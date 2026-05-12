@@ -53,7 +53,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lastUpdated}>Son Güncelleme: 7 Şubat 2026 | Sürüm 2.0</Text>
+        <Text style={styles.lastUpdated}>Son Güncelleme: 1 Nisan 2026 | Sürüm 2.2</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. GİRİŞ</Text>
@@ -70,18 +70,19 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.subsectionTitle}>2.1. Kişisel Bilgiler</Text>
           <Text style={styles.paragraph}>
             • Cihaz Kimliği: Her cihaz için benzersiz bir kimlik oluşturulur{'\n'}
-            • Konum Bilgileri: Acil durumlarda konumunuzu paylaşmak için{'\n'}
+            • Konum Bilgileri: Acil durumlar ve aile güvenliği özellikleri için{'\n'}
             • Sağlık Bilgileri: Acil durumlarda sağlık profiliniz (isteğe bağlı){'\n'}
             • İletişim Bilgileri: Aile üyeleri ve acil durum kişileri (ICE){'\n'}
-            • Mesajlaşma Verileri: Offline mesajlaşma içeriği
+            • Mesajlaşma Verileri: Mesajlaşma içeriği (çevrimiçi ve çevrimdışı)
           </Text>
 
           <Text style={styles.subsectionTitle}>2.2. Teknik Bilgiler</Text>
           <Text style={styles.paragraph}>
             • Cihaz Bilgileri: İşletim sistemi, model, versiyon{'\n'}
-            • Kullanım Verileri: Uygulama kullanım istatistikleri{'\n'}
+            • Kullanım Verileri: Uygulama kullanım istatistikleri (yalnızca cihazınızda saklanır, sunuculara gönderilmez){'\n'}
             • Sensör Verileri: Deprem algılama için ivmeölçer verileri{'\n'}
-            • Ağ Bilgileri: Bluetooth ve WiFi durumu
+            • Ağ Bilgileri: Bluetooth ve WiFi durumu{'\n'}
+            • Hata Verileri: Uygulama performansı ve hata tespiti için anonim teknik veriler toplanabilir
           </Text>
         </View>
 
@@ -104,7 +105,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
             Bilgileriniz sadece şu durumlarda paylaşılır:{'\n\n'}
             • Acil Durumlar: Hayat kurtarma amaçlı acil durumlarda{'\n'}
             • Hukuki Zorunluluklar: Yasal gereklilikler{'\n'}
-            • Servis Sağlayıcılar: Firebase, Analytics gibi servisler (şifrelenmiş){'\n'}
+            • Servis Sağlayıcılar: Firebase, OpenAI gibi servisler (güvenlik kuralları dahilinde){'\n'}
             • Kullanıcı İzni: Açıkça izin verdiğiniz durumlarda
           </Text>
         </View>
@@ -112,10 +113,10 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>5. VERİ GÜVENLİĞİ</Text>
           <Text style={styles.paragraph}>
-            • End-to-End Şifreleme: Tüm hassas veriler şifrelenir{'\n'}
-            • Güvenli Depolama: Firebase Secure Storage kullanılır{'\n'}
-            • Erişim Kontrolü: Sadece yetkili kullanıcılar erişebilir{'\n'}
-            • Düzenli Güvenlik Denetimleri: Güvenlik açıkları kontrol edilir
+            • Bulut Güvenliği: Verileriniz Firebase güvenlik kuralları ve Google Cloud altyapısı ile korunur{'\n'}
+            • Mesh Şifreleme: Cihazlar arası BLE mesh iletişimi uçtan uca şifrelenir{'\n'}
+            • Erişim Kontrolü: Firestore güvenlik kuralları ile yetkisiz erişim engellenir{'\n'}
+            • Güvenli İletişim: Sunucu bağlantıları TLS/SSL ile şifrelenir
           </Text>
         </View>
 
@@ -123,11 +124,9 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.sectionTitle}>6. VERİ SAKLAMA</Text>
           <Text style={styles.paragraph}>
             • Aktif Kullanım: Hesabınız aktif olduğu sürece veriler saklanır{'\n'}
-            • Konum Geçmişi: Son 24 saat (cihaz üzerinde), sunucuda saklanmaz{'\n'}
-            • SOS Mesajları: 30 gün{'\n'}
-            • Chat Mesajları: 90 gün{'\n'}
-            • Crash Raporları: 90 gün (Firebase Crashlytics){'\n'}
-            • Hesap Silme: Hesabınızı sildiğinizde tüm veriler 30 gün içinde kalıcı olarak silinir
+            • Konum Verileri: Anlık konumunuz ve konum geçmişiniz, aile güvenliği özellikleri için hem cihazınızda hem de sunucularımızda güvenli şekilde saklanır{'\n'}
+            • Verileriniz yasal yükümlülükler ve hizmet gereksinimleri doğrultusunda saklanır{'\n'}
+            • Hesabınızı sildiğinizde verileriniz mümkün olan en kısa sürede kaldırılır
           </Text>
         </View>
 
@@ -144,10 +143,11 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.sectionTitle}>6.6. YAPAY ZEKA KULLANIMI</Text>
           <Text style={styles.paragraph}>
             AfetNet, acil durum rehberliği için yapay zeka destekli bir asistan sunar:{'\n\n'}
-            • AI sorguları OpenAI API aracılığıyla işlenir{'\n'}
-            • Sorgular anonim olarak gönderilir — kişisel bilgiler AI sağlayıcısıyla paylaşılmaz{'\n'}
+            • Mesajlarınız, doğru yanıt üretebilmek için konuşma bağlamıyla birlikte OpenAI API'ye iletilir{'\n'}
+            • İletim, güvenli sunucu proxy'si üzerinden kimlik doğrulamalı olarak gerçekleştirilir{'\n'}
+            • OpenAI, API üzerinden gelen verileri model eğitiminde kullanmaz{'\n'}
             • AI yanıtları cihazınızda önbelleğe alınır{'\n'}
-            • İnternetsiz ortamda 241 maddeden oluşan çevrimdışı bilgi tabanı kullanılır
+            • İnternetsiz ortamda çevrimdışı bilgi tabanı kullanılır
           </Text>
         </View>
 
@@ -164,11 +164,12 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>8. ÇEREZLER VE TAKİP</Text>
+          <Text style={styles.sectionTitle}>8. UYGULAMA İÇİ ANALİTİK</Text>
           <Text style={styles.paragraph}>
-            • Analitik Çerezler: Uygulama performansını izlemek için{'\n'}
-            • Reklam Çerezleri: Kullanılmaz{'\n'}
-            • Üçüncü Taraf Takip: Sadece Firebase Analytics (anonim)
+            • Üçüncü taraf analitik servisi kullanılmamaktadır{'\n'}
+            • Uygulama performans verileri yalnızca yerel olarak cihazınızda saklanır{'\n'}
+            • Reklam takibi: Kullanılmaz{'\n'}
+            • Çerez: Mobil uygulama olarak çerez kullanılmamaktadır
           </Text>
         </View>
 
@@ -181,7 +182,31 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>10. DEĞİŞİKLİKLER</Text>
+          <Text style={styles.sectionTitle}>10. ACİL DURUM KONUM VERİLERİ VE SINIRLAMALAR</Text>
+
+          <View style={styles.emergencyBanner}>
+            <Text style={styles.emergencyBannerText}>
+              AfetNet resmî bir acil durum servisi DEĞİLDİR.{'\n'}
+              Hayatî tehlike durumunda DERHAL 112'yi arayın.
+            </Text>
+          </View>
+
+          <Text style={styles.paragraph}>
+            AfetNet, SOS ve acil durum özellikleri kapsamında konum verilerinizi yalnızca uygulama
+            içerisinde kayıtlı diğer kullanıcılara (aile üyeleri, yakın çevre) iletmek amacıyla
+            kullanır. Bu veriler:{'\n\n'}
+            • 112, AFAD veya herhangi bir resmî acil servis birimine GÖNDERİLMEZ{'\n'}
+            • Resmî acil servisler tarafından alınamaz ve kullanılamaz{'\n'}
+            • Doğruluğu garanti edilemez (GPS sinyali, cihaz durumu, çevresel koşullara bağlıdır){'\n'}
+            • Gecikmeli, hatalı veya eksik olabilir{'\n\n'}
+            AfetNet bir topluluk güvenliği uygulamasıdır. Uygulama, acil durum sevki yapamaz,
+            kurtarma operasyonu başlatamaz ve herhangi bir resmî kurumla doğrudan entegre değildir.
+            Hayatî tehlike durumunda daima 112'yi aramanız gerekmektedir.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>11. DEĞİŞİKLİKLER</Text>
           <Text style={styles.paragraph}>
             Bu Gizlilik Politikası zaman zaman güncellenebilir. Önemli değişikliklerde size bildirim
             gönderilecektir. Değişiklikleri kabul etmek için uygulamayı kullanmaya devam edebilirsiniz.
@@ -189,7 +214,7 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>11. İLETİŞİM</Text>
+          <Text style={styles.sectionTitle}>12. İLETİŞİM</Text>
           <Text style={styles.paragraph}>
             Gizlilik ile ilgili sorularınız için:{'\n\n'}
             E-posta: support@afetnet.app{'\n'}
@@ -261,6 +286,21 @@ const styles = StyleSheet.create({
   paragraph: {
     fontSize: 15,
     color: '#cbd5e1',
+    lineHeight: 24,
+  },
+  emergencyBanner: {
+    backgroundColor: 'rgba(220, 38, 38, 0.15)',
+    borderWidth: 2,
+    borderColor: '#dc2626',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  emergencyBannerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fca5a5',
+    textAlign: 'center',
     lineHeight: 24,
   },
   footer: {

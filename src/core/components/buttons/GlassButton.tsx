@@ -7,7 +7,7 @@
 import React from 'react';
 import { Pressable, Text, StyleSheet, ViewStyle, TextStyle, StyleProp, ActivityIndicator, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue,

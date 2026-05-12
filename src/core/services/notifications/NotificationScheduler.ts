@@ -24,7 +24,7 @@ export interface NotificationContent {
 export interface ScheduleOptions {
   delay?: number; // seconds
   repeats?: boolean;
-  channelType?: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'general';
+  channelType?: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'call' | 'general';
 }
 
 // Rate limiting state
@@ -35,7 +35,7 @@ const MAX_NOTIFICATIONS_PER_WINDOW = 3;
 /**
  * ELITE: Check rate limiting for notification deduplication
  */
-function shouldSendNotification(key: string): boolean {
+function shouldSendNotification(key: string, options?: { skipGlobalRateLimit?: boolean }): boolean {
   const now = Date.now();
   const recentTime = recentNotifications.get(key);
 
@@ -50,16 +50,18 @@ function shouldSendNotification(key: string): boolean {
     return false; // Duplicate within window
   }
 
-  // Check overall rate
-  let recentCount = 0;
-  for (const time of recentNotifications.values()) {
-    if (now - time < RATE_LIMIT_WINDOW) {
-      recentCount++;
+  if (!options?.skipGlobalRateLimit) {
+    // Check overall rate
+    let recentCount = 0;
+    for (const time of recentNotifications.values()) {
+      if (now - time < RATE_LIMIT_WINDOW) {
+        recentCount++;
+      }
     }
-  }
 
-  if (recentCount >= MAX_NOTIFICATIONS_PER_WINDOW) {
-    return false; // Rate limited
+    if (recentCount >= MAX_NOTIFICATIONS_PER_WINDOW) {
+      return false; // Rate limited
+    }
   }
 
   recentNotifications.set(key, now);
@@ -80,11 +82,21 @@ export async function scheduleNotification(
       return null;
     }
 
-    // Rate limiting check — CRITICAL: SOS and EEW ALWAYS bypass rate limiter
+    // Rate limiting check — CRITICAL: SOS and EEW ALWAYS bypass rate limiter entirely
     const isCriticalType = options.channelType === 'sos' || options.channelType === 'eew';
+    // CRITICAL FIX: Earthquake, message, and family channels bypass GLOBAL rate limit but keep per-key dedup.
+    // Without this, 3 news/system notifications within 30s block the next earthquake/family notification
+    // — potentially silencing a real earthquake alert or family SOS that the user needs to see.
+    const isMessageChannel = options.channelType === 'message';
+    const isEarthquakeChannel = options.channelType === 'earthquake';
+    const isFamilyChannel = options.channelType === 'family';
+    const data = content.data || {};
     if (!isCriticalType) {
-      const notificationKey = `${content.title}:${content.body.substring(0, 50)}`;
-      if (!shouldSendNotification(notificationKey)) {
+      const messageId = typeof data.messageId === 'string' ? data.messageId.trim() : '';
+      const notificationKey = messageId
+        ? `msg:${messageId}`
+        : `${options.channelType || 'general'}:${content.title}:${content.body.substring(0, 50)}`;
+      if (!shouldSendNotification(notificationKey, { skipGlobalRateLimit: isMessageChannel || isEarthquakeChannel || isFamilyChannel })) {
         logger.debug('Notification rate limited:', content.title);
         return null;
       }

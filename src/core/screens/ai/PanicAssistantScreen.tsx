@@ -61,9 +61,47 @@ export default function PanicAssistantScreen() {
     }
   };
 
-  const sendSafeStatus = () => {
+  const sendSafeStatus = async () => {
     haptics.notificationSuccess();
-    Alert.alert("Durum İletildi", "Güvende olduğunuz bilgisi Mesh ağı üzerinden ailenize iletildi.");
+    try {
+      // Send safe status via mesh broadcast + Firebase (same as FamilyStatusSection)
+      const { meshNetworkService } = await import('../../services/mesh');
+      const { MeshMessageType } = await import('../../services/mesh/MeshProtocol');
+      const { identityService } = await import('../../services/IdentityService');
+
+      const uid = identityService.getUid() || 'unknown';
+      const senderName = identityService.getDisplayName() || 'Kullanıcı';
+
+      // 1. Mesh broadcast (works offline)
+      const payload = JSON.stringify({
+        type: 'STATUS',
+        status: 'safe',
+        from: uid,
+        senderName,
+        message: 'Güvendeyim',
+        timestamp: Date.now(),
+      });
+      await meshNetworkService.broadcastMessage(payload, MeshMessageType.STATUS).catch(() => {});
+
+      // 2. Firebase status update (works online)
+      try {
+        const { firebaseDataService } = await import('../../services/FirebaseDataService');
+        await firebaseDataService.saveStatusUpdate(uid, {
+          status: 'safe',
+          message: 'Güvendeyim',
+          timestamp: Date.now(),
+          senderUid: uid,
+          senderName,
+        });
+      } catch {
+        logger.debug('Firebase status update failed (mesh still sent)');
+      }
+
+      Alert.alert('Durum İletildi', 'Güvende olduğunuz bilgisi ailenize ve yakındaki kullanıcılara iletildi.');
+    } catch (e) {
+      logger.warn('Safe status broadcast failed:', e);
+      Alert.alert('Hata', 'Durum gönderilemedi. İnternet veya Bluetooth bağlantınızı kontrol edin.');
+    }
   };
 
   const startMedicalDiagnosis = (intent: 'bleeding' | 'consciousness') => {
@@ -238,7 +276,7 @@ export default function PanicAssistantScreen() {
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/red_panic_bg.png')}
+      source={require('../../../../assets/images/premium/red_panic_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

@@ -4,7 +4,7 @@
  * Uses DeviceEventEmitter to listen for incoming call events.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ import {
 export default function IncomingCallOverlay() {
   const [visible, setVisible] = useState(false);
   const [callData, setCallData] = useState<IncomingCallData | null>(null);
+  const hapticTimers = useRef<NodeJS.Timeout[]>([]);
 
   // Pulse animation
   const pulseScale = useSharedValue(1);
@@ -65,23 +66,27 @@ export default function IncomingCallOverlay() {
 
         // Haptic burst for incoming call
         haptics.impactHeavy();
-        setTimeout(() => haptics.impactHeavy(), 300);
-        setTimeout(() => haptics.impactHeavy(), 600);
-        setTimeout(() => haptics.impactHeavy(), 900);
+        hapticTimers.current = [
+          setTimeout(() => haptics.impactHeavy(), 300),
+          setTimeout(() => haptics.impactHeavy(), 600),
+          setTimeout(() => haptics.impactHeavy(), 900),
+        ];
       },
     );
 
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      hapticTimers.current.forEach(t => clearTimeout(t));
+    };
   }, []);
 
-  // Auto-dismiss after 45 seconds
-  useEffect(() => {
-    if (!visible) return;
-    const timer = setTimeout(() => {
-      handleReject();
-    }, 45_000);
-    return () => clearTimeout(timer);
-  }, [visible]);
+  const handleReject = useCallback(() => {
+    if (callData) {
+      voiceCallService.rejectCall(callData.callId).catch(e => { if (__DEV__) console.debug('rejectCall failed:', e); });
+    }
+    setVisible(false);
+    setCallData(null);
+  }, [callData]);
 
   const handleAnswer = useCallback(() => {
     if (!callData) return;
@@ -96,16 +101,21 @@ export default function IncomingCallOverlay() {
         callId: callData.callId,
         isIncoming: true,
       });
-    }).catch(() => {});
+    }).catch(e => { if (__DEV__) console.debug('Navigate to VoiceCall failed:', e); });
   }, [callData]);
 
-  const handleReject = useCallback(() => {
-    if (callData) {
-      voiceCallService.rejectCall(callData.callId).catch(() => {});
-    }
-    setVisible(false);
-    setCallData(null);
-  }, [callData]);
+  // Auto-dismiss after 45 seconds
+  // CRITICAL FIX: Include handleReject in deps to avoid calling stale closure.
+  // handleReject is a useCallback that depends on callData — if the effect only
+  // depended on [visible], the 45s timeout could call a stale handleReject that
+  // has callData=null (initial value), causing the reject to silently no-op.
+  useEffect(() => {
+    if (!visible) return;
+    const timer = setTimeout(() => {
+      handleReject();
+    }, 45_000);
+    return () => clearTimeout(timer);
+  }, [visible, handleReject]);
 
   if (!visible || !callData) return null;
 

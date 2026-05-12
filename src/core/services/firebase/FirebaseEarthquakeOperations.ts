@@ -4,7 +4,7 @@
  */
 
 import { doc, setDoc, getDocs, query, collection, where } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 import type { EarthquakeFirebaseData, FeltEarthquakeReportData } from '../../types/firebase';
@@ -103,7 +103,7 @@ export async function saveFeltEarthquakeReport(
 
     // CRITICAL: Firestore rules require userId == auth.uid
     // Without this, all felt earthquake reports will be rejected with permission-denied
-    const currentUser = getAuth().currentUser;
+    const currentUser = getFirebaseAuth()?.currentUser ?? null;
     if (!currentUser) {
       logger.debug('No authenticated user, skipping felt earthquake report save');
       return false;

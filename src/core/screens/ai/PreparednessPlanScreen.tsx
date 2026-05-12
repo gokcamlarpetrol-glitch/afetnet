@@ -7,15 +7,24 @@ import { useNavigation } from '@react-navigation/core';
 import { usePreparednessStore } from '../../ai/stores/preparednessStore';
 import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 import * as haptics from '../../utils/haptics';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../components/SafeBlurView';
 import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring, withSequence, withTiming } from 'react-native-reanimated';
 import { DirectStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('PreparednessPlanScreen');
 
-// ELITE: Storage key for persistence
-const CHECKLIST_STORAGE_KEY = '@afetnet_preparedness_checklist';
+// ELITE: User-scoped storage key for persistence (prevents cross-account data leak)
+const CHECKLIST_STORAGE_BASE = '@afetnet_preparedness_checklist';
+function getChecklistKey(): string {
+  try {
+    const { getFirebaseAuth } = require('../../../lib/firebase');
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    return uid ? `${CHECKLIST_STORAGE_BASE}_${uid}` : CHECKLIST_STORAGE_BASE;
+  } catch {
+    return CHECKLIST_STORAGE_BASE;
+  }
+}
 
 // ELITE: Comprehensive checklist items
 const CHECKLIST_SECTIONS = [
@@ -125,7 +134,7 @@ export default function PreparednessPlanScreen() {
 
   const loadProgress = async () => {
     try {
-      const saved = DirectStorage.getString(CHECKLIST_STORAGE_KEY);
+      const saved = DirectStorage.getString(getChecklistKey());
       if (saved) {
         setCheckedItems(JSON.parse(saved));
       }
@@ -138,7 +147,7 @@ export default function PreparednessPlanScreen() {
 
   const saveProgress = async () => {
     try {
-      DirectStorage.setString(CHECKLIST_STORAGE_KEY, JSON.stringify(checkedItems));
+      DirectStorage.setString(getChecklistKey(), JSON.stringify(checkedItems));
     } catch (e) {
       logger.warn('Failed to save progress:', e);
     }
@@ -177,7 +186,7 @@ export default function PreparednessPlanScreen() {
           onPress: async () => {
             haptics.notificationWarning();
             setCheckedItems({});
-            DirectStorage.delete(CHECKLIST_STORAGE_KEY);
+            DirectStorage.delete(getChecklistKey());
           }
         },
       ]
@@ -330,7 +339,7 @@ export default function PreparednessPlanScreen() {
 
   return (
     <ImageBackground
-      source={mode === 'kid' ? require('../../../../assets/images/premium/green_nature_bg.png') : require('../../../../assets/images/premium/green_nature_bg.png')}
+      source={mode === 'kid' ? require('../../../../assets/images/premium/green_nature_bg.jpg') : require('../../../../assets/images/premium/green_nature_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

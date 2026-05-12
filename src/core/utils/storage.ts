@@ -19,6 +19,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from './logger';
 
 const logger = createLogger('Storage');
+type StorageReadyListener = () => void;
+type StorageBackend = 'mmkv' | 'async-storage-cache';
+
+const storageReadyListeners = new Set<StorageReadyListener>();
+let storageReady = false;
+let resolveStorageReady: (() => void) | null = null;
+const storageReadyPromise = new Promise<void>((resolve) => {
+  resolveStorageReady = resolve;
+});
+
+const markStorageReady = () => {
+  if (storageReady) return;
+  storageReady = true;
+  resolveStorageReady?.();
+  resolveStorageReady = null;
+  for (const listener of storageReadyListeners) {
+    try {
+      listener();
+    } catch (error) {
+      logger.error('Storage ready listener failed:', error);
+    }
+  }
+  storageReadyListeners.clear();
+};
 
 /**
  * AsyncStorage-backed synchronous cache.
@@ -29,6 +53,7 @@ const logger = createLogger('Storage');
 class AsyncStorageCache {
   private cache = new Map<string, string>();
   private isLoaded = false;
+  private mutatedDuringHydration = new Set<string>();
 
   constructor() {
     // Load all existing data from AsyncStorage synchronously-ish
@@ -42,22 +67,27 @@ class AsyncStorageCache {
       if (keys.length > 0) {
         const pairs = await AsyncStorage.multiGet(keys);
         for (const [key, value] of pairs) {
-          if (value !== null) {
+          if (value !== null && !this.mutatedDuringHydration.has(key)) {
             this.cache.set(key, value);
           }
         }
       }
       this.isLoaded = true;
+      this.mutatedDuringHydration.clear();
       console.log(`[AsyncStorageCache] Hydrated ${this.cache.size} keys from AsyncStorage`);
+      markStorageReady();
     } catch (e) {
       console.error('[AsyncStorageCache] Hydration failed:', e);
       this.isLoaded = true; // Mark as loaded anyway to prevent hanging
+      this.mutatedDuringHydration.clear();
+      markStorageReady();
     }
   }
 
   set(key: string, value: boolean | string | number) {
     const strVal = String(value);
     this.cache.set(key, strVal);
+    if (!this.isLoaded) this.mutatedDuringHydration.add(key);
     AsyncStorage.setItem(key, strVal).catch(e =>
       console.error(`[AsyncStorageCache] setItem failed: ${key}`, e)
     );
@@ -78,6 +108,7 @@ class AsyncStorageCache {
 
   delete(key: string) {
     this.cache.delete(key);
+    if (!this.isLoaded) this.mutatedDuringHydration.add(key);
     AsyncStorage.removeItem(key).catch(() => {});
   }
 
@@ -102,10 +133,13 @@ class AsyncStorageCache {
 
 let storageInstance: MMKV | AsyncStorageCache;
 let usingMMKV = false;
+let storageBackend: StorageBackend = 'async-storage-cache';
 
 try {
   storageInstance = new MMKV({ id: 'afetnet-storage-v2' });
   usingMMKV = true;
+  storageBackend = 'mmkv';
+  markStorageReady();
   console.log('[Storage] MMKV initialized (fast, persistent)');
 } catch (error: any) {
   // MMKV failed — use AsyncStorage-backed cache instead of volatile MemoryStorage
@@ -114,6 +148,26 @@ try {
 }
 
 export const storage = storageInstance;
+export { storageBackend };
+
+export const isStorageReady = (): boolean => storageReady;
+
+export const waitForStorageReady = (): Promise<void> => (
+  storageReady ? Promise.resolve() : storageReadyPromise
+);
+
+export const onStorageReady = (listener: StorageReadyListener): (() => void) => {
+  if (storageReady) {
+    listener();
+    return () => {};
+  }
+  storageReadyListeners.add(listener);
+  return () => {
+    storageReadyListeners.delete(listener);
+  };
+};
+
+export const isUsingMMKV = (): boolean => usingMMKV;
 
 /**
  * Flag indicating storage is persistent. NOW ALWAYS TRUE because

@@ -64,7 +64,7 @@ export default function UserReportsScreen({ navigation }: { navigation: UserRepo
 
   const getUserLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Konum İzni', 'Rapor göndermek için konum izni gereklidir');
         return;
@@ -97,7 +97,7 @@ export default function UserReportsScreen({ navigation }: { navigation: UserRepo
         quality: 0.5,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets?.[0]?.uri) {
         setPhotoUri(result.assets[0].uri);
       }
     } catch (error: unknown) {
@@ -124,7 +124,7 @@ export default function UserReportsScreen({ navigation }: { navigation: UserRepo
         quality: 0.5,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets?.[0]?.uri) {
         setPhotoUri(result.assets[0].uri);
       }
     } catch (error: unknown) {

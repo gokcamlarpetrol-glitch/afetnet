@@ -334,19 +334,18 @@ class GlobalErrorHandlerService {
     try {
     // Rate limiting: Prevent error spam
     const now = Date.now();
-    if (now - this.lastErrorTime < this.ERROR_RATE_WINDOW) {
-      this.errorCount++;
-      if (this.errorCount > this.ERROR_RATE_LIMIT) {
-        // Too many errors - skip logging to prevent spam
-        if (__DEV__) {
-          logger.warn(`⚠️ Error rate limit exceeded (${this.errorCount} errors in ${this.ERROR_RATE_WINDOW}ms)`);
-        }
-        return;
-      }
-    } else {
+    if (now - this.lastErrorTime >= this.ERROR_RATE_WINDOW) {
+      // Window expired — reset counter for fresh window
       this.errorCount = 0;
+      this.lastErrorTime = now;
     }
-    this.lastErrorTime = now;
+    this.errorCount++;
+    if (this.errorCount > this.ERROR_RATE_LIMIT) {
+      if (__DEV__) {
+        logger.warn(`⚠️ Error rate limit exceeded (${this.errorCount} errors in ${this.ERROR_RATE_WINDOW}ms)`);
+      }
+      return;
+    }
 
     // Build comprehensive error context
     const errorContext: ErrorContext = {
@@ -446,14 +445,28 @@ class GlobalErrorHandlerService {
    */
   getErrorStats(): { errorCount: number; rateLimitExceeded: boolean } {
     const now = Date.now();
-    const rateLimitExceeded = 
-      now - this.lastErrorTime < this.ERROR_RATE_WINDOW && 
+    const rateLimitExceeded =
+      now - this.lastErrorTime < this.ERROR_RATE_WINDOW &&
       this.errorCount > this.ERROR_RATE_LIMIT;
 
     return {
       errorCount: this.errorCount,
       rateLimitExceeded,
     };
+  }
+
+  /**
+   * ELITE: Cleanup — restore original console.error to prevent leaks across re-initializations.
+   * Call this on shutdown to avoid stale interceptors.
+   */
+  destroy(): void {
+    // Restore original console.error if we intercepted it
+    if (this.originalConsoleError) {
+      console.error = this.originalConsoleError;
+      this.originalConsoleError = null;
+    }
+    this.isInitialized = false;
+    this.errorCount = 0;
   }
 }
 

@@ -16,6 +16,7 @@ import Animated, {
   useAnimatedStyle,
   withRepeat,
   withTiming,
+  cancelAnimation,
   Easing,
   FadeIn
 } from 'react-native-reanimated';
@@ -137,8 +138,10 @@ export function FamilyMarker({
         true,
       );
     } else {
+      cancelAnimation(pulse);
       pulse.value = withTiming(1, { duration: 300 });
     }
+    return () => { cancelAnimation(pulse); };
   }, [status, isOnline, isStale]);
 
   const animatedStyle = useAnimatedStyle(() => ({

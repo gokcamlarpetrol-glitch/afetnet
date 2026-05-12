@@ -18,6 +18,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { createLogger } from '../../utils/logger';
 import { Platform } from 'react-native';
+import { getFirebaseAuth } from '../../../lib/firebase';
 
 const logger = createLogger('BiometricAuthService');
 
@@ -50,11 +51,15 @@ interface FailedAttempt {
 // CONSTANTS
 // ============================================================
 
-const STORAGE_KEYS = {
-    BIOMETRIC_ENABLED: '@afetnet:biometric_enabled',
-    FAILED_ATTEMPTS: '@afetnet:biometric_failed_attempts',
-    LAST_AUTH_TIMESTAMP: '@afetnet:last_biometric_auth',
-} as const;
+/** User-scoped storage keys to prevent cross-account data leak */
+function getStorageKeys() {
+    const uid = getFirebaseAuth()?.currentUser?.uid || 'anonymous';
+    return {
+        BIOMETRIC_ENABLED: `@afetnet:biometric_enabled:${uid}`,
+        FAILED_ATTEMPTS: `@afetnet:biometric_failed_attempts:${uid}`,
+        LAST_AUTH_TIMESTAMP: `@afetnet:last_biometric_auth:${uid}`,
+    };
+}
 
 const SECURITY_CONFIG = {
     MAX_FAILED_ATTEMPTS: 5,
@@ -371,7 +376,7 @@ class BiometricAuthService {
             logger.warn('🔒 Biometric authentication locked out due to too many failed attempts');
         }
 
-        this.saveFailedAttempts().catch(() => { });
+        this.saveFailedAttempts().catch(e => { if (__DEV__) logger.debug('Save failed attempts error:', e); });
     }
 
     private resetFailedAttempts(): void {
@@ -380,12 +385,12 @@ class BiometricAuthService {
             lastAttempt: 0,
             lockedUntil: null,
         };
-        this.saveFailedAttempts().catch(() => { });
+        this.saveFailedAttempts().catch(e => { if (__DEV__) logger.debug('Reset failed attempts save error:', e); });
     }
 
     private async loadFailedAttempts(): Promise<void> {
         try {
-            const stored = await SecureStore.getItemAsync(STORAGE_KEYS.FAILED_ATTEMPTS);
+            const stored = await SecureStore.getItemAsync(getStorageKeys().FAILED_ATTEMPTS);
             if (stored) {
                 this.failedAttempts = JSON.parse(stored);
             }
@@ -397,7 +402,7 @@ class BiometricAuthService {
     private async saveFailedAttempts(): Promise<void> {
         try {
             await SecureStore.setItemAsync(
-                STORAGE_KEYS.FAILED_ATTEMPTS,
+                getStorageKeys().FAILED_ATTEMPTS,
                 JSON.stringify(this.failedAttempts)
             );
         } catch {
@@ -412,7 +417,7 @@ class BiometricAuthService {
      */
     async isBiometricEnabled(): Promise<boolean> {
         try {
-            const value = await SecureStore.getItemAsync(STORAGE_KEYS.BIOMETRIC_ENABLED);
+            const value = await SecureStore.getItemAsync(getStorageKeys().BIOMETRIC_ENABLED);
             return value === 'true';
         } catch {
             return false;
@@ -428,7 +433,7 @@ class BiometricAuthService {
                 throw new Error('Biometric authentication is not available on this device');
             }
             await SecureStore.setItemAsync(
-                STORAGE_KEYS.BIOMETRIC_ENABLED,
+                getStorageKeys().BIOMETRIC_ENABLED,
                 enabled ? 'true' : 'false'
             );
             logger.info(`Biometric authentication ${enabled ? 'enabled' : 'disabled'}`);
@@ -447,8 +452,8 @@ class BiometricAuthService {
         try {
             this.lastSuccessfulAuth = 0;
             this.resetFailedAttempts();
-            await SecureStore.deleteItemAsync(STORAGE_KEYS.BIOMETRIC_ENABLED);
-            await SecureStore.deleteItemAsync(STORAGE_KEYS.LAST_AUTH_TIMESTAMP);
+            await SecureStore.deleteItemAsync(getStorageKeys().BIOMETRIC_ENABLED);
+            await SecureStore.deleteItemAsync(getStorageKeys().LAST_AUTH_TIMESTAMP);
             logger.info('BiometricAuthService reset complete');
         } catch (error) {
             logger.error('Failed to reset biometric data:', error);

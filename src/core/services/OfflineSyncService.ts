@@ -20,6 +20,7 @@ const logger = createLogger('OfflineSyncService');
 const SYNC_QUEUE_KEY = '@afetnet:offline_sync_queue';
 const MAX_RETRY_COUNT = 10; // Elite: Increased retry limit
 const INITIAL_RETRY_DELAY_MS = 1000;
+const MAX_SYNC_QUEUE_SIZE = 500;
 
 export interface SyncItem {
   id: string;
@@ -47,16 +48,32 @@ class OfflineSyncService {
   private isSyncing = false;
   private syncTimer: NodeJS.Timeout | null = null;
   private unsubscribeNetInfo: (() => void) | null = null;
+  private currentUid = '';
+
+  /**
+   * Get user-scoped storage key to prevent cross-account data leak
+   */
+  private getScopedKey(): string {
+    return this.currentUid ? `${SYNC_QUEUE_KEY}:${this.currentUid}` : SYNC_QUEUE_KEY;
+  }
 
   /**
    * Initialize service and start monitoring
    */
   async initialize() {
+    // Resolve current user UID for scoped storage
+    try {
+      const { identityService } = await import('./IdentityService');
+      this.currentUid = identityService.getUid() || '';
+    } catch {
+      this.currentUid = '';
+    }
+
     await this.loadQueue();
 
     this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
       const wasOnline = this.isOnline;
-      this.isOnline = state.isConnected ?? false;
+      this.isOnline = (state.isConnected ?? false) && (state.isInternetReachable !== false);
 
       if (!wasOnline && this.isOnline) {
         logger.info('Network restored, starting sync');
@@ -65,8 +82,8 @@ class OfflineSyncService {
     });
 
     const state = await NetInfo.fetch();
-    this.isOnline = state.isConnected ?? false;
-    logger.info(`OfflineSyncService initialized. Online: ${this.isOnline}`);
+    this.isOnline = (state.isConnected ?? false) && (state.isInternetReachable !== false);
+    logger.info(`OfflineSyncService initialized. Online: ${this.isOnline}, UID: ${this.currentUid ? 'set' : 'none'}`);
   }
 
   /**
@@ -97,6 +114,20 @@ class OfflineSyncService {
       synced: false,
       priority,
     };
+
+    // Enforce queue size limit — drop oldest non-critical items first
+    if (this.queue.length >= MAX_SYNC_QUEUE_SIZE) {
+      // Find oldest non-critical, non-high priority item to drop
+      const dropIndex = this.queue.findIndex(q => !q.synced && q.priority === 'normal');
+      if (dropIndex >= 0) {
+        logger.warn(`Sync queue full (${this.queue.length}/${MAX_SYNC_QUEUE_SIZE}), dropping oldest normal item: ${this.queue[dropIndex].id}`);
+        this.queue.splice(dropIndex, 1);
+      } else {
+        // All items are critical/high — drop the oldest regardless
+        logger.warn(`Sync queue full (${this.queue.length}/${MAX_SYNC_QUEUE_SIZE}), dropping oldest item: ${this.queue[0].id}`);
+        this.queue.shift();
+      }
+    }
 
     // Sort by priority on insert (simple push, sort later)
     this.queue.push(item);
@@ -262,7 +293,8 @@ class OfflineSyncService {
 
   private async loadQueue() {
     try {
-      const data = DirectStorage.getString(SYNC_QUEUE_KEY) ?? null;
+      const key = this.getScopedKey();
+      const data = DirectStorage.getString(key) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         this.queue = Array.isArray(parsed) ? parsed : [];
@@ -272,12 +304,16 @@ class OfflineSyncService {
 
   private async saveQueue() {
     try {
-      DirectStorage.setString(SYNC_QUEUE_KEY, JSON.stringify(this.queue));
+      const key = this.getScopedKey();
+      DirectStorage.setString(key, JSON.stringify(this.queue));
     } catch { /* Storage write may fail silently */ }
   }
 
   destroy() {
+    // Persist queue with scoped key before cleanup
+    void this.saveQueue();
     if (this.unsubscribeNetInfo) this.unsubscribeNetInfo();
+    this.unsubscribeNetInfo = null;
     if (this.syncTimer) clearTimeout(this.syncTimer);
     this.syncTimer = null;
   }

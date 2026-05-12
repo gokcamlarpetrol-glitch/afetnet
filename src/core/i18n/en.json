@@ -1,0 +1,75 @@
+{
+  "_meta": {
+    "language": "English",
+    "locale": "en",
+    "version": "0.1.0",
+    "completeness": 0.05,
+    "note": "Skeleton — only critical life-safety strings translated. Full translation pending Sprint 9 implementation."
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "close": "Close",
+    "save": "Save",
+    "delete": "Delete",
+    "share": "Share",
+    "yes": "Yes",
+    "no": "No",
+    "loading": "Loading…",
+    "error": "Error"
+  },
+  "eew": {
+    "earthquake_approaching": "EARTHQUAKE APPROACHING",
+    "drop_cover_hold": "DROP — COVER — HOLD ON",
+    "seconds": "SECONDS",
+    "warning_ended": "WARNING ENDED",
+    "early_warning_beta": "EARLY WARNING SYSTEM",
+    "intensity_estimate": "Local Intensity Estimate",
+    "disclaimer": "This is a local sensor estimate. Official magnitude is provided by AFAD/Kandilli observatory network."
+  },
+  "sos": {
+    "send_sos": "Send SOS",
+    "cancel_sos": "Cancel SOS",
+    "sos_not_sent": "SOS NOT SENT",
+    "all_channels_failed": "All {{count}} channels failed. Rescue teams are not notified.",
+    "call_112": "Call 112",
+    "retry_send": "Retry"
+  },
+  "family": {
+    "title": "Family",
+    "add_member": "Add Family Member",
+    "status_safe": "Safe",
+    "status_need_help": "Needs Help",
+    "status_unknown": "Unknown",
+    "battery": "Battery",
+    "location": "Location",
+    "status_stale": "Updated {{days}} days ago"
+  },
+  "notification": {
+    "permission_title": "Enable Notifications",
+    "permission_subtitle": "Life-saving seconds depend on it",
+    "permission_benefit_eew": "Receive earthquake warnings even when device is on silent",
+    "permission_benefit_sos": "Receive family SOS signals",
+    "enable": "Enable",
+    "later": "Later",
+    "device_clock_wrong": "DEVICE CLOCK IS INCORRECT",
+    "clock_skew_message": "Your clock is ~{{minutes}}min off. Messages and SOS may fail to send."
+  },
+  "kvkk": {
+    "title": "Data Sharing (KVKK Article 6)",
+    "subtitle": "Your health data is stored only on this device by default. It is NOT uploaded to any server unless you enable the options below.",
+    "cloud_sync": "Cloud Backup",
+    "cloud_sync_description": "Encrypted backup to Firebase for device recovery",
+    "backend_share": "Rescue Team Sharing",
+    "backend_share_description": "Share with 112/AFAD rescue teams during SOS",
+    "explicit_consent": "I Give Explicit Consent",
+    "withdraw_consent": "Withdraw Consent"
+  },
+  "errors": {
+    "network": "Network connection lost",
+    "auth_failed": "Authentication failed",
+    "permission_denied": "Permission denied",
+    "unknown": "An unexpected error occurred"
+  }
+}

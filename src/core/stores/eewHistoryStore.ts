@@ -99,6 +99,19 @@ export const useEEWHistoryStore = create<EEWHistoryState>()(
                 };
 
                 set((state) => {
+                    // Dedup: skip if same source + similar magnitude + similar location within 5 minutes
+                    const DEDUP_WINDOW_MS = 5 * 60 * 1000;
+                    const isDuplicate = state.events.some(e => {
+                        if (e.source !== event.source) return false;
+                        if (Math.abs(e.timestamp - event.timestamp) > DEDUP_WINDOW_MS) return false;
+                        if (Math.abs(e.magnitude - event.magnitude) > 0.3) return false;
+                        // ~10km proximity check (rough lat/lng comparison)
+                        if (Math.abs(e.latitude - event.latitude) > 0.1) return false;
+                        if (Math.abs(e.longitude - event.longitude) > 0.1) return false;
+                        return true;
+                    });
+                    if (isDuplicate) return state;
+
                     const updatedEvents = [newEvent, ...state.events];
                     // Keep only last maxEvents
                     if (updatedEvents.length > state.maxEvents) {

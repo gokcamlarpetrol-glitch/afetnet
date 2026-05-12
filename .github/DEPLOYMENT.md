@@ -1,74 +1,55 @@
 # Deployment Dokümantasyonu
 
-## Backend Deployment (Render.com)
+## Backend Deployment (Firebase Functions)
 
 ### Otomatik Deployment
 
-Render.com, GitHub repository'nize bağlandığında otomatik olarak deploy eder:
+GitHub Actions, Firebase backend kaynaklari degistiginde production deploy calistirir:
 
-1. **`main` branch'e push yapıldığında** otomatik deploy başlar
-2. **`server/` klasöründeki değişiklikler** deploy'u tetikler
-3. **Build command:** `cd server && npm install && npm run build`
-4. **Start command:** `cd server && npm start`
+1. **`main` branch'e push yapildiginda** deploy baslar
+2. **`functions/**`, Firebase rules/indexes ve `firebase.json`** degisiklikleri deploy'u tetikler
+3. **Build command:** `npm --prefix functions ci && npm --prefix functions run build`
+4. **Deploy command:** `firebase deploy --project afetnet-4a6b6 --only functions,firestore:rules,firestore:indexes,storage,database`
 
 ### Manuel Deployment
 
-Render.com dashboard'dan manuel deploy yapabilirsiniz:
+GitHub Actions uzerinden `Deploy Firebase Backend` workflow'u manuel tetiklenebilir.
 
-1. Render.com'a giriş yapın
-2. `afetnet-backend` servisini seçin
-3. "Manual Deploy" butonuna tıklayın
-4. Deploy edilecek commit'i seçin
+Yerel CLI ile manuel deploy:
+
+```bash
+npm --prefix functions ci
+npm --prefix functions run build
+firebase deploy --project afetnet-4a6b6 --only functions,firestore:rules,firestore:indexes,storage,database
+```
 
 ### Environment Variables
 
-Render.com'da şu environment variables ayarlanmalı:
+GitHub Actions production environment icin su secret ayarlanmalidir:
 
 **Zorunlu:**
-- `DATABASE_URL` - PostgreSQL connection string
-- `NODE_ENV` - `production`
-- `PORT` - `3001`
-- `ORG_SECRET` - Push notification security secret
-- `APPLE_SHARED_SECRET` - IAP verification secret
-- `APNS_KEY_ID` - Apple Push Notification key ID
-- `APNS_TEAM_ID` - Apple Push Notification team ID
-- `APNS_PRIVATE_KEY` - Apple Push Notification private key
-- `FIREBASE_PROJECT_ID` - Firebase project ID
-- `FIREBASE_CLIENT_EMAIL` - Firebase service account email
-- `FIREBASE_PRIVATE_KEY` - Firebase service account private key
+- `FIREBASE_SERVICE_ACCOUNT_AFETNET_4A6B6` - Firebase deploy yetkili service account JSON
 
 **Opsiyonel:**
 - `SENTRY_DSN` - Sentry error tracking DSN
-- `SENTRY_ENABLED` - `true` (production'da aktif)
-- `BASE_URL` - Backend base URL (Render otomatik ayarlar)
+- `OPENAI_API_KEY` - Firebase Functions runtime secret/env olarak tanimli olmali
 - `EEW_PROVIDER_MODE` - `poll` veya `websocket`
-- `AFAD_KANDILLI_URL` - AFAD/Kandilli API URL
-- `USGS_URL` - USGS API URL
-- `EMSC_URL` - EMSC API URL
 
-### Health Check
+### Smoke Check
 
-Backend health check endpoint:
+Deploy sonrasi Functions loglari ve zamanlayici durumlari kontrol edilir:
 
 ```bash
-curl https://afetnet-backend.onrender.com/health
-```
-
-Response:
-```json
-{
-  "status": "OK",
-  "timestamp": "2025-01-27T10:00:00.000Z",
-  "database": "connected",
-  "monitoring": "active"
-}
+firebase functions:log --project afetnet-4a6b6 --limit 50
+firebase functions:list --project afetnet-4a6b6
 ```
 
 ### Deployment Checklist
 
 - [ ] Environment variables kontrol edildi
-- [ ] Database migration'lar çalıştırıldı
-- [ ] Health check başarılı
+- [ ] `npm --prefix functions run build` basarili
+- [ ] `npm run verify:native-config` basarili
+- [ ] Functions loglari ve zamanlayicilar kontrol edildi
 - [ ] Sentry monitoring aktif
 - [ ] Logs kontrol edildi
 - [ ] API endpoints test edildi
@@ -138,15 +119,14 @@ firebase deploy
 
 1. **`ci.yml`** - Lint, test, build check
 2. **`ci_rules.yml`** - Rules-aware CI (secrets check, PR size)
-3. **`deploy-backend.yml`** - Backend deployment (opsiyonel)
+3. **`deploy-backend.yml`** - Firebase Functions + rules deployment
 
 ### Deployment Triggers
 
 - **Backend:** `main` branch'e push
 - **Frontend:** Manuel EAS build
-- **Firebase:** Manuel `firebase deploy`
+- **Firebase:** GitHub Actions veya manuel `firebase deploy`
 
 ---
 
-**Son Güncelleme:** 2025-01-27
-
+**Son Güncelleme:** 2026-05-12

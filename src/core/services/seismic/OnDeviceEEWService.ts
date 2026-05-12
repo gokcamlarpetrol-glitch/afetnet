@@ -37,12 +37,14 @@ const MIN_CONFIDENCE_FOR_ALERT = 85;       // High confidence required to reduce
 const MIN_MAGNITUDE_FOR_ALERT = 0.15;      // Well above walking/vibration noise floor
 
 // Super confidence threshold for FULL COUNTDOWN experience
-// Only the most certain detections get the full countdown UI
-const SUPER_CONFIDENCE_THRESHOLD = 95;     // Must be very confident for full countdown
-const SUPER_MAGNITUDE_THRESHOLD = 0.3;     // Strong shaking required for countdown
+// ELITE: Lowered from 95/0.3 — EnsembleDetectionService's 5-layer filter (70% threshold +
+// 2+ method consensus) already eliminates false positives. 88/0.2 lets real M4.0+ earthquakes
+// trigger the countdown while still requiring very high ensemble confidence.
+const SUPER_CONFIDENCE_THRESHOLD = 88;     // Ensemble 5-layer filter provides upstream protection
+const SUPER_MAGNITUDE_THRESHOLD = 0.2;     // 0.2g ≈ MMI V (~M4.5 nearby) — actionable shaking
 
-// Alert cooldown (prevent spam) - 2 minutes between alerts
-const ALERT_COOLDOWN_MS = 120000;          // 120s minimum between on-device EEW alerts
+// Alert cooldown — 60s allows detection of rapid aftershock sequences (e.g. 2023 Kahramanmaraş)
+const ALERT_COOLDOWN_MS = 60000;           // 60s minimum between on-device EEW alerts
 
 // ============================================================
 // SERVICE
@@ -80,7 +82,7 @@ class OnDeviceEEWService {
    */
   private async updateUserLocation(): Promise<void> {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') return;
 
       const location = await Location.getCurrentPositionAsync({
@@ -219,7 +221,7 @@ class OnDeviceEEWService {
   private estimateWarningTime(event: DetectionEvent): number {
     // P-wave frequency gives distance hint
     // Lower frequency = more distant = more warning time
-    const freq = event.frequency || 5;
+    const freq = event.frequency ?? 5;
 
     if (freq < 2) return 15; // Very low freq = distant (15s)
     if (freq < 5) return 10; // Low freq = medium (10s)
@@ -233,7 +235,9 @@ class OnDeviceEEWService {
   private estimateMagnitudeFromGForce(gForce: number, confidence: number): number {
     // Rough approximation based on near-field PGA
     // Higher confidence = trust the reading more
-    const confMultiplier = confidence / 100;
+    const normalizedConfidence = Math.max(0, Math.min(1, confidence / 100));
+    // Cap confidence effect to +0.3 magnitude to avoid over-inflated alerts.
+    const confMultiplier = normalizedConfidence * 0.3;
 
     if (gForce < 0.02) return 4.0 + confMultiplier;
     if (gForce < 0.05) return 4.5 + confMultiplier;
@@ -261,7 +265,7 @@ class OnDeviceEEWService {
   private estimateDistance(event: DetectionEvent): number {
     // Frequency-based distance estimation
     // Ts - Tp ≈ Distance/8 for typical crustal velocities
-    const freq = event.frequency || 5;
+    const freq = event.frequency ?? 5;
 
     if (freq < 2) return 100; // ~100km
     if (freq < 5) return 50;  // ~50km

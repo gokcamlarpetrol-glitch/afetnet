@@ -71,11 +71,17 @@ export default function AllNewsScreen() {
   const filteredArticles = useMemo(() => {
     if (!searchQuery.trim()) return articles;
     const query = searchQuery.toLowerCase();
-    return articles.filter(article =>
-      article.title?.toLowerCase().includes(query) ||
-            article.source?.toLowerCase().includes(query) ||
-            article.summary?.toLowerCase().includes(query),
-    );
+    return articles.filter(article => {
+      try {
+        return (
+          (article.title && article.title.toLowerCase().includes(query)) ||
+          (article.source && article.source.toLowerCase().includes(query)) ||
+          (article.summary && article.summary.toLowerCase().includes(query))
+        );
+      } catch {
+        return false;
+      }
+    });
   }, [articles, searchQuery]);
 
   const formatDate = (timestamp: number) => {
@@ -166,7 +172,7 @@ export default function AllNewsScreen() {
       <FlatList
         data={filteredArticles}
         renderItem={renderNewsItem}
-        keyExtractor={(item, index) => item.id || index.toString()}
+        keyExtractor={(item, index) => item.id || `news-${item.title?.substring(0, 20) || index}`}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         // ELITE: Performance optimizations

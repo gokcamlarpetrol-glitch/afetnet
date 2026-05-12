@@ -6,6 +6,15 @@
 import { earthquakeAnalysisService } from '../EarthquakeAnalysisService';
 import { Earthquake } from '../../../stores/earthquakeStore';
 
+// Mock fetch to prevent real HTTP calls in tests (causes open handles)
+const mockFetch = jest.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ([]),
+  text: async () => '[]',
+  headers: { get: () => 'application/json' },
+});
+(global as any).fetch = mockFetch;
+
 describe('EarthquakeAnalysisService - 5.0+ Magnitude Tests', () => {
   beforeAll(async () => {
     await earthquakeAnalysisService.initialize();

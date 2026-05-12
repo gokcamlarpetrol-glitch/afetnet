@@ -38,9 +38,9 @@ const BACKGROUND_SEISMIC_TASK = 'BACKGROUND_SEISMIC_MONITORING_TASK';
 const BACKGROUND_FETCH_TASK = 'BACKGROUND_SEISMIC_FETCH_TASK';
 
 const STORAGE_KEYS = {
-    ENABLED: '@afetnet_background_seismic_enabled',
-    LAST_CHECK: '@afetnet_background_last_check',
-    DETECTIONS: '@afetnet_background_detections',
+    ENABLED: '@afetnet_background_seismic_enabled', // Device-scoped intentionally — seismic sensitivity is hardware-specific
+    LAST_CHECK: '@afetnet_background_last_check', // Device-scoped intentionally — seismic sensitivity is hardware-specific
+    DETECTIONS: '@afetnet_background_detections', // Device-scoped intentionally — seismic sensitivity is hardware-specific
 };
 
 // Sampling rates based on power state
@@ -213,6 +213,9 @@ class BackgroundSeismicMonitorService {
      * Setup app state listener for adaptive power management
      */
     private setupAppStateListener(): void {
+        if (this.appStateSubscription) {
+            this.appStateSubscription.remove();
+        }
         this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
             const previousState = this.appState;
             this.appState = nextState;
@@ -308,10 +311,12 @@ class BackgroundSeismicMonitorService {
             if (saved !== null) {
                 this.config.enabled = saved === 'true';
             }
+            // Device-scoped intentionally — seismic sensitivity is hardware-specific
             const savedSensitivity = DirectStorage.getString('@afetnet_background_seismic_sensitivity');
             if (savedSensitivity === 'low' || savedSensitivity === 'medium' || savedSensitivity === 'high') {
                 this.config.sensitivity = savedSensitivity;
             }
+            // Device-scoped intentionally — seismic sensitivity is hardware-specific
             const savedPowerMode = DirectStorage.getString('@afetnet_background_seismic_power_mode');
             if (savedPowerMode === 'normal' || savedPowerMode === 'aggressive' || savedPowerMode === 'battery_saver') {
                 this.config.powerMode = savedPowerMode;

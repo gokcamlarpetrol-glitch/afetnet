@@ -969,7 +969,7 @@ class NewsAggregatorService {
 
   /**
    * Haber icerigi AI ile ozetle
-   * OpenAI GPT-4 kullanarak Turkce, anlasilir ozet olustur
+   * OpenAI kullanarak Turkce, anlasilir ozet olustur
    */
   async summarizeArticle(article: NewsArticle): Promise<string> {
     // CRITICAL: Validate article input

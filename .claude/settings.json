@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(npm test *)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run lint *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gh *)",
+      "Bash(firebase *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git push * main)",
+      "Bash(npm install *)",
+      "Edit(**/.env*)",
+      "Write(**/.env*)",
+      "Edit(**/google-services.json)",
+      "Edit(**/GoogleService-Info.plist)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE_PATH=$(echo \"$TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('file_path',''))\" 2>/dev/null); if [ -n \"$FILE_PATH\" ] && echo \"$FILE_PATH\" | grep -qE '\\.(ts|tsx)$'; then cd /Users/gokhancamci/AfetNet1 && npx tsc --noEmit 2>&1 | tail -20; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

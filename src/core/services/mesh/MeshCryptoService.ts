@@ -19,6 +19,14 @@ import { getDeviceId } from '../../utils/device';
 // instead of broken XOR cipher
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { getFirebaseAuth } from '../../../lib/firebase';
+
+// User-scoped SecureStore key helper — reads from instance initUid when available
+let _meshCryptoInitUid = '';
+const scopedKey = (base: string): string => {
+    const uid = _meshCryptoInitUid || getFirebaseAuth()?.currentUser?.uid || 'default';
+    return `${base}_${uid}`;
+};
 
 const logger = createLogger('MeshCryptoService');
 
@@ -74,6 +82,7 @@ export interface EncryptedPayload {
 class MeshCryptoService {
     private isInitialized = false;
     private myDeviceId = '';
+    private initUid = ''; // UID captured at init time for correct key cleanup on destroy
     private myKeyPair: KeyPair | null = null;
     private peerKeys: Map<string, PeerKey> = new Map();
     private keyExchangeListeners: Set<(peerId: string, publicKey: string) => void> = new Set();
@@ -87,6 +96,18 @@ class MeshCryptoService {
 
         try {
             this.myDeviceId = await getDeviceId();
+
+            // Wait briefly for auth if not yet available (auth restore may be in progress)
+            let uid = getFirebaseAuth()?.currentUser?.uid;
+            if (!uid) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                uid = getFirebaseAuth()?.currentUser?.uid;
+            }
+            this.initUid = uid || 'default';
+            _meshCryptoInitUid = this.initUid;
+            if (this.initUid === 'default') {
+                logger.warn('MeshCryptoService: auth not available — using default key scope');
+            }
 
             // Load or generate key pair
             await this.loadOrGenerateKeyPair();
@@ -108,8 +129,8 @@ class MeshCryptoService {
     private async loadOrGenerateKeyPair(): Promise<void> {
         try {
             // Try to load existing key pair
-            const privateKeyData = await SecureStore.getItemAsync(CRYPTO_CONFIG.STORAGE_PRIVATE_KEY);
-            const publicKeyData = await SecureStore.getItemAsync(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY);
+            const privateKeyData = await SecureStore.getItemAsync(scopedKey(CRYPTO_CONFIG.STORAGE_PRIVATE_KEY));
+            const publicKeyData = await SecureStore.getItemAsync(scopedKey(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY));
 
             if (privateKeyData && publicKeyData) {
                 const parsed = JSON.parse(privateKeyData);
@@ -150,17 +171,17 @@ class MeshCryptoService {
 
         // Save to secure storage
         await SecureStore.setItemAsync(
-            CRYPTO_CONFIG.STORAGE_PRIVATE_KEY,
+            scopedKey(CRYPTO_CONFIG.STORAGE_PRIVATE_KEY),
             JSON.stringify({ key: privateKey, createdAt: Date.now() })
         );
-        await SecureStore.setItemAsync(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY, publicKey);
+        await SecureStore.setItemAsync(scopedKey(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY), publicKey);
 
         logger.info('New key pair generated (Curve25519)');
     }
 
     private async loadPeerKeys(): Promise<void> {
         try {
-            const data = await SecureStore.getItemAsync(CRYPTO_CONFIG.STORAGE_PEER_KEYS);
+            const data = await SecureStore.getItemAsync(scopedKey(CRYPTO_CONFIG.STORAGE_PEER_KEYS));
             if (data) {
                 const peers = JSON.parse(data) as PeerKey[];
                 peers.forEach(peer => this.peerKeys.set(peer.peerId, peer));
@@ -174,7 +195,7 @@ class MeshCryptoService {
     private async savePeerKeys(): Promise<void> {
         try {
             const peers = Array.from(this.peerKeys.values());
-            await SecureStore.setItemAsync(CRYPTO_CONFIG.STORAGE_PEER_KEYS, JSON.stringify(peers));
+            await SecureStore.setItemAsync(scopedKey(CRYPTO_CONFIG.STORAGE_PEER_KEYS), JSON.stringify(peers));
         } catch (error) {
             logger.debug('Failed to save peer keys:', error);
         }
@@ -224,10 +245,23 @@ class MeshCryptoService {
         };
 
         this.peerKeys.set(peerId, peerKey);
+
+        // FIX: Cap peerKeys to prevent unbounded growth when encountering many peers.
+        // Evict oldest entries (by lastUpdated) when exceeding 200 peers.
+        const MAX_PEER_KEYS = 200;
+        if (this.peerKeys.size > MAX_PEER_KEYS) {
+            const sorted = Array.from(this.peerKeys.entries())
+                .sort((a, b) => a[1].lastUpdated - b[1].lastUpdated);
+            const toRemove = sorted.slice(0, this.peerKeys.size - MAX_PEER_KEYS);
+            for (const [id] of toRemove) {
+                this.peerKeys.delete(id);
+            }
+        }
+
         await this.savePeerKeys();
 
         // Notify listeners
-        this.keyExchangeListeners.forEach(cb => cb(peerId, peerPublicKey));
+        [...this.keyExchangeListeners].forEach(cb => cb(peerId, peerPublicKey));
 
         logger.debug(`Shared secret established with ${peerId.slice(0, 8)}`);
     }
@@ -406,6 +440,44 @@ class MeshCryptoService {
         }
     }
 
+    /**
+     * Decrypt a broadcast message (uses the key that was sent alongside the ciphertext)
+     */
+    async decryptBroadcast(ciphertext: string, key: string): Promise<string | null> {
+        try {
+            const keyBytes = naclUtil.decodeBase64(key);
+
+            // ciphertext format: base64(nonce) + ':' + base64(encrypted)
+            const separatorIndex = ciphertext.indexOf(':');
+            if (separatorIndex === -1) {
+                logger.error('Invalid broadcast ciphertext format (missing nonce separator)');
+                return null;
+            }
+
+            const nonce = naclUtil.decodeBase64(ciphertext.substring(0, separatorIndex));
+            const encryptedBytes = naclUtil.decodeBase64(ciphertext.substring(separatorIndex + 1));
+
+            const plaintextBytes = nacl.secretbox.open(encryptedBytes, nonce, keyBytes);
+
+            if (!plaintextBytes) {
+                logger.error('Broadcast decryption failed — message tampered or wrong key');
+                return null;
+            }
+
+            return naclUtil.encodeUTF8(plaintextBytes);
+        } catch (error) {
+            logger.error('Broadcast decryption failed:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Check if the service has been initialized
+     */
+    getIsInitialized(): boolean {
+        return this.isInitialized;
+    }
+
     // ============================================================================
     // LISTENERS
     // ============================================================================
@@ -435,6 +507,43 @@ class MeshCryptoService {
     async rotateKeys(): Promise<void> {
         await this.generateKeyPair();
         logger.info('Keys rotated');
+    }
+
+    // ============================================================================
+    // CLEANUP
+    // ============================================================================
+
+    /**
+     * Full teardown — call on app shutdown or account switch.
+     * Resets all in-memory state AND clears SecureStore keys so the next user
+     * doesn't inherit the previous user's keypair/peer secrets (privacy fix).
+     */
+    async destroy(): Promise<void> {
+        this.peerKeys.clear();
+        this.keyExchangeListeners.clear();
+        this.myKeyPair = null;
+        this.myDeviceId = '';
+        this.isInitialized = false;
+
+        // CRITICAL FIX: Await SecureStore deletions to prevent next user from
+        // reading old keys if initialize() is called immediately after destroy()
+        // (rapid account switch). Fire-and-forget allowed deletions to race.
+        // Use initUid (captured at init time) to ensure correct keys are deleted
+        // even if auth state has already changed during logout
+        const uid = this.initUid || 'default';
+        const destroyScopedKey = (base: string) => `${base}_${uid}`;
+        try {
+            await Promise.all([
+                SecureStore.deleteItemAsync(destroyScopedKey(CRYPTO_CONFIG.STORAGE_PRIVATE_KEY)),
+                SecureStore.deleteItemAsync(destroyScopedKey(CRYPTO_CONFIG.STORAGE_PUBLIC_KEY)),
+                SecureStore.deleteItemAsync(destroyScopedKey(CRYPTO_CONFIG.STORAGE_PEER_KEYS)),
+            ]);
+        } catch {
+            // SecureStore may be unavailable; best-effort
+        }
+        this.initUid = '';
+        _meshCryptoInitUid = '';
+        logger.info('MeshCryptoService destroyed (SecureStore keys cleared)');
     }
 }
 

@@ -13,6 +13,7 @@ import AIAssistantCard from './components/AIAssistantCard';
 import NewsCard from './components/NewsCard';
 import { PaperBackground } from '../../components/design-system/PaperBackground';
 import { PremiumEarthquakeCard } from '../../components/design-system/ModernEarthquakeCard';
+import { formatToTurkishTimeOnly } from '../../utils/timeUtils';
 // ELITE: Family Check-In moved to Family Screen
 
 import SOSModal from '../../components/SOSModal';
@@ -44,9 +45,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
-    refresh().catch((err) => logger.error('Refresh failed', err));
-
-    // Elite Entrance Animation
+    // Elite Entrance Animation — starts immediately (no network dependency)
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -60,13 +59,23 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         useNativeDriver: true,
       }),
     ]).start();
+
+    // PERF: Defer earthquake refresh — show cached data instantly, fetch fresh data after UI renders.
+    // InteractionManager ensures the network call runs after animations and layout complete.
+    const timer = setTimeout(() => {
+      refresh().catch((err) => logger.error('Refresh failed', err));
+    }, 500);
+    return () => clearTimeout(timer);
   }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     haptics.impactLight();
     try {
-      await refresh();
+      // ELITE: Timeout guard — prevents infinite spinner if network hangs
+      const refreshPromise = refresh();
+      const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 15000));
+      await Promise.race([refreshPromise, timeoutPromise]);
     } finally {
       setRefreshing(false);
     }
@@ -90,13 +99,22 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
 
 
 
+  // Sprint 8: iPad responsive — wider content on tablet
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isTablet, width } = require('../../utils/responsive').useResponsive();
+  const contentMaxWidth = isTablet ? Math.min(width * 0.85, 900) : '100%';
+
   return (
     <PaperBackground>
       <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
       <Animated.ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, isTablet && { alignSelf: 'center', width: contentMaxWidth }]}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        removeClippedSubviews={true}
+        testID="home-screen"
+        accessibilityLabel="Ana ekran"
         refreshControl={
           <RefreshControl
             refreshing={refreshing || loading}
@@ -115,7 +133,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           <View style={styles.dataStatusBanner}>
             <Ionicons name="alert-circle-outline" size={16} color="#92400e" />
             <Text style={styles.dataStatusText}>{dataStatusText}</Text>
-            <Pressable onPress={onRefresh} style={styles.dataStatusAction}>
+            <Pressable onPress={onRefresh} style={styles.dataStatusAction} accessibilityRole="button" accessibilityLabel="Deprem verilerini yenile">
               <Text style={styles.dataStatusActionText}>Yenile</Text>
             </Pressable>
           </View>
@@ -125,7 +143,8 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           <PremiumEarthquakeCard
             magnitude={latestEarthquake.magnitude}
             location={latestEarthquake.location}
-            time={new Date(latestEarthquake.time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+            time={formatToTurkishTimeOnly(latestEarthquake.time)}
+            rawTimestamp={latestEarthquake.time}
             depth={latestEarthquake.depth}
             latitude={latestEarthquake.latitude}
             longitude={latestEarthquake.longitude}

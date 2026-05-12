@@ -125,7 +125,7 @@ export function RescueCompass({ userLocation, targetLocation, targetName, visibl
           {/* Stats */}
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{formatDistance(distance)}</Text>
+              <Text style={styles.statValue}>{formatDistance(distance / 1000)}</Text>
               <Text style={styles.statLabel}>MESAFE</Text>
             </View>
             <View style={styles.divider} />

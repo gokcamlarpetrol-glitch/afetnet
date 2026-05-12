@@ -42,6 +42,24 @@ function getFirebaseApiKey(): string {
       process.env.FIREBASE_API_KEY ||
       ''; // ELITE SECURITY: No hardcoded fallback
 
+    if (!firebaseApiKeyCache) {
+      try {
+        const nativeFirebase = require('@react-native-firebase/app');
+        const nativeApp =
+          typeof nativeFirebase?.default?.app === 'function'
+            ? nativeFirebase.default.app()
+            : typeof nativeFirebase?.app === 'function'
+              ? nativeFirebase.app()
+              : null;
+        const nativeKey = nativeApp?.options?.apiKey;
+        if (typeof nativeKey === 'string' && nativeKey.trim().length > 0) {
+          firebaseApiKeyCache = nativeKey.trim();
+        }
+      } catch {
+        // native fallback unavailable
+      }
+    }
+
     // ELITE: Validate API key format (Firebase keys start with AIzaSy)
     if (firebaseApiKeyCache && firebaseApiKeyCache.startsWith('AIzaSy') && firebaseApiKeyCache.length > 30) {
       firebaseKeyValidated = true;
@@ -170,7 +188,7 @@ export async function getFirebaseAppAsync() {
       return getApp();
     }
     const config = getFirebaseConfig();
-    return initializeApp(config.ios); // Default to iOS config for now, or detect platform
+    return initializeApp(Platform.OS === 'android' ? config.android : config.ios);
   } catch (error) {
     const logger = createLogger('FirebaseConfig');
     logger.error('Failed to initialize Firebase app:', error);

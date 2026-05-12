@@ -16,17 +16,16 @@
  * @version 3.0.0
  */
 
-import { doc, setDoc, getDoc, getDocs, deleteDoc, collection, onSnapshot, query, where, arrayRemove, arrayUnion, updateDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { doc, setDoc, getDoc, getDocs, deleteDoc, collection, onSnapshot, query, where, arrayRemove, arrayUnion, updateDoc, limit, writeBatch } from 'firebase/firestore';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 import type { FamilyMember } from '../../types/family';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('FirebaseFamilyOps');
 const TIMEOUT_MS = 10000;
 const RETRY_CONFIG = { maxRetries: 2, baseDelayMs: 500, maxDelayMs: 5000 };
 const MIN_VALID_TIMESTAMP_MS = new Date('2000-01-01T00:00:00.000Z').getTime();
-const FIREBASE_UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 
 // ─── HELPERS ──────────────────────────────────────
 
@@ -94,6 +93,12 @@ function normalizeTimestampMs(value: unknown, fallback: number = 0): number {
   }
 
   return fallback;
+}
+
+function isMutualFamilyLinkData(data: Record<string, unknown> | null | undefined): boolean {
+  return data?.approvalState === 'mutual'
+    || data?.relationshipStatus === 'accepted'
+    || data?.isMutual === true;
 }
 
 async function withTimeout<T>(
@@ -201,7 +206,7 @@ export async function createFamily(
     // Create UID → familyId mapping (for security rules)
     await setDoc(
       doc(db, 'users', myUid, 'familyIds', familyId),
-      { active: true, joinedAt: now }
+      { active: true, joinedAt: now, ownerUid: myUid, role: 'owner' }
     );
 
     logger.info(`✅ Family created: families/${familyId}`);
@@ -225,7 +230,7 @@ export async function createFamily(
         // Store the family group chat ID in the family document for easy lookup
         await updateDoc(doc(db, 'families', familyId), {
           familyGroupChatId: groupId,
-        }).catch(() => { /* best effort */ });
+        }).catch(e => { if (__DEV__) logger.debug('familyGroupChatId update failed:', e); });
         logger.info(`✅ Family group chat auto-created: ${groupId} for family ${familyId}`);
       }
     } catch (groupError) {
@@ -275,11 +280,28 @@ async function _getOrCreateDefaultFamilyImpl(
     const snapshot = await getDocs(familyIdsRef);
 
     if (!snapshot.empty) {
-      // Return first active family
+      // Return the user's own active family. Remote family links are relationship
+      // metadata and must not become the default write target for this user.
       for (const docSnap of snapshot.docs) {
         const data = docSnap.data();
-        if (data.active !== false) {
+        if (data.active === false) continue;
+
+        if (data.role === 'owner' || data.ownerUid === myUid) {
           return docSnap.id;
+        }
+
+        try {
+          const familyDoc = await getDoc(doc(db, 'families', docSnap.id));
+          if (familyDoc.exists() && familyDoc.data()?.createdBy === myUid) {
+            await setDoc(
+              doc(db, 'users', myUid, 'familyIds', docSnap.id),
+              { active: true, ownerUid: myUid, role: 'owner', updatedAt: Date.now() },
+              { merge: true },
+            );
+            return docSnap.id;
+          }
+        } catch {
+          // Ignore unreadable remote family mappings; they are not default write targets.
         }
       }
     }
@@ -304,7 +326,7 @@ export async function saveFamilyMember(
   myUid: string,
 ): Promise<boolean> {
   const memberUid = typeof member.uid === 'string' ? member.uid.trim() : '';
-  if (!familyId || !memberUid || !FIREBASE_UID_REGEX.test(memberUid)) {
+  if (!familyId || !memberUid || !isLikelyFirebaseUid(memberUid)) {
     logger.warn('saveFamilyMember: member UID is missing/invalid for V3 model');
     return false;
   }
@@ -331,6 +353,49 @@ export async function saveFamilyMember(
         accuracy: toFiniteNumber(member.location?.accuracy, 0),
       }
       : null;
+    const approvalState = member.approvalState === 'mutual' ? 'mutual' : 'pending';
+    const adderName = await (async () => {
+      try {
+        const { identityService } = await import('../../services/IdentityService');
+        return identityService.getDisplayName() || 'Aile Üyesi';
+      } catch { return 'Aile Üyesi'; }
+    })();
+
+    if (approvalState !== 'mutual') {
+      await setDoc(
+        doc(db, 'users', myUid, 'familyMembers', memberUid),
+        {
+          familyId,
+          name: member.name,
+          approvalState: 'pending',
+          relationshipStatus: 'pending',
+          requestedBy: myUid,
+          requestedAt: now,
+          addedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, 'users', memberUid, 'familyMembers', myUid),
+        {
+          familyId,
+          adderUid: myUid,
+          adderName,
+          approvalState: 'pending',
+          relationshipStatus: 'pending',
+          requestedBy: myUid,
+          requestedAt: now,
+          addedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      ).catch(e => { if (__DEV__) logger.debug('pending familyMembers reverse link write failed:', e); });
+
+      logger.info(`⏳ Pending family invitation saved for ${memberUid}; live data stays locked until acceptance`);
+      return true;
+    }
 
     // 1. Write member document
     const memberRef = doc(db, 'families', familyId, 'members', memberUid);
@@ -353,6 +418,7 @@ export async function saveFamilyMember(
           latitude,
           longitude,
           location: locationPayload,
+          approvalState,
           batteryLevel: typeof member.batteryLevel === 'number' ? member.batteryLevel : null,
           isOnline: typeof member.isOnline === 'boolean'
             ? member.isOnline
@@ -375,7 +441,7 @@ export async function saveFamilyMember(
             // If updateDoc fails (doc may not exist yet), try setDoc with merge
             // CRITICAL: createdBy is required by Firestore rules for family create
             return setDoc(familyRef, {
-              members: [memberUid, myUid],
+              members: arrayUnion(memberUid, myUid),
               createdBy: myUid,
               updatedAt: now,
             }, { merge: true });
@@ -389,7 +455,7 @@ export async function saveFamilyMember(
     // 3. Create UID → familyId mapping for the new member
     await setDoc(
       doc(db, 'users', memberUid, 'familyIds', familyId),
-      { active: true, joinedAt: now },
+      { active: true, joinedAt: now, ownerUid: myUid, role: 'member' },
       { merge: true }
     ).catch((err) => {
       // May fail if we can't write to another user's doc — that's expected
@@ -398,25 +464,36 @@ export async function saveFamilyMember(
 
     // 4. Create bidirectional familyMembers mapping (for Firestore rules)
     // users/{myUid}/familyMembers/{memberUid} and vice versa
-    // CRITICAL: Include adderUid + adderName in the reverse doc so the target
-    // user can identify who added them and join the correct family on sync.
-    const adderName = await (async () => {
-      try {
-        const { identityService } = await import('../../services/IdentityService');
-        return identityService.getDisplayName() || 'Aile Üyesi';
-      } catch { return 'Aile Üyesi'; }
-    })();
     await Promise.all([
       setDoc(
         doc(db, 'users', myUid, 'familyMembers', memberUid),
-        { familyId, name: member.name, addedAt: now },
+        {
+          familyId,
+          name: member.name,
+          approvalState: 'mutual',
+          relationshipStatus: 'accepted',
+          requestedBy: myUid,
+          addedAt: now,
+          acceptedAt: now,
+          updatedAt: now,
+        },
         { merge: true }
-      ).catch(() => { }),
+      ).catch(e => { if (__DEV__) logger.debug('familyMembers forward link write failed:', e); }),
       setDoc(
         doc(db, 'users', memberUid, 'familyMembers', myUid),
-        { familyId, adderUid: myUid, adderName, addedAt: now },
+        {
+          familyId,
+          adderUid: myUid,
+          adderName,
+          approvalState: 'mutual',
+          relationshipStatus: 'accepted',
+          requestedBy: myUid,
+          addedAt: now,
+          acceptedAt: now,
+          updatedAt: now,
+        },
         { merge: true }
-      ).catch(() => { }),
+      ).catch(e => { if (__DEV__) logger.debug('familyMembers reverse link write failed:', e); }),
     ]);
 
     logger.info(`✅ Family member saved: families/${familyId}/members/${memberUid}`);
@@ -440,7 +517,31 @@ export async function saveFamilyMember(
         );
         logger.info(`✅ Auto-added ${member.name} to family group chat ${familyGroupChatId}`);
       } else {
-        logger.debug('No familyGroupChatId found — member will join when group is created on-demand');
+        // CRITICAL FIX: Auto-create family group chat if it doesn't exist.
+        // This handles the case where createFamily() group creation failed.
+        try {
+          const { groupChatService } = await import('../GroupChatService');
+          const { identityService } = await import('../IdentityService');
+          const ownerDeviceId = identityService.getMeshDeviceId?.() || identityService.getMyId?.() || myUid;
+          const ownerName = identityService.getDisplayName() || 'Aile Üyesi';
+          const familyName = familyData?.name || 'Ailem';
+
+          const newGroupId = await groupChatService.createGroup(
+            familyName,
+            [myUid, memberUid],
+            { [myUid]: ownerName, [memberUid]: member.name },
+            { [myUid]: ownerDeviceId, [memberUid]: member.deviceId || memberUid },
+          );
+
+          if (newGroupId) {
+            await updateDoc(doc(db, 'families', familyId), {
+              familyGroupChatId: newGroupId,
+            }).catch(e => { if (__DEV__) logger.debug('familyGroupChatId write failed:', e); });
+            logger.info(`✅ Auto-created missing family group chat: ${newGroupId} for family ${familyId}`);
+          }
+        } catch (createGroupError) {
+          logger.warn('Auto-create family group chat on member add failed (non-blocking):', createGroupError);
+        }
       }
     } catch (groupError) {
       // Non-blocking — member will see the group when FamilyGroupChatScreen reconciles
@@ -468,9 +569,10 @@ export async function loadFamilyMembers(
     }
 
     const membersRef = collection(db, 'families', familyId, 'members');
+    const membersQuery = query(membersRef, limit(100));
 
     const snapshot = await retryWithBackoff(
-      () => withTimeout(() => getDocs(membersRef), 'Aile üyelerini yükleme'),
+      () => withTimeout(() => getDocs(membersQuery), 'Aile üyelerini yükleme'),
       RETRY_CONFIG,
     );
 
@@ -511,6 +613,7 @@ export async function loadFamilyMembers(
         relationship: typeof data.relationship === 'string' ? data.relationship : undefined,
         phoneNumber: typeof data.phoneNumber === 'string' ? data.phoneNumber : undefined,
         notes: typeof data.notes === 'string' ? data.notes : undefined,
+        approvalState: data.approvalState === 'mutual' ? 'mutual' : 'pending',
         createdAt,
         updatedAt,
       } as FamilyMember);
@@ -534,6 +637,10 @@ export async function deleteFamilyMember(
   myUid?: string,
 ): Promise<boolean> {
   try {
+    if (!familyId || !memberUid) {
+      logger.warn('deleteFamilyMember: familyId or memberUid is missing');
+      return false;
+    }
     const db = await getFirestoreInstanceAsync();
     if (!db) return false;
 
@@ -551,29 +658,55 @@ export async function deleteFamilyMember(
     await updateDoc(familyRef, {
       members: arrayRemove(memberUid),
       updatedAt: Date.now(),
-    }).catch(() => { /* best-effort */ });
+    }).catch(e => { if (__DEV__) logger.debug('arrayRemove from family failed:', e); });
 
     // 3. Remove UID → familyId mapping
     await deleteDoc(
       doc(db, 'users', memberUid, 'familyIds', familyId)
-    ).catch(() => { /* best-effort — may not have permission */ });
+    ).catch(e => { if (__DEV__) logger.debug('familyIds mapping delete failed:', e); });
 
     // 4. Remove bidirectional familyMembers mapping (best-effort)
     // Direct cleanup if we know who is removing whom
     if (myUid) {
-      await deleteDoc(doc(db, 'users', myUid, 'familyMembers', memberUid)).catch(() => { });
-      await deleteDoc(doc(db, 'users', memberUid, 'familyMembers', myUid)).catch(() => { });
+      await deleteDoc(doc(db, 'users', myUid, 'familyMembers', memberUid)).catch(e => { if (__DEV__) logger.debug('familyMembers cleanup (my→member) failed:', e); });
+      await deleteDoc(doc(db, 'users', memberUid, 'familyMembers', myUid)).catch(e => { if (__DEV__) logger.debug('familyMembers cleanup (member→my) failed:', e); });
     }
-    // Also enumerate remaining family members for thorough cleanup
+    // Also enumerate remaining family members for thorough cleanup — use writeBatch
+    // to avoid N+1 sequential writes (2 deletes per remaining member).
     try {
-      const membersSnap = await getDocs(collection(db, 'families', familyId, 'members'));
+      const membersSnap = await getDocs(query(collection(db, 'families', familyId, 'members'), limit(100)));
+      const batch = writeBatch(db);
+      let opCount = 0;
       for (const mDoc of membersSnap.docs) {
         const otherUid = mDoc.id;
         if (otherUid === memberUid) continue;
-        await deleteDoc(doc(db, 'users', otherUid, 'familyMembers', memberUid)).catch(() => { });
-        await deleteDoc(doc(db, 'users', memberUid, 'familyMembers', otherUid)).catch(() => { });
+        batch.delete(doc(db, 'users', otherUid, 'familyMembers', memberUid));
+        batch.delete(doc(db, 'users', memberUid, 'familyMembers', otherUid));
+        opCount += 2;
+      }
+      if (opCount > 0) {
+        await batch.commit().catch(e => { if (__DEV__) logger.debug('familyMembers batch cleanup failed:', e); });
       }
     } catch { /* best-effort cleanup */ }
+
+    // 5. Remove from family group chat (best-effort)
+    // Without this, removed members still see messages in the family group chat
+    // and other members still see the removed member in the group.
+    try {
+      const familyDoc = await getDoc(doc(db, 'families', familyId));
+      const familyData = familyDoc.data();
+      const familyGroupChatId = familyData?.familyGroupChatId;
+      if (familyGroupChatId && typeof familyGroupChatId === 'string') {
+        const { groupChatService } = await import('../GroupChatService');
+        // Resolve member name from the member doc we just deleted (use best-effort lookup)
+        const memberName = 'Aile Üyesi'; // Name was already deleted; use generic label
+        await groupChatService.removeMemberFromGroup(familyGroupChatId, memberUid, memberName);
+        logger.info(`✅ Removed ${memberUid} from family group chat ${familyGroupChatId}`);
+      }
+    } catch (groupError) {
+      // Non-blocking — group chat cleanup is best-effort
+      logger.debug('Family group chat removal failed (non-blocking):', groupError);
+    }
 
     logger.info(`✅ Member ${memberUid} deleted from families/${familyId}`);
     return true;
@@ -585,88 +718,163 @@ export async function deleteFamilyMember(
 /**
  * Subscribe to real-time family member updates.
  * Path: families/{familyId}/members/
+ * Uses retry-with-backoff for transient errors.
  */
 export async function subscribeToFamilyMembers(
   familyId: string,
   callback: (members: FamilyMember[]) => void,
   onError?: (error: any) => void,
 ): Promise<() => void> {
-  try {
-    const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available for family subscription');
-      return () => { };
-    }
+  let isDisposed = false;
+  let currentUnsub: (() => void) | null = null;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  // CRITICAL FIX: Was 5 — subscription died permanently after 5 errors (network blips,
+  // auth token refresh). Now 20 with longer backoff so even sustained outages recover.
+  const MAX_RETRIES = 20;
 
-    const membersRef = collection(db, 'families', familyId, 'members');
+  const cleanup = () => {
+    isDisposed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } currentUnsub = null; }
+  };
 
-    const unsubscribe = onSnapshot(
-      membersRef,
-      (snapshot) => {
-        try {
-          const members: FamilyMember[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            const lastSeen = normalizeTimestampMs(data.lastSeen, 0);
-            const createdAt = normalizeTimestampMs(data.joinedAt ?? data.createdAt, 0);
-            const updatedAt = normalizeTimestampMs(data.updatedAt, createdAt || lastSeen || Date.now());
-            const latitude = toFiniteNumber(data.latitude ?? data.location?.latitude, 0);
-            const longitude = toFiniteNumber(data.longitude ?? data.location?.longitude, 0);
-            const locationTimestamp = normalizeTimestampMs(data.location?.timestamp, lastSeen || updatedAt);
-            const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+  const startSnapshot = async (): Promise<boolean> => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db || isDisposed) return false;
 
-            members.push({
-              id: data.id || docSnap.id,
-              uid: docSnap.id,
-              familyId,
-              name: data.name || 'Bilinmeyen',
-              status: data.status || 'unknown',
-              lastSeen,
-              latitude,
-              longitude,
-              location: hasLocation
-                ? {
-                  latitude,
-                  longitude,
-                  timestamp: locationTimestamp,
-                  accuracy: toFiniteNumber(data.location?.accuracy, 0),
-                }
-                : undefined,
-              batteryLevel: toNullableFiniteNumber(data.batteryLevel) ?? undefined,
-              isOnline: typeof data.isOnline === 'boolean'
-                ? data.isOnline
-                : (lastSeen > 0 ? Date.now() - lastSeen < 10 * 60 * 1000 : false),
-              deviceId: typeof data.deviceId === 'string' ? data.deviceId : undefined,
-              avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : undefined,
-              relationship: typeof data.relationship === 'string' ? data.relationship : undefined,
-              phoneNumber: typeof data.phoneNumber === 'string' ? data.phoneNumber : undefined,
-              notes: typeof data.notes === 'string' ? data.notes : undefined,
-              createdAt,
-              updatedAt,
-            } as FamilyMember);
-          });
-          callback(members);
-        } catch (error) {
-          logger.error('Error processing family member snapshot:', error);
+      const membersRef = collection(db, 'families', familyId, 'members');
+
+      const unsubscribe = onSnapshot(
+        membersRef,
+        (snapshot) => {
+          if (isDisposed) return;
+          retryCount = 0; // Reset on successful snapshot
+          try {
+            const members: FamilyMember[] = [];
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data();
+              const lastSeen = normalizeTimestampMs(data.lastSeen, 0);
+              const createdAt = normalizeTimestampMs(data.joinedAt ?? data.createdAt, 0);
+              const updatedAt = normalizeTimestampMs(data.updatedAt, createdAt || lastSeen || Date.now());
+              const latitude = toFiniteNumber(data.latitude ?? data.location?.latitude, 0);
+              const longitude = toFiniteNumber(data.longitude ?? data.location?.longitude, 0);
+              const locationTimestamp = normalizeTimestampMs(data.location?.timestamp, lastSeen || updatedAt);
+              const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+
+              members.push({
+                id: data.id || docSnap.id,
+                uid: docSnap.id,
+                familyId,
+                name: data.name || 'Bilinmeyen',
+                status: data.status || 'unknown',
+                lastSeen,
+                latitude,
+                longitude,
+                location: hasLocation
+                  ? {
+                    latitude,
+                    longitude,
+                    timestamp: locationTimestamp,
+                    accuracy: toFiniteNumber(data.location?.accuracy, 0),
+                  }
+                  : undefined,
+                batteryLevel: toNullableFiniteNumber(data.batteryLevel) ?? undefined,
+                isOnline: typeof data.isOnline === 'boolean'
+                  ? data.isOnline
+                  : (lastSeen > 0 ? Date.now() - lastSeen < 10 * 60 * 1000 : false),
+                deviceId: typeof data.deviceId === 'string' ? data.deviceId : undefined,
+                avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : undefined,
+                relationship: typeof data.relationship === 'string' ? data.relationship : undefined,
+                phoneNumber: typeof data.phoneNumber === 'string' ? data.phoneNumber : undefined,
+                notes: typeof data.notes === 'string' ? data.notes : undefined,
+                approvalState: data.approvalState === 'mutual' ? 'mutual' : 'pending',
+                createdAt,
+                updatedAt,
+              } as FamilyMember);
+            });
+            callback(members);
+          } catch (error) {
+            logger.error('Error processing family member snapshot:', error);
+            onError?.(error);
+          }
+        },
+        (error: any) => {
+          if (isDisposed) return;
+          currentUnsub = null;
+          const code = error?.code || '';
+          if (code === 'permission-denied' || code === 'unauthenticated') {
+            // Only treat as permanent if we're actually authenticated
+            // During cold start, auth may not be ready yet → retry instead of giving up
+            let isAuthenticated = false;
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-var-requires
+              const { getFirebaseAuth } = require('../../../lib/firebase');
+              isAuthenticated = !!getFirebaseAuth()?.currentUser;
+            } catch { /* auth check failed, treat as transient */ }
+            if (isAuthenticated) {
+              logger.error(`subscribeToFamilyMembers: permanent error (${code}) for ${familyId} (user authenticated)`);
+              onError?.(error);
+              return;
+            }
+            logger.warn(`subscribeToFamilyMembers: auth error (${code}) for ${familyId} but user not authenticated yet, retrying...`);
+            onError?.(error);
+            scheduleRetry();
+            return;
+          }
+          logger.warn(`subscribeToFamilyMembers: transient error for ${familyId}, scheduling retry`, error);
           onError?.(error);
-        }
-      },
-      (error: any) => {
-        if (error?.code === 'permission-denied') {
-          logger.debug(`Family subscription for ${familyId}: permission denied`);
-          return;
-        }
-        logger.warn(`Family subscription error for ${familyId}:`, error);
-        onError?.(error);
-      },
-    );
+          scheduleRetry();
+        },
+      );
 
-    logger.info(`✅ Subscribed to family members: families/${familyId}`);
-    return unsubscribe;
-  } catch (error) {
-    logger.error('Failed to subscribe to family members:', error);
-    return () => { };
+      if (isDisposed) {
+        try { unsubscribe(); } catch { /* no-op */ }
+        return false;
+      }
+
+      if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+      currentUnsub = unsubscribe;
+      logger.info(`✅ Subscribed to family members: families/${familyId}`);
+      return true;
+    } catch (error: unknown) {
+      if (isDisposed) return false;
+      const code = getErrorCode(error);
+      if (code === 'permission-denied') {
+        logger.debug(`Family subscription for ${familyId}: permission denied`);
+        return false;
+      }
+      logger.warn('subscribeToFamilyMembers startSnapshot error:', error);
+      onError?.(error);
+      return false;
+    }
+  };
+
+  const scheduleRetry = () => {
+    if (isDisposed || retryCount >= MAX_RETRIES) {
+      if (retryCount >= MAX_RETRIES) {
+        logger.error(`subscribeToFamilyMembers: exhausted ${MAX_RETRIES} retries for ${familyId}`);
+      }
+      return;
+    }
+    retryCount++;
+    const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+    logger.info(`subscribeToFamilyMembers: retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      if (!isDisposed) {
+        await startSnapshot();
+      }
+    }, delay);
+  };
+
+  const success = await startSnapshot();
+  if (!success && !isDisposed) {
+    scheduleRetry();
   }
+
+  return cleanup;
 }
 
 // ─── BIDIRECTIONAL SYNC ──────────────────────────────
@@ -695,20 +903,29 @@ export async function syncRemoteFamilyAdditions(
 
     const now = Date.now();
     const allMembers: FamilyMember[] = [];
-    const seenFamilyIds = new Set<string>();
+    const seenMemberUids = new Set<string>();
 
     for (const linkDoc of linksSnap.docs) {
       const data = linkDoc.data();
+      if (!isMutualFamilyLinkData(data)) continue;
+
+      const otherUid = linkDoc.id;
+      if (!otherUid || otherUid === myUid || seenMemberUids.has(otherUid)) continue;
+
       const familyId = data.familyId;
       if (!familyId || typeof familyId !== 'string') continue;
-      if (seenFamilyIds.has(familyId)) continue;
-      seenFamilyIds.add(familyId);
+      seenMemberUids.add(otherUid);
 
-      // Ensure I have the familyIds mapping (only owner can write, so this is for MY doc)
+      const ownerUid = typeof data.requestedBy === 'string'
+        ? data.requestedBy
+        : (typeof data.adderUid === 'string' ? data.adderUid : otherUid);
+
+      // Keep remote family mapping as relationship metadata only.
+      // getOrCreateDefaultFamily() intentionally ignores role='member' mappings.
       try {
         await setDoc(
           doc(db, 'users', myUid, 'familyIds', familyId),
-          { active: true, joinedAt: now },
+          { active: true, joinedAt: now, ownerUid, role: 'member' },
           { merge: true }
         );
       } catch (err) {
@@ -744,21 +961,27 @@ export async function syncRemoteFamilyAdditions(
         // best effort
       }
 
-      // Load members from this family
-      try {
-        const members = await loadFamilyMembers(familyId);
-        for (const m of members) {
-          if (m.uid && m.uid !== myUid) {
-            allMembers.push(m);
-          }
-        }
-      } catch {
-        // best effort — will retry next launch
-      }
+      const displayName = typeof data.adderName === 'string'
+        ? data.adderName
+        : (typeof data.name === 'string' ? data.name : 'Aile Üyesi');
+
+      allMembers.push({
+        id: otherUid,
+        uid: otherUid,
+        familyId,
+        name: displayName,
+        status: 'unknown',
+        approvalState: 'mutual',
+        lastSeen: 0,
+        latitude: 0,
+        longitude: 0,
+        createdAt: normalizeTimestampMs(data.addedAt ?? data.acceptedAt, now),
+        updatedAt: now,
+      } as FamilyMember);
     }
 
     if (allMembers.length > 0) {
-      logger.info(`✅ Synced ${allMembers.length} remote family members from ${seenFamilyIds.size} families`);
+      logger.info(`✅ Synced ${allMembers.length} accepted remote family links`);
     }
 
     return allMembers;
@@ -772,115 +995,185 @@ export async function syncRemoteFamilyAdditions(
  * Subscribe to real-time changes on users/{myUid}/familyMembers.
  * Detects when another user adds us to their family.
  * Calls onNewMember for each newly detected family member link.
+ * Uses retry-with-backoff for transient errors.
  */
 export async function subscribeToFamilyMemberLinks(
   myUid: string,
   myDisplayName: string,
   onNewMember: (member: FamilyMember, familyId: string) => void,
 ): Promise<() => void> {
-  try {
-    const db = await getFirestoreInstanceAsync();
-    if (!db) return () => { };
+  let isDisposed = false;
+  let currentUnsub: (() => void) | null = null;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  // CRITICAL FIX: Was 5 — subscription died permanently after 5 errors. Now 20.
+  const MAX_RETRIES = 20;
+  const knownLinks = new Set<string>();
+  let isFirstSnapshot = true;
 
-    const linksRef = collection(db, 'users', myUid, 'familyMembers');
-    const knownLinks = new Set<string>();
-    let isFirstSnapshot = true;
+  const cleanup = () => {
+    isDisposed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } currentUnsub = null; }
+  };
 
-    const unsubscribe = onSnapshot(
-      linksRef,
-      async (snapshot) => {
-        try {
-          const now = Date.now();
+  const startSnapshot = async (): Promise<boolean> => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db || isDisposed) return false;
 
-          for (const change of snapshot.docChanges()) {
-            if (change.type !== 'added') continue;
+      const linksRef = collection(db, 'users', myUid, 'familyMembers');
 
-            const otherUid = change.doc.id;
-            if (otherUid === myUid) continue;
-            if (knownLinks.has(otherUid)) continue;
-            knownLinks.add(otherUid);
+      const unsubscribe = onSnapshot(
+        linksRef,
+        async (snapshot) => {
+          if (isDisposed) return;
+          retryCount = 0; // Reset on successful snapshot
+          try {
+            const now = Date.now();
 
-            // Skip processing on first snapshot (handled by syncRemoteFamilyAdditions)
-            if (isFirstSnapshot) continue;
+            for (const change of snapshot.docChanges()) {
+              const otherUid = change.doc.id;
+              if (otherUid === myUid) continue;
 
-            const data = change.doc.data();
-            const familyId = data.familyId;
-            if (!familyId || typeof familyId !== 'string') continue;
-
-            logger.info(`📥 Remote family addition detected: ${otherUid} added me to family ${familyId}`);
-
-            // Create my own familyIds mapping
-            try {
-              await setDoc(
-                doc(db, 'users', myUid, 'familyIds', familyId),
-                { active: true, joinedAt: now },
-                { merge: true }
-              );
-            } catch { /* best effort */ }
-
-            // Add myself to the family members array
-            try {
-              const familyRef = doc(db, 'families', familyId);
-              await updateDoc(familyRef, {
-                members: arrayUnion(myUid),
-                updatedAt: now,
-              });
-            } catch { /* best effort */ }
-
-            // Ensure my member doc exists in the family
-            try {
-              const myMemberRef = doc(db, 'families', familyId, 'members', myUid);
-              const myMemberDoc = await getDoc(myMemberRef);
-              if (!myMemberDoc.exists()) {
-                await setDoc(myMemberRef, {
-                  uid: myUid,
-                  name: myDisplayName,
-                  status: 'unknown',
-                  joinedAt: now,
-                  createdAt: now,
-                  updatedAt: now,
-                }, { merge: true });
+              const data = change.doc.data();
+              if (change.type === 'removed') {
+                knownLinks.delete(otherUid);
+                continue;
               }
-            } catch { /* best effort */ }
+              if (change.type !== 'added' && change.type !== 'modified') continue;
 
-            // Resolve the adder's info to create a FamilyMember
-            const adderName = typeof data.adderName === 'string' ? data.adderName : 'Aile Üyesi';
-            const member: FamilyMember = {
-              id: otherUid,
-              uid: otherUid,
-              familyId,
-              name: adderName,
-              status: 'unknown',
-              lastSeen: 0,
-              latitude: 0,
-              longitude: 0,
-              createdAt: typeof data.addedAt === 'number' ? data.addedAt : now,
-              updatedAt: now,
-            } as FamilyMember;
+              if (!isMutualFamilyLinkData(data)) continue;
+              if (knownLinks.has(otherUid)) continue;
 
-            onNewMember(member, familyId);
+              // Skip processing accepted links on first snapshot (handled by syncRemoteFamilyAdditions)
+              if (isFirstSnapshot) {
+                knownLinks.add(otherUid);
+                continue;
+              }
+
+              knownLinks.add(otherUid);
+              const familyId = data.familyId;
+              if (!familyId || typeof familyId !== 'string') continue;
+
+              logger.info(`Remote family addition detected: ${otherUid} added me to family ${familyId}`);
+
+              // Create my own familyIds mapping
+              try {
+                await setDoc(
+                  doc(db, 'users', myUid, 'familyIds', familyId),
+                  { active: true, joinedAt: now },
+                  { merge: true }
+                );
+              } catch { /* best effort */ }
+
+              // Add myself to the family members array
+              try {
+                const familyRef = doc(db, 'families', familyId);
+                await updateDoc(familyRef, {
+                  members: arrayUnion(myUid),
+                  updatedAt: now,
+                });
+              } catch { /* best effort */ }
+
+              // Ensure my member doc exists in the family
+              try {
+                const myMemberRef = doc(db, 'families', familyId, 'members', myUid);
+                const myMemberDoc = await getDoc(myMemberRef);
+                if (!myMemberDoc.exists()) {
+                  await setDoc(myMemberRef, {
+                    uid: myUid,
+                    name: myDisplayName,
+                    status: 'unknown',
+                    joinedAt: now,
+                    createdAt: now,
+                    updatedAt: now,
+                  }, { merge: true });
+                }
+              } catch { /* best effort */ }
+
+              // Resolve the adder's info to create a FamilyMember
+              const adderName = typeof data.adderName === 'string' ? data.adderName : 'Aile Üyesi';
+              const member: FamilyMember = {
+                id: otherUid,
+                uid: otherUid,
+                familyId,
+                name: adderName,
+                status: 'unknown',
+                approvalState: 'mutual',
+                lastSeen: 0,
+                latitude: 0,
+                longitude: 0,
+                createdAt: typeof data.addedAt === 'number' ? data.addedAt : now,
+                updatedAt: now,
+              } as FamilyMember;
+
+              onNewMember(member, familyId);
+            }
+
+            isFirstSnapshot = false;
+          } catch (error) {
+            logger.error('Error processing familyMemberLinks snapshot:', error);
           }
+        },
+        (error: any) => {
+          if (isDisposed) return;
+          currentUnsub = null;
+          const code = error?.code || '';
+          if (code === 'permission-denied' || code === 'unauthenticated') {
+            logger.error(`subscribeToFamilyMemberLinks: permanent error (${code}) for ${myUid}`);
+            return;
+          }
+          logger.warn(`subscribeToFamilyMemberLinks: transient error for ${myUid}, scheduling retry`, error);
+          scheduleRetry();
+        },
+      );
 
-          isFirstSnapshot = false;
-        } catch (error) {
-          logger.error('Error processing familyMemberLinks snapshot:', error);
-        }
-      },
-      (error: any) => {
-        if (error?.code === 'permission-denied') {
-          logger.debug('familyMemberLinks subscription: permission denied');
-          return;
-        }
-        logger.warn('familyMemberLinks subscription error:', error);
-      },
-    );
+      if (isDisposed) {
+        try { unsubscribe(); } catch { /* no-op */ }
+        return false;
+      }
 
-    logger.info(`✅ Subscribed to family member links: users/${myUid}/familyMembers`);
-    return unsubscribe;
-  } catch (error) {
-    logger.error('Failed to subscribe to family member links:', error);
-    return () => { };
+      if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+      currentUnsub = unsubscribe;
+      logger.info(`✅ Subscribed to family member links: users/${myUid}/familyMembers`);
+      return true;
+    } catch (error: unknown) {
+      if (isDisposed) return false;
+      const code = getErrorCode(error);
+      if (code === 'permission-denied') {
+        logger.debug('familyMemberLinks subscription: permission denied');
+        return false;
+      }
+      logger.warn('subscribeToFamilyMemberLinks startSnapshot error:', error);
+      return false;
+    }
+  };
+
+  const scheduleRetry = () => {
+    if (isDisposed || retryCount >= MAX_RETRIES) {
+      if (retryCount >= MAX_RETRIES) {
+        logger.error(`subscribeToFamilyMemberLinks: exhausted ${MAX_RETRIES} retries for ${myUid}`);
+      }
+      return;
+    }
+    retryCount++;
+    const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+    logger.info(`subscribeToFamilyMemberLinks: retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      if (!isDisposed) {
+        await startSnapshot();
+      }
+    }, delay);
+  };
+
+  const success = await startSnapshot();
+  if (!success && !isDisposed) {
+    scheduleRetry();
   }
+
+  return cleanup;
 }
 
 // ─── LEGACY COMPAT ──────────────────────────────────

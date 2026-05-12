@@ -22,7 +22,7 @@ import {
     Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as haptics from '../../utils/haptics';
 import { turkeyAssemblyPointsService, AssemblyPoint } from '../../services/TurkeyAssemblyPointsService';
@@ -100,9 +100,9 @@ const SafeZoneNavigator = memo(({ visible, userLocation, onClose, onNavigate }: 
     const navigateToPoint = useCallback((point: AssemblyPoint & { distance: number }) => {
         haptics.impactMedium();
         const url = Platform.OS === 'ios'
-            ? `http://maps.apple.com/?daddr=${point.latitude},${point.longitude}&dirflg=w`
+            ? `https://maps.apple.com/?daddr=${point.latitude},${point.longitude}&dirflg=w`
             : `https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}&travelmode=walking`;
-        Linking.openURL(url).catch(() => { });
+        Linking.openURL(url).catch(e => { if (__DEV__) console.debug('Open maps URL failed:', e); });
         onNavigate?.(point);
     }, [onNavigate]);
 

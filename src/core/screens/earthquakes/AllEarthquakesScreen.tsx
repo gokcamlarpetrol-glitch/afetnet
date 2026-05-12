@@ -63,6 +63,27 @@ type LocationFilter = 25 | 50 | 100 | 999999; // 999999 = all Turkey
 type MagnitudeFilter = 0 | 3 | 4 | 5;
 type SourceFilter = 'AFAD' | 'KANDILLI' | 'USGS' | 'EMSC' | null; // null = all sources
 
+// Module-level pure functions (avoid re-creation per list item)
+const getSourceColor = (source: string) => {
+  switch (source) {
+    case 'AFAD': return '#3b82f6';
+    case 'KANDILLI': return '#f59e0b';
+    case 'USGS': return '#10b981';
+    case 'EMSC': return '#8b5cf6';
+    default: return '#64748b';
+  }
+};
+
+const getSourceLabel = (source: string) => {
+  return source === 'KANDILLI' ? 'Kandilli' : source;
+};
+
+const getMagnitudeColor = (mag: number) => {
+  if (mag >= 5.0) return colors.earthquake.major;
+  if (mag >= 4.0) return colors.earthquake.moderate;
+  return colors.earthquake.minor;
+};
+
 export default function AllEarthquakesScreen({ navigation }: { navigation: AllEarthquakesNavigationProp }) {
   const insets = useSafeAreaInsets();
   const { earthquakes, loading, refresh, lastUpdate } = useEarthquakes(); // CRITICAL: Get lastUpdate from hook
@@ -76,7 +97,9 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
   const [locationStatus, setLocationStatus] = useState<'unknown' | 'requesting' | 'granted' | 'denied' | 'error'>('unknown');
 
   useEffect(() => {
-    // ELITE: Ekran açıldığında en güncel veriyi çek
+    // ELITE: Ekran açıldığında arka planda güncelle.
+    // Store zaten MMKV cache'den anlık yükleniyor (earthquakeStore synchronous init).
+    // Burada sadece taze veri çekiyoruz — mevcut listeyi silmeden.
     refresh().catch((error) => {
       logger.error('Failed to refresh earthquakes:', error);
     });
@@ -86,7 +109,9 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
   const requestLocationPermission = useCallback(async () => {
     try {
       setLocationStatus('requesting');
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      // CRITICAL FIX: Apple 5.1.1 — never prompt for permission on mount.
+      // Use getForegroundPermissionsAsync (check-only) instead of requestForegroundPermissionsAsync.
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         setLocationStatus('denied');
         setUserLocation(null);
@@ -195,13 +220,7 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
     return reference ? formatTimestamp(reference.time) : '---';
   }, [lastUpdate, filteredEarthquakes, earthquakes]); // CRITICAL: Include lastUpdate in dependencies
 
-  const getMagnitudeColor = (mag: number) => {
-    if (mag >= 5.0) return colors.earthquake.major;
-    if (mag >= 4.0) return colors.earthquake.moderate;
-    return colors.earthquake.minor;
-  };
-
-  const renderItem = ({ item }: { item: Earthquake }) => {
+  const renderItem = useCallback(({ item }: { item: Earthquake }) => {
     const distance = userLocation
       ? Math.round(
         calculateDistance(
@@ -212,26 +231,6 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
         )
       )
       : null;
-
-    // Source badge color
-    const getSourceColor = (source: string) => {
-      switch (source) {
-        case 'AFAD':
-          return '#3b82f6';
-        case 'KANDILLI':
-          return '#f59e0b';
-        case 'USGS':
-          return '#10b981';
-        case 'EMSC':
-          return '#8b5cf6';
-        default:
-          return '#64748b';
-      }
-    };
-
-    const getSourceLabel = (source: string) => {
-      return source === 'KANDILLI' ? 'Kandilli' : source;
-    };
 
     return (
       <TouchableOpacity
@@ -292,7 +291,7 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
         </TouchableOpacity>
       </TouchableOpacity>
     );
-  };
+  }, [userLocation, navigation]);
 
   return (
     <View style={styles.container}>
@@ -468,11 +467,6 @@ export default function AllEarthquakesScreen({ navigation }: { navigation: AllEa
         maxToRenderPerBatch={10}
         windowSize={10}
         initialNumToRender={10}
-        getItemLayout={(data, index) => ({
-          length: 100,
-          offset: 100 * index,
-          index,
-        })}
         ListEmptyComponent={
           loading ? null : (
             <View style={styles.emptyState}>

@@ -22,10 +22,6 @@ export type { StoredMessage, PendingACK, Mailbox } from './MeshStoreForwardServi
 export { meshEmergencyService, EmergencyReasonCode } from './MeshEmergencyService';
 export type { FamilyMember, EmergencySettings } from './MeshEmergencyService';
 
-// Q-Mesh Protocol (Low-Level)
-export { QMeshProtocol, PacketType, PacketPriority } from './QMeshProtocol';
-export type { QMeshPacket } from './QMeshProtocol';
-
 // Message Bridge
 export { meshMessageBridge } from './MeshMessageBridge';
 export type { BridgedMessage, MessageSource } from './MeshMessageBridge';

@@ -58,6 +58,13 @@ export interface EarthquakeNotifyData {
     isTest?: boolean;
     timeAdvance?: number;
     earthquakeId?: string;
+    /**
+     * Cross-pipeline dedup key (Sprint Audit Fix EEW-C1).
+     * 3 services (EEWService, MultiSourceEEWService, RealtimeEarthquakeMonitor)
+     * poll the same AFAD endpoint with different prefixed eventIds → duplicate
+     * notifications. eventKey normalizes by magnitude+coords+time-window.
+     */
+    eventKey?: string;
 }
 
 /** Data payload for SOS notifications */
@@ -182,6 +189,13 @@ class NotificationCenter {
     private settingsCacheTime = 0;
     private readonly SETTINGS_CACHE_TTL = 5000; // 5s cache
 
+    // REVIEW FIX: Cross-pipeline eventKey dedup (5 dakika window).
+    // 3 EEW servisi (EEWService, MultiSourceEEW, RealtimeMonitor) aynı depremi
+    // farklı eventId'lerle bildirebilir. eventKey magnitude+coords+time normalize
+    // edilmiş hali → 5dk içinde aynı eventKey gelirse dedup edilir.
+    private readonly eventKeyDedupMap = new Map<string, number>();
+    private static readonly EVENT_KEY_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
     // FIX: Track currently active conversation to suppress OS banner.
     // WhatsApp/Telegram suppress notifications when viewing the same chat.
     public currentlyViewingConversationId: string | null = null;
@@ -234,8 +248,15 @@ class NotificationCenter {
                         const presented = await Notifications.getPresentedNotificationsAsync();
                         for (const notif of presented) {
                             const nType = (notif?.request?.content?.data?.type || '').toLowerCase();
+                            // CRITICAL FIX (N5): Title fallback prevents dismissing real SOS notifications.
+                            // Some FCM payloads have empty/wrong data.type field; nType becomes ''.
+                            // Without title heuristic, a real SOS notification with type='' gets dismissed.
+                            const title = (notif?.request?.content?.title || '').toLowerCase();
+                            const titleHintsSos = title.includes('sos') || title.includes('enkaz') ||
+                                title.includes('acil') || title.includes('deprem') ||
+                                title.includes('yardım');
                             const isSosOrEew = nType.includes('sos') || nType === 'eew'
-                                || nType === 'earthquake' || nType === 'family_sos';
+                                || nType === 'earthquake' || nType === 'family_sos' || titleHintsSos;
                             if (!isSosOrEew) {
                                 await Notifications.dismissNotificationAsync(notif.request.identifier);
                             }
@@ -666,6 +687,29 @@ class NotificationCenter {
         source?: string,
     ): Promise<NotifyResult> {
         try {
+            // REVIEW FIX: eventKey-based cross-pipeline dedup BEFORE everything else.
+            // EEWService + MultiSourceEEWService + RealtimeEarthquakeMonitor aynı AFAD
+            // depremini farklı eventId'lerle bildirir. eventKey (mag+coords+time-window)
+            // 5 dakika içinde aynı görülürse second/third call silently dedup edilir.
+            const dataAsAny = data as Record<string, unknown>;
+            const eventKey = typeof dataAsAny.eventKey === 'string' ? dataAsAny.eventKey : null;
+            if (eventKey) {
+                const now = Date.now();
+                const lastSeen = this.eventKeyDedupMap.get(eventKey);
+                if (lastSeen !== undefined && now - lastSeen < NotificationCenter.EVENT_KEY_DEDUP_WINDOW_MS) {
+                    if (__DEV__) {
+                        logger.debug(`🚫 [${category}] Cross-pipeline dedup: eventKey=${eventKey} seen ${Math.floor((now - lastSeen) / 1000)}s ago (src: ${source || 'unknown'})`);
+                    }
+                    return { delivered: false, reason: 'Cross-pipeline duplicate (eventKey)', priority: 'low' };
+                }
+                this.eventKeyDedupMap.set(eventKey, now);
+                // Bound memory: keep last 500 entries
+                if (this.eventKeyDedupMap.size > 500) {
+                    const oldestKey = this.eventKeyDedupMap.keys().next().value;
+                    if (oldestKey) this.eventKeyDedupMap.delete(oldestKey);
+                }
+            }
+
             // Build payload
             const payload: NotificationPayload = {
                 category,

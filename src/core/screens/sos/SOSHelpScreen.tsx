@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
     FadeInDown, FadeInUp,
     useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, Easing,
+    cancelAnimation,
 } from 'react-native-reanimated';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
@@ -96,6 +97,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
     const firestoreUnsubRef = useRef<(() => void) | null>(null);
     const audioUnsubRef = useRef<(() => void) | null>(null);
+    const audioListenerSubRef = useRef<{ remove: () => void } | null>(null);
 
     // Pulse animation for SOS marker
     const pulseScale = useSharedValue(1);
@@ -108,6 +110,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
             -1,
             true,
         );
+        return () => cancelAnimation(pulseScale);
     }, [pulseScale]);
     const pulseStyle = useAnimatedStyle(() => ({
         transform: [{ scale: pulseScale.value }],
@@ -134,7 +137,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
 
         const startLocationWatch = async () => {
             try {
-                const { status } = await Location.requestForegroundPermissionsAsync();
+                const { status } = await Location.getForegroundPermissionsAsync();
                 if (status !== 'granted' || cancelled) return;
 
                 const sub = await Location.watchPositionAsync(
@@ -206,6 +209,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                     () => { /* permission errors are non-critical */ },
                 );
 
+                if (cancelled) {
+                    unsub();
+                    return;
+                }
                 firestoreUnsubRef.current = unsub;
             } catch (err) {
                 logger.warn('Firestore location listener failed:', err);
@@ -230,9 +237,9 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         const a =
             Math.sin(dLat / 2) * Math.sin(dLat / 2) +
             Math.cos((myLocation.latitude * Math.PI) / 180) *
-                Math.cos((senderLocation.latitude * Math.PI) / 180) *
-                Math.sin(dLng / 2) *
-                Math.sin(dLng / 2);
+            Math.cos((senderLocation.latitude * Math.PI) / 180) *
+            Math.sin(dLng / 2) *
+            Math.sin(dLng / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         setDistance(R * c);
     }, [myLocation, senderLocation]);
@@ -276,9 +283,12 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         };
     }, [signalId]);
 
-    // Fit map to show both locations
+    // Fit map to show both locations — only on initial load
+    // (don't override manual pan/zoom by the rescuer)
+    const hasInitialFitRef = useRef(false);
     useEffect(() => {
-        if (!mapRef.current || !senderLocation) return;
+        if (!mapRef.current || !senderLocation || hasInitialFitRef.current) return;
+        hasInitialFitRef.current = true;
 
         const coords = [{ latitude: senderLocation.latitude, longitude: senderLocation.longitude }];
         if (myLocation) {
@@ -296,6 +306,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     // Cleanup audio on unmount
     useEffect(() => {
         return () => {
+            if (audioListenerSubRef.current) {
+                try { audioListenerSubRef.current.remove(); } catch { /* */ }
+                audioListenerSubRef.current = null;
+            }
             if (soundRef.current) {
                 try { soundRef.current.remove(); } catch { /* */ }
                 soundRef.current = null;
@@ -328,9 +342,18 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
             setIsPlayingAudio(true);
             player.play();
 
-            player.addListener('playbackStatusUpdate', (status: any) => {
+            // CRITICAL FIX: Track the listener subscription so it can be cleaned up on unmount.
+            // Without this, the listener leaks and can fire after the component is unmounted.
+            if (audioListenerSubRef.current) {
+                try { audioListenerSubRef.current.remove(); } catch { /* */ }
+            }
+            audioListenerSubRef.current = player.addListener('playbackStatusUpdate', (status: any) => {
                 if (status?.didJustFinish || status?.isBuffering === false && status?.positionMillis >= status?.durationMillis) {
                     setIsPlayingAudio(false);
+                    if (audioListenerSubRef.current) {
+                        try { audioListenerSubRef.current.remove(); } catch { /* */ }
+                        audioListenerSubRef.current = null;
+                    }
                     try { player.remove(); } catch { /* */ }
                     soundRef.current = null;
                 }
@@ -349,7 +372,12 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         try {
             haptics.impactMedium();
             const deviceId = senderDeviceId || senderUid || '';
-            await sosChannelRouter.sendRescueACK(signalId || '', deviceId, {
+            // CRITICAL FIX: Validate signalId before sending ACK.
+            // Empty signalId creates invalid Firestore paths (e.g., 'sos_broadcasts//acks/...')
+            if (!signalId || signalId.trim().length === 0) {
+                throw new Error('Sinyal kimliği bulunamadı — ACK gönderilemez.');
+            }
+            await sosChannelRouter.sendRescueACK(signalId, deviceId, {
                 sosSenderUid: senderUid,
             });
             setAckSent(true);
@@ -563,11 +591,11 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                                     styles.mapOverlayButton,
                                     pressed && { opacity: 0.8 },
                                 ]}
-                                onPress={handleOpenDirections}
+                                onPress={handleOpenLocationOnMap}
                             >
-                                <Ionicons name="navigate" size={18} color="#fff" />
+                                <Ionicons name="map" size={18} color="#fff" />
                                 <Text style={styles.mapOverlayButtonText}>
-                                    Yol Tarifi {distanceText ? `(${distanceText})` : ''}
+                                    Konuma Git {distanceText ? `(${distanceText})` : ''}
                                 </Text>
                             </Pressable>
                             <Pressable
@@ -576,10 +604,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                                     styles.mapOverlayButtonSecondary,
                                     pressed && { opacity: 0.8 },
                                 ]}
-                                onPress={handleOpenLocationOnMap}
+                                onPress={handleOpenDirections}
                             >
-                                <Ionicons name="map" size={18} color="#fff" />
-                                <Text style={styles.mapOverlayButtonText}>Uygulama Haritası</Text>
+                                <Ionicons name="navigate" size={18} color="#fff" />
+                                <Text style={styles.mapOverlayButtonText}>GPS Tarifi</Text>
                             </Pressable>
                         </View>
                     </Animated.View>
@@ -594,9 +622,19 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                         <View style={styles.senderInfo}>
                             <Text style={styles.senderName}>{senderName}</Text>
                             {distanceText && (
-                                <Text style={styles.distanceText}>
-                                    {distanceText} uzaklıkta
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                    <Ionicons
+                                        name={distance !== null && distance < 100 ? "flame" : "location"}
+                                        size={14}
+                                        color={distance !== null && distance < 100 ? "#ef4444" : "#94a3b8"}
+                                    />
+                                    <Text style={[
+                                        styles.distanceText,
+                                        distance !== null && distance < 100 && { color: '#ef4444', fontWeight: '800' }
+                                    ]}>
+                                        {distance !== null && distance < 100 ? `ÇOK YAKIN: ${distanceText}` : `${distanceText} uzaklıkta`}
+                                    </Text>
+                                </View>
                             )}
                         </View>
                         {trapped && (
@@ -716,7 +754,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                         </Text>
                     </Pressable>
 
-                    {/* Directions with walking/driving */}
+                    {/* In-app map navigation */}
                     {senderLocation && (
                         <Pressable
                             style={({ pressed }) => [
@@ -724,11 +762,11 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                                 styles.actionButtonDirections,
                                 pressed && { opacity: 0.8 },
                             ]}
-                            onPress={handleOpenDirections}
+                            onPress={handleOpenLocationOnMap}
                         >
-                            <Ionicons name="navigate" size={24} color="#fff" />
+                            <Ionicons name="map" size={24} color="#fff" />
                             <Text style={styles.actionButtonText}>
-                                Yol Tarifi {distanceText ? `(${distanceText})` : ''}
+                                Konuma Git {distanceText ? `(${distanceText})` : ''}
                             </Text>
                         </Pressable>
                     )}

@@ -71,6 +71,19 @@ credentials.json
 # Temporary files
 *.log
 *.tmp
+.tsbuildinfo
+coverage/
+
+# Debug/test scripts (root level)
+debug-test.js
+fetch_*.js
+patch*.js
+test-store.js
+testClient.js
+test_*.js
+verify_*.js
+functions_log.txt
+firestore_errors.txt
 
 # IDE & Editor
 .vscode/
@@ -89,3 +102,10 @@ Thumbs.db
 .env.local
 .env.*.local
 .env.bak
+
+# Cloud Functions
+functions/lib/
+functions/.env
+functions/.env.local
+functions/testAdmin.js
+functions/testFirestore.js

@@ -35,6 +35,7 @@ export async function processEarthquakeNotifications(
     priorityLow: 'normal' | 'low';
     notificationPush: boolean;
   },
+  options?: { isStartup?: boolean },
 ): Promise<void> {
   if (earthquakes.length === 0) {
     return;
@@ -43,14 +44,17 @@ export async function processEarthquakeNotifications(
   const latestEq = earthquakes[0];
   const lastCheckedEq = DirectStorage.getString(LAST_CHECKED_KEY) ?? null;
 
-  // NOTIFICATION GATEWAY FIX: Skip stale earthquakes (older than 15 minutes)
-  // This prevents the notification flood when the app is reopened and
-  // re-fetches historical earthquake data that was already notified.
-  const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+  // NOTIFICATION GATEWAY FIX: Skip stale earthquakes
+  // Normal mode: 15 min threshold prevents notification flood on app reopen.
+  // Startup mode: Use 60 min for significant (M5+) earthquakes so they aren't
+  // missed after a crash+restart. Smaller earthquakes still use 15 min.
+  const isStartup = options?.isStartup === true;
+  const isSignificant = latestEq.magnitude >= 5.0;
+  const STALE_THRESHOLD_MS = (isStartup && isSignificant) ? 60 * 60 * 1000 : 15 * 60 * 1000;
   const earthquakeAge = Date.now() - latestEq.time;
   if (earthquakeAge > STALE_THRESHOLD_MS) {
     if (__DEV__) {
-      logger.info(`⏭️ Stale earthquake skipped: M${latestEq.magnitude.toFixed(1)} ${latestEq.location} (${Math.round(earthquakeAge / 60000)}min old)`);
+      logger.info(`⏭️ Stale earthquake skipped: M${latestEq.magnitude.toFixed(1)} ${latestEq.location} (${Math.round(earthquakeAge / 60000)}min old, threshold=${Math.round(STALE_THRESHOLD_MS / 60000)}min)`);
     }
     // Still update the last-checked marker so we don't re-check it
     DirectStorage.setString(LAST_CHECKED_KEY, latestEq.id);

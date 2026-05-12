@@ -110,6 +110,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
+  newArchEnabled: false,
   splash: {
     image: "./assets/splash.png",
     resizeMode: "cover",
@@ -123,6 +124,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-location",
     "expo-notifications",
     "expo-web-browser",
+    "expo-asset",
     [
       "expo-camera",
       {
@@ -148,9 +150,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           "jsEngine": "hermes" // ELITE SECURITY: Bytecode compilation
         },
         "android": {
-          "compileSdkVersion": 34,
-          "targetSdkVersion": 34,
-          "buildToolsVersion": "34.0.0",
+          "compileSdkVersion": 35,
+          "targetSdkVersion": 35,
+          "buildToolsVersion": "35.0.0",
           "jsEngine": "hermes", // ELITE SECURITY: Bytecode compilation
           "kotlinVersion": "2.1.20",
           "enableProguardInReleaseBuilds": true, // ELITE SECURITY: Obfuscation
@@ -195,14 +197,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // location: FamilyTrackingService + BackgroundEEWService location keep-alive + BackgroundLocationTask
       // bluetooth-central: HighPerformanceBle BLE scanning for offline mesh networking
       // bluetooth-peripheral: AfetNetBlePeripheral GATT server for mesh peer discovery
-      // processing: expo-background-task BGProcessingTask (mesh sync, seismic monitoring)
       UIBackgroundModes: [
         "fetch",
         "remote-notification",
         "location",
         "bluetooth-central",
         "bluetooth-peripheral",
-        "processing",
       ],
       ITSAppUsesNonExemptEncryption: false,
       // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
@@ -220,7 +220,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "http",
         "https",
         "maps",
-        "comgooglemaps",
         "whatsapp",
       ],
     },
@@ -254,6 +253,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.RECORD_AUDIO",
       "android.permission.INTERNET",
       "android.permission.VIBRATE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_LOCATION",
+      "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+      "android.permission.POST_NOTIFICATIONS",
     ],
     googleServicesFile: resolvedAndroidGoogleServicesFile,
   },

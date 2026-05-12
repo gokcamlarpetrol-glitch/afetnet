@@ -62,12 +62,12 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
 
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../utils/device');
-      const deviceId = await getDeviceId();
-      if (deviceId) {
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      const uid = getFirebaseAuth()?.currentUser?.uid;
+      if (uid) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
         const { location } = get();
-        await firebaseDataService.saveStatusUpdate(deviceId, {
+        await firebaseDataService.saveStatusUpdate(uid, {
           status,
           location: location || null,
           timestamp: Date.now(),
@@ -78,7 +78,6 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
     }
 
     // CRITICAL: Send to backend for rescue coordination
-    // ELITE: This ensures rescue teams know user's current status
     try {
       const { backendEmergencyService } = await import('../services/BackendEmergencyService');
       if (backendEmergencyService.initialized) {
@@ -104,11 +103,11 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
 
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../utils/device');
-      const deviceId = await getDeviceId();
-      if (deviceId) {
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      const uid = getFirebaseAuth()?.currentUser?.uid;
+      if (uid) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
-        await firebaseDataService.saveLocationUpdate(deviceId, {
+        await firebaseDataService.saveLocationUpdate(uid, {
           latitude: location.latitude,
           longitude: location.longitude,
           accuracy: null,
@@ -129,11 +128,11 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
 
     // Save to Firebase
     try {
-      const { getDeviceId } = await import('../utils/device');
-      const deviceId = await getDeviceId();
-      if (deviceId) {
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      const uid = getFirebaseAuth()?.currentUser?.uid;
+      if (uid) {
         const { firebaseDataService } = await import('../services/FirebaseDataService');
-        await firebaseDataService.saveStatusUpdate(deviceId, {
+        await firebaseDataService.saveStatusUpdate(uid, {
           status,
           location: location || null,
           timestamp: Date.now(),
@@ -144,7 +143,6 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
     }
 
     // CRITICAL: Send to backend for rescue coordination
-    // ELITE: This ensures rescue teams know user's current status
     try {
       const { backendEmergencyService } = await import('../services/BackendEmergencyService');
       if (backendEmergencyService.initialized) {
@@ -164,6 +162,24 @@ export const useUserStatusStore = create<UserStatusState & UserStatusActions>((s
     }
   },
 
-  reset: () => set(initialState),
+  reset: () => {
+    set(initialState);
+
+    // AUDIT FIX: Notify backend of status reset
+    (async () => {
+      try {
+        const { getFirebaseAuth } = await import('../../lib/firebase');
+        const auth = getFirebaseAuth();
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          const { doc, updateDoc } = await import('firebase/firestore');
+          const { getFirestoreInstanceAsync } = await import('../services/firebase/FirebaseInstanceManager');
+          const db = await getFirestoreInstanceAsync();
+          if (!db) return;
+          await updateDoc(doc(db, 'users', uid), { status: 'safe', updatedAt: new Date() });
+        }
+      } catch { /* best-effort during reset */ }
+    })();
+  },
 }));
 

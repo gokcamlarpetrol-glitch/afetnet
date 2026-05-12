@@ -12,7 +12,7 @@
  */
 
 import { getErrorMessage } from '../../utils/errorUtils';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -32,6 +32,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeIn, SlideInRight } from 'react-native-reanimated';
 import { useHealthProfileStore, type HealthProfile, type EmergencyContact } from '../../stores/healthProfileStore';
+import { KVKKConsentSection } from '../../components/compliance/KVKKConsentSection';
 import * as haptics from '../../utils/haptics';
 import { colors, typography, spacing } from '../../theme';
 import { styles } from './HealthProfileScreen.styles';
@@ -144,7 +145,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
     return { value: bmi.toFixed(1), category, color };
   }, []);
 
-  const bmiData = calculateBMI(formData.height, formData.weight);
+  const bmiData = useMemo(() => calculateBMI(formData.height, formData.weight), [formData.height, formData.weight, calculateBMI]);
 
   useEffect(() => {
     const loadProfileData = async () => {
@@ -1128,8 +1129,8 @@ AfetNet - Hayat Kurtaran Teknoloji
                       Share.share({
                         message: emergencyCardData,
                         title: 'Acil Durum Kartım',
-                      }).catch(() => { /* user cancelled */ });
-                    }).catch(() => { /* module load failed */ });
+                      }).catch(e => { if (__DEV__) console.debug('Share cancelled or failed:', e); });
+                    }).catch(e => { if (__DEV__) console.debug('Share module load failed:', e); });
                   }}
                 >
                   <LinearGradient
@@ -1273,6 +1274,11 @@ AfetNet - Hayat Kurtaran Teknoloji
               </Text>
             </View>
           )}
+        </Animated.View>
+
+        {/* KVKK Madde 6 — Açık Rıza Toggles (varsayılan kapalı) */}
+        <Animated.View entering={FadeInDown.delay(50)}>
+          <KVKKConsentSection />
         </Animated.View>
 
         {/* Render all categories */}

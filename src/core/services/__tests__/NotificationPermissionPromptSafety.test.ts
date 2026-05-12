@@ -23,6 +23,27 @@ describe('Notification startup prompt safety', () => {
     expect(initializeBlock).not.toContain('requestPermissionsAsync');
   });
 
+  it('NotificationCenter initialize checks status but never prompts on app start', () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'notifications/NotificationCenter.ts'),
+      'utf8',
+    );
+    const initializeBlock = source.match(/async initialize\(\): Promise<void> \{[\s\S]*?this\.isInitialized = true;/s)?.[0] || '';
+
+    expect(initializeBlock).toContain('getPermissionStatus');
+    expect(initializeBlock).not.toContain('requestPermissions(');
+    expect(initializeBlock).toContain('deferred');
+  });
+
+  it('FCMTokenService initialize does not prompt unless explicitly allowed', () => {
+    const source = readServiceFile('FCMTokenService');
+    const initializeBlock = source.match(/async initialize\(options:[\s\S]*?\/\/ ==================== ANDROID CHANNELS/s)?.[0] || '';
+
+    expect(initializeBlock).toContain('allowPermissionPrompt');
+    expect(initializeBlock).toContain("options.allowPermissionPrompt === true");
+    expect(initializeBlock).toContain('getPermissionsAsync');
+  });
+
   it('UltraFastEEWNotification warmup checks status but does not open prompt', () => {
     const source = readServiceFile('UltraFastEEWNotification');
     const warmupBlock = source.match(/async warmup\(\): Promise<void> \{[\s\S]*?prewarmTTS\(\);/s)?.[0] || '';

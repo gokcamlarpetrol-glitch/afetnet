@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView, Text, Pressable } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { useMapStore, MapFilters } from '../../../stores/mapStore';
 import { colors } from '../../../theme';

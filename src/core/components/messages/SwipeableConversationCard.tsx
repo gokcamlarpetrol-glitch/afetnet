@@ -41,7 +41,7 @@ function formatRelativeTime(timestamp: number): string {
     a.getDate() === b.getDate();
 
   if (isSameDay(date, today)) {
-    return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
   }
   if (isSameDay(date, yesterday)) return 'Dün';
 
@@ -52,7 +52,7 @@ function formatRelativeTime(timestamp: number): string {
   }
 
   // Older: dd MMM
-  return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+  return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', timeZone: 'Europe/Istanbul' });
 }
 
 // ─── Delivery status tick helper ─────────────────────────────────────────────
@@ -317,8 +317,7 @@ export const SwipeableConversationCard = React.memo(
     prev.item.status === next.item.status &&
     prev.item.lastMessageStatus === next.item.lastMessageStatus &&
     prev.item.lastMessageFrom === next.item.lastMessageFrom &&
-    prev.typingActive === next.typingActive &&
-    prev.index === next.index,
+    prev.typingActive === next.typingActive,
 );
 
 const styles = StyleSheet.create({

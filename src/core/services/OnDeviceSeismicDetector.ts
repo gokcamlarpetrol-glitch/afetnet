@@ -93,8 +93,9 @@ const DEFAULT_CONFIG: DetectorConfig = {
     backgroundEnabled: true,
 };
 
-// PRODUCTION: Cooldown between alerts to prevent notification spam
-const ALERT_COOLDOWN_MS = 120000; // 120 seconds (2 min) minimum between alerts
+// ELITE: 60s cooldown allows rapid aftershock detection (e.g. Kahramanmaraş double-quake)
+// False positive protection: EnsembleDetectionService 5-layer filter + STA/LTA 5.0 threshold
+const ALERT_COOLDOWN_MS = 60000; // 60 seconds minimum between alerts
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -125,9 +126,11 @@ class OnDeviceSeismicDetectorService {
 
     // Calibration (device at rest baseline)
     private baselineNoise = 0.005; // Expected noise level
+    private gravity = 1.0; // Dynamic gravity estimate (Low-Pass Filter)
 
     // Event handlers
     private onEarthquakeDetected: ((event: SeismicEvent) => void) | null = null;
+    private sensorDataListeners = new Set<(data: { x: number, y: number, z: number, magnitude: number }) => void>();
 
     // ==================== INITIALIZATION ====================
 
@@ -216,10 +219,23 @@ class OnDeviceSeismicDetectorService {
     private handleAccelerometerData = (data: AccelerometerMeasurement): void => {
         const timestamp = Date.now();
 
-        // Calculate acceleration magnitude (removing gravity)
-        // Gravity is ~1g, so we subtract it from total magnitude
+        // Calculate total magnitude
         const totalMag = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
-        const magnitude = Math.abs(totalMag - 1.0); // Remove gravity component
+
+        // ELITE FIX: Dynamic DC-Offset Removal (Low-Pass Filter)
+        // Adjust gravity estimation slowly (alpha = 0.9 for 100Hz)
+        // This makes the detector immune to the phone's orientation!
+        // Even if the phone is tilted or upside down, the baseline becomes 0.
+        this.gravity = this.gravity * 0.9 + totalMag * 0.1;
+
+        // High-pass filter result (remove gravity completely)
+        const magnitude = Math.abs(totalMag - this.gravity);
+
+        // Emit raw data to subscribers (like the Seismograph UI)
+        if (this.sensorDataListeners.size > 0) {
+            const dataPacket = { x: data.x, y: data.y, z: data.z, magnitude };
+            this.sensorDataListeners.forEach(listener => listener(dataPacket));
+        }
 
         const sample: AccelerationSample = {
             x: data.x,
@@ -484,6 +500,16 @@ class OnDeviceSeismicDetectorService {
     }
 
     /**
+     * Subscribe to raw sensor data for seismograph UI
+     */
+    onSensorData(handler: (data: { x: number, y: number, z: number, magnitude: number }) => void): () => void {
+        this.sensorDataListeners.add(handler);
+        return () => {
+            this.sensorDataListeners.delete(handler);
+        };
+    }
+
+    /**
      * Get recent events
      */
     async getRecentEvents(): Promise<SeismicEvent[]> {
@@ -550,7 +576,7 @@ export const onDeviceSeismicDetector = new OnDeviceSeismicDetectorService();
 // REACT HOOK
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export function useOnDeviceSeismicDetector() {
     const [isRunning, setIsRunning] = useState(false);
@@ -565,7 +591,7 @@ export function useOnDeviceSeismicDetector() {
         // Start detector
         onDeviceSeismicDetector.start().then(() => {
             setIsRunning(true);
-        });
+        }).catch(e => { if (__DEV__) console.debug('Seismic detector start failed:', e); });
 
         return () => {
             // Don't stop on unmount - keep running in background
@@ -581,4 +607,26 @@ export function useOnDeviceSeismicDetector() {
         },
         calibrate: () => onDeviceSeismicDetector.runCalibration(),
     };
+}
+
+export function useSeismographData() {
+    const [sensorData, setSensorData] = useState<{ x: number, y: number, z: number, magnitude: number } | null>(null);
+    const lastUpdateRef = useRef(0);
+
+    useEffect(() => {
+        const unsubscribe = onDeviceSeismicDetector.onSensorData((data) => {
+            const now = Date.now();
+            // Throttle to ~30 FPS (32ms) to prevent UI thread from freezing
+            if (now - lastUpdateRef.current > 32) {
+                setSensorData(data);
+                lastUpdateRef.current = now;
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, []);
+
+    return sensorData;
 }

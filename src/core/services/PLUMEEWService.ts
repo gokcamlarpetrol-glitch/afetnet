@@ -22,6 +22,7 @@
  */
 
 import { createLogger } from '../utils/logger';
+import { calculateDistance } from '../utils/locationUtils';
 import { firebaseDataService } from './FirebaseDataService';
 
 const logger = createLogger('PLUMEEWService');
@@ -60,6 +61,7 @@ const S_WAVE_VELOCITY = 3.5; // km/s (average S-wave velocity)
 const P_WAVE_VELOCITY = 6.0; // km/s (average P-wave velocity)
 const MIN_OBSERVATIONS = 2; // Minimum observations for prediction
 const MAX_OBSERVATION_AGE_MS = 60000; // 60 seconds
+const MAX_OBSERVATIONS = 50; // Firestore + in-memory cap to control burst load
 
 // Intensity attenuation coefficients (simplified)
 const ATTENUATION_A = 0.0; // Geometric spreading
@@ -75,6 +77,9 @@ class PLUMEEWService {
     private userLocation: { latitude: number; longitude: number } | null = null;
     private predictionCallbacks: ((prediction: PLUMPrediction) => void)[] = [];
     private firestoreUnsubscribe: (() => void) | null = null;
+    private queryRefreshTimer: ReturnType<typeof setInterval> | null = null;
+    private retryCount = 0;
+    private pendingRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // ==================== LIFECYCLE ====================
 
@@ -92,6 +97,27 @@ class PLUMEEWService {
         // Subscribe to nearby intensity observations
         await this.subscribeToNearbyObservations();
 
+        // ELITE: Periodically refresh query to avoid stale timestamp filter.
+        // Firestore query uses Date.now() at subscription time — becomes stale after MAX_OBSERVATION_AGE_MS.
+        // Re-subscribe every 45s to keep the query window fresh.
+        if (this.queryRefreshTimer) clearInterval(this.queryRefreshTimer);
+        this.queryRefreshTimer = setInterval(() => {
+            try {
+                if (this.isRunning) {
+                    // Only re-subscribe if current subscription is alive AND no pending retry
+                    if (this.firestoreUnsubscribe && !this.pendingRetryTimer) {
+                        try { this.firestoreUnsubscribe(); } catch { /* */ }
+                        this.firestoreUnsubscribe = null;
+                        this.subscribeToNearbyObservations().catch(e => {
+                            if (__DEV__) logger.debug('PLUM query refresh failed:', e);
+                        });
+                    }
+                }
+            } catch (e) {
+                if (__DEV__) logger.debug('PLUM query refresh error:', e);
+            }
+        }, 45_000);
+
         logger.info('✅ PLUM EEW Service started');
     }
 
@@ -102,6 +128,19 @@ class PLUMEEWService {
         if (!this.isRunning) return;
 
         this.isRunning = false;
+
+        // ELITE: Clear query refresh timer
+        if (this.queryRefreshTimer) {
+            clearInterval(this.queryRefreshTimer);
+            this.queryRefreshTimer = null;
+        }
+
+        // Clear pending retry timer
+        if (this.pendingRetryTimer) {
+            clearTimeout(this.pendingRetryTimer);
+            this.pendingRetryTimer = null;
+        }
+        this.retryCount = 0;
 
         if (this.firestoreUnsubscribe) {
             this.firestoreUnsubscribe();
@@ -124,37 +163,77 @@ class PLUMEEWService {
         }
 
         try {
-            const { getFirestore, collection, query, where, onSnapshot } = await import('firebase/firestore');
-            const db = getFirestore();
+            const { collection, query, where, orderBy, limit, onSnapshot } = await import('firebase/firestore');
+            const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
 
             // Query nearby observations (simplified - in production use geohash)
             const obsQuery = query(
                 collection(db, 'plum_observations'),
-                where('timestamp', '>', Date.now() - MAX_OBSERVATION_AGE_MS)
+                where('timestamp', '>', Date.now() - MAX_OBSERVATION_AGE_MS),
+                orderBy('timestamp', 'desc'),
+                limit(MAX_OBSERVATIONS),
             );
 
             this.firestoreUnsubscribe = onSnapshot(obsQuery, (snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    if (change.type === 'added' || change.type === 'modified') {
-                        const obs = change.doc.data() as PLUMObservation;
+                // Reset retry count on successful snapshot
+                this.retryCount = 0;
 
+                snapshot.docChanges().forEach((change) => {
+                    const obs = change.doc.data() as PLUMObservation;
+                    if (change.type === 'removed') {
+                        this.observations.delete(obs.deviceId);
+                        return;
+                    }
+
+                    if (change.type === 'added' || change.type === 'modified') {
                         // Filter by distance
-                        const distance = this.calculateDistance(
-                            this.userLocation!.latitude,
-                            this.userLocation!.longitude,
+                        const userLoc = this.userLocation;
+                        if (!userLoc) return;
+                        const distance = calculateDistance(
+                            userLoc.latitude,
+                            userLoc.longitude,
                             obs.latitude,
                             obs.longitude
                         );
 
                         if (distance <= PLUM_RADIUS_KM) {
                             this.observations.set(obs.deviceId, obs);
-                            this.evaluatePLUM();
+                        } else {
+                            this.observations.delete(obs.deviceId);
                         }
                     }
                 });
+                this.pruneObservations();
+                this.evaluatePLUM();
+            }, (error) => {
+                const backoffMs = Math.min(3000 * Math.pow(2, this.retryCount), 60000);
+                this.retryCount++;
+                logger.warn(`PLUM observations listener error (retry #${this.retryCount}, backoff ${backoffMs}ms):`, error);
+
+                // Dead subscription: clean up and re-subscribe after exponential backoff
+                if (this.firestoreUnsubscribe) {
+                    try { this.firestoreUnsubscribe(); } catch { /* already dead */ }
+                    this.firestoreUnsubscribe = null;
+                }
+                if (this.isRunning) {
+                    // Clear any existing pending retry to prevent cascading
+                    if (this.pendingRetryTimer) {
+                        clearTimeout(this.pendingRetryTimer);
+                    }
+                    this.pendingRetryTimer = setTimeout(() => {
+                        this.pendingRetryTimer = null;
+                        if (this.isRunning) {
+                            this.subscribeToNearbyObservations().catch(e =>
+                                logger.error('PLUM re-subscribe failed:', e),
+                            );
+                        }
+                    }, backoffMs);
+                }
             });
 
-            logger.info('📡 Subscribed to nearby PLUM observations');
+            logger.info('Subscribed to nearby PLUM observations');
         } catch (error) {
             logger.error('Failed to subscribe to observations:', error);
         }
@@ -183,6 +262,7 @@ class PLUMEEWService {
         };
 
         this.observations.set('local', observation);
+        this.pruneObservations();
 
         // Share to Firebase for other devices
         await this.shareObservation(observation);
@@ -196,8 +276,10 @@ class PLUMEEWService {
      */
     private async shareObservation(obs: PLUMObservation): Promise<void> {
         try {
-            const { getFirestore, collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-            const db = getFirestore();
+            const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+            const { getFirestoreInstanceAsync } = await import('./firebase/FirebaseInstanceManager');
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
 
             await addDoc(collection(db, 'plum_observations'), {
                 ...obs,
@@ -214,17 +296,15 @@ class PLUMEEWService {
      * Evaluate PLUM and make prediction
      */
     private evaluatePLUM(): void {
-        if (!this.userLocation || this.observations.size < MIN_OBSERVATIONS) {
+        // CRITICAL FIX (EEW-H3): Take local snapshot of userLocation.
+        // Without this, if stop() runs during the long for-loop below,
+        // `this.userLocation = null` causes null-deref crash mid-evaluation.
+        const userLoc = this.userLocation;
+        if (!userLoc || this.observations.size < MIN_OBSERVATIONS) {
             return;
         }
 
-        // Clean old observations
-        const now = Date.now();
-        for (const [key, obs] of this.observations.entries()) {
-            if (now - obs.timestamp > MAX_OBSERVATION_AGE_MS) {
-                this.observations.delete(key);
-            }
-        }
+        this.pruneObservations();
 
         if (this.observations.size < MIN_OBSERVATIONS) return;
 
@@ -236,9 +316,9 @@ class PLUMEEWService {
         let latestTimestamp = 0;
 
         for (const obs of this.observations.values()) {
-            const distance = this.calculateDistance(
-                this.userLocation.latitude,
-                this.userLocation.longitude,
+            const distance = calculateDistance(
+                userLoc.latitude,
+                userLoc.longitude,
                 obs.latitude,
                 obs.longitude
             );
@@ -273,9 +353,10 @@ class PLUMEEWService {
         // Calculate confidence based on number of observations and consistency
         const confidence = Math.min(100, 50 + this.observations.size * 10);
 
+        // userLoc snapshot taken at top of evaluatePLUM — safe even if userLocation cleared during stop()
         const prediction: PLUMPrediction = {
-            targetLatitude: this.userLocation.latitude,
-            targetLongitude: this.userLocation.longitude,
+            targetLatitude: userLoc.latitude,
+            targetLongitude: userLoc.longitude,
             predictedIntensity,
             confidence,
             usedObservations: this.observations.size,
@@ -312,30 +393,25 @@ class PLUMEEWService {
         return Math.max(1, Math.min(12, 3.66 * logPGA - 1.66));
     }
 
-    /**
-     * Calculate distance between two points (Haversine)
-     */
-    private calculateDistance(
-        lat1: number,
-        lon1: number,
-        lat2: number,
-        lon2: number
-    ): number {
-        const R = 6371;
-        const dLat = this.toRad(lat2 - lat1);
-        const dLon = this.toRad(lon2 - lon1);
-        const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(this.toRad(lat1)) *
-            Math.cos(this.toRad(lat2)) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
+    // calculateDistance imported from utils/locationUtils
 
-    private toRad(deg: number): number {
-        return deg * (Math.PI / 180);
+    private pruneObservations(): void {
+        const now = Date.now();
+
+        // Remove stale entries first.
+        for (const [key, obs] of this.observations.entries()) {
+            if (now - obs.timestamp > MAX_OBSERVATION_AGE_MS) {
+                this.observations.delete(key);
+            }
+        }
+
+        // Enforce hard cap by keeping most recent observations.
+        if (this.observations.size > MAX_OBSERVATIONS) {
+            const sorted = Array.from(this.observations.entries())
+                .sort((a, b) => b[1].timestamp - a[1].timestamp)
+                .slice(0, MAX_OBSERVATIONS);
+            this.observations = new Map(sorted);
+        }
     }
 
     // ==================== CALLBACKS ====================
@@ -355,7 +431,7 @@ class PLUMEEWService {
      * Notify all callbacks
      */
     private notifyPrediction(prediction: PLUMPrediction): void {
-        for (const callback of this.predictionCallbacks) {
+        for (const callback of [...this.predictionCallbacks]) {
             try {
                 callback(prediction);
             } catch (error) {

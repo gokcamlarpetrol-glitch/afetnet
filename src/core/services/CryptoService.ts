@@ -23,15 +23,19 @@ import * as ExpoCrypto from 'expo-crypto';
 // SECURITY FIX: Use tweetnacl for real cryptographic operations
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { getFirebaseAuth } from '../../lib/firebase';
 
 const logger = createLogger('CryptoService');
 
-// Storage keys
-const PRIVATE_KEY_STORAGE = 'afetnet_crypto_private_key';
-const PUBLIC_KEY_STORAGE = 'afetnet_crypto_public_key';
-const SIGN_PRIVATE_KEY_STORAGE = 'afetnet_crypto_sign_private_key';
-const SIGN_PUBLIC_KEY_STORAGE = 'afetnet_crypto_sign_public_key';
-const KEY_PAIRS_STORAGE = '@afetnet:crypto_known_keys_v2';
+// Storage keys — user-scoped to prevent cross-account key sharing
+// Uses cached UID from init time to prevent "default" fallback during auth restore
+let _cryptoServiceInitUid = '';
+const getUidSuffix = () => _cryptoServiceInitUid || getFirebaseAuth()?.currentUser?.uid || 'default';
+const getPrivateKeyStorage = () => `afetnet_crypto_private_key_${getUidSuffix()}`;
+const getPublicKeyStorage = () => `afetnet_crypto_public_key_${getUidSuffix()}`;
+const getSignPrivateKeyStorage = () => `afetnet_crypto_sign_private_key_${getUidSuffix()}`;
+const getSignPublicKeyStorage = () => `afetnet_crypto_sign_public_key_${getUidSuffix()}`;
+const getKnownKeysStorage = () => `@afetnet:crypto_known_keys_v2:${getUidSuffix()}`;
 
 // ELITE: Key pair interface (for encryption)
 export interface EncryptionKeyPair {
@@ -92,6 +96,17 @@ class CryptoService {
         if (this.isInitialized) return true;
 
         try {
+            // Wait briefly for auth if not available (prevents 'default' key scope race)
+            let uid = getFirebaseAuth()?.currentUser?.uid;
+            if (!uid) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                uid = getFirebaseAuth()?.currentUser?.uid;
+            }
+            if (!uid) {
+                logger.warn('CryptoService: no auth UID — deferring initialization');
+                return false;
+            }
+            _cryptoServiceInitUid = uid;
             logger.info('Initializing CryptoService with expo-crypto');
 
             // 1. Check if secure storage is available
@@ -99,8 +114,8 @@ class CryptoService {
             logger.info(`Secure storage: ${this.useSecureStorage ? 'enabled' : 'fallback to AsyncStorage'}`);
 
             // 2. Load or generate encryption key pair
-            const storedEncKey = await this.loadSecurely(PRIVATE_KEY_STORAGE);
-            const storedEncPubKey = await this.loadSecurely(PUBLIC_KEY_STORAGE);
+            const storedEncKey = await this.loadSecurely(getPrivateKeyStorage());
+            const storedEncPubKey = await this.loadSecurely(getPublicKeyStorage());
 
             if (storedEncKey && storedEncPubKey) {
                 this.encryptionKeyPair = {
@@ -115,8 +130,8 @@ class CryptoService {
             }
 
             // 3. Load or generate signing key pair
-            const storedSignKey = await this.loadSecurely(SIGN_PRIVATE_KEY_STORAGE);
-            const storedSignPubKey = await this.loadSecurely(SIGN_PUBLIC_KEY_STORAGE);
+            const storedSignKey = await this.loadSecurely(getSignPrivateKeyStorage());
+            const storedSignPubKey = await this.loadSecurely(getSignPublicKeyStorage());
 
             if (storedSignKey && storedSignPubKey) {
                 this.signingKeyPair = {
@@ -158,8 +173,8 @@ class CryptoService {
         };
 
         // Store securely
-        await this.storeSecurely(PRIVATE_KEY_STORAGE, this.encryptionKeyPair.privateKey);
-        await this.storeSecurely(PUBLIC_KEY_STORAGE, this.encryptionKeyPair.publicKey);
+        await this.storeSecurely(getPrivateKeyStorage(), this.encryptionKeyPair.privateKey);
+        await this.storeSecurely(getPublicKeyStorage(), this.encryptionKeyPair.publicKey);
 
         return this.encryptionKeyPair;
     }
@@ -178,8 +193,8 @@ class CryptoService {
         };
 
         // Store securely
-        await this.storeSecurely(SIGN_PRIVATE_KEY_STORAGE, this.signingKeyPair.privateKey);
-        await this.storeSecurely(SIGN_PUBLIC_KEY_STORAGE, this.signingKeyPair.publicKey);
+        await this.storeSecurely(getSignPrivateKeyStorage(), this.signingKeyPair.privateKey);
+        await this.storeSecurely(getSignPublicKeyStorage(), this.signingKeyPair.publicKey);
 
         return this.signingKeyPair;
     }
@@ -444,7 +459,7 @@ class CryptoService {
     private async saveKnownPublicKeys(): Promise<void> {
         try {
             const data = JSON.stringify(Array.from(this.knownPublicKeys.entries()));
-            DirectStorage.setString(KEY_PAIRS_STORAGE, data);
+            DirectStorage.setString(getKnownKeysStorage(), data);
         } catch (error) {
             logger.error('Failed to save known public keys:', error);
         }
@@ -455,7 +470,7 @@ class CryptoService {
      */
     private async loadKnownPublicKeys(): Promise<void> {
         try {
-            const data = DirectStorage.getString(KEY_PAIRS_STORAGE) ?? null;
+            const data = DirectStorage.getString(getKnownKeysStorage()) ?? null;
             if (data) {
                 const entries = JSON.parse(data) as [string, KnownPublicKey][];
                 this.knownPublicKeys = new Map(entries);
@@ -475,11 +490,11 @@ class CryptoService {
         this.knownPublicKeys.clear();
 
         const keysToRemove = [
-            PRIVATE_KEY_STORAGE,
-            PUBLIC_KEY_STORAGE,
-            SIGN_PRIVATE_KEY_STORAGE,
-            SIGN_PUBLIC_KEY_STORAGE,
-            KEY_PAIRS_STORAGE,
+            getPrivateKeyStorage(),
+            getPublicKeyStorage(),
+            getSignPrivateKeyStorage(),
+            getSignPublicKeyStorage(),
+            getKnownKeysStorage(),
         ];
 
         for (const key of keysToRemove) {
@@ -516,6 +531,31 @@ class CryptoService {
      */
     isReady(): boolean {
         return this.isInitialized && !!this.encryptionKeyPair && !!this.signingKeyPair;
+    }
+
+    /**
+     * Clear all crypto state and delete stored keys on logout
+     */
+    async destroy(): Promise<void> {
+        const uid = _cryptoServiceInitUid || getFirebaseAuth()?.currentUser?.uid || '';
+        this.encryptionKeyPair = null;
+        this.signingKeyPair = null;
+        this.knownPublicKeys.clear();
+        this.isInitialized = false;
+
+        // Delete stored keys from SecureStore (privacy: don't leave private keys on device)
+        if (uid) {
+            const keysToDelete = [
+                `afetnet_crypto_private_key_${uid}`,
+                `afetnet_crypto_public_key_${uid}`,
+                `afetnet_crypto_sign_private_key_${uid}`,
+                `afetnet_crypto_sign_public_key_${uid}`,
+            ];
+            for (const key of keysToDelete) {
+                try { await SecureStore.deleteItemAsync(key); } catch { /* best effort */ }
+            }
+        }
+        _cryptoServiceInitUid = '';
     }
 }
 

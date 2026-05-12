@@ -222,6 +222,9 @@ class ScreenProtectionService {
         this.protectedScreens.clear();
         this.isRecordingDetected = false;
 
+        // CRITICAL FIX: Reset isInitialized so the service can be re-initialized
+        this.isInitialized = false;
+
         logger.info('ScreenProtectionService stopped');
     }
 }

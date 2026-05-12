@@ -24,6 +24,11 @@ const TIMEOUT_MS = 10000;
 const HISTORY_WRITE_INTERVAL_MS = 5 * 60 * 1000;
 let lastHistoryWriteTime = 0;
 
+/** FIX: Reset module-level throttle on logout to prevent cross-account state leak */
+export function resetLocationThrottle(): void {
+  lastHistoryWriteTime = 0;
+}
+
 async function withTimeout<T>(
   operation: () => Promise<T>,
   operationName: string,
@@ -72,11 +77,11 @@ export async function saveLocationUpdate(
     const locationPayload = {
       latitude: location.latitude,
       longitude: location.longitude,
-      accuracy: location.accuracy || null,
-      altitude: location.altitude || null,
-      speed: location.speed || null,
-      heading: location.heading || null,
-      battery: location.battery || null,
+      accuracy: location.accuracy ?? null,
+      altitude: location.altitude ?? null,
+      speed: location.speed ?? null,
+      heading: location.heading ?? null,
+      battery: location.battery ?? null,
       source: location.source || 'gps',
       updatedAt: now,
       timestamp: location.timestamp || now,
@@ -160,83 +165,166 @@ export function subscribeToLocation(
   callback: (location: LocationUpdateData | null) => void,
   onError?: (error: any) => void,
 ): Unsubscribe | null {
-  try {
-    const db = (globalThis as any).__firestoreInstance;
-    if (!db) {
-      logger.warn('Firestore not available for location subscription');
-      return null;
+  let isDisposed = false;
+  let currentUnsub: Unsubscribe | null = null;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const MAX_RETRIES = 20;
+
+  const startSnapshot = () => {
+    try {
+      const db = (globalThis as any).__firestoreInstance;
+      if (!db) {
+        logger.warn('Firestore not available for location subscription');
+        return;
+      }
+
+      const locationRef = doc(db, 'locations_current', uid);
+
+      const unsub = onSnapshot(
+        locationRef,
+        (snap) => {
+          if (isDisposed) return;
+          retryCount = 0; // Reset on successful snapshot
+          if (snap.exists()) {
+            callback(snap.data() as LocationUpdateData);
+          } else {
+            callback(null);
+          }
+        },
+        (error: any) => {
+          if (error?.code === 'permission-denied') {
+            logger.debug(`Location subscription for ${uid}: permission denied`);
+            return;
+          }
+          logger.warn(`Location subscription error for ${uid}:`, error);
+
+          // Retry with exponential backoff
+          if (isDisposed || retryCount >= MAX_RETRIES) {
+            if (retryCount >= MAX_RETRIES) {
+              logger.error(`Location subscription exhausted ${MAX_RETRIES} retries for ${uid}`);
+            }
+            onError?.(error);
+            return;
+          }
+          retryCount++;
+          const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+          logger.info(`Location subscription retry ${retryCount}/${MAX_RETRIES} for ${uid} in ${delay}ms`);
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isDisposed) startSnapshot();
+          }, delay);
+        },
+      );
+
+      if (isDisposed) {
+        unsub();
+        return;
+      }
+      // Clean up previous subscription before assigning new one on retry
+      if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+      currentUnsub = unsub;
+
+      logger.info(`Subscribed to location: locations_current/${uid}`);
+    } catch (error) {
+      logger.warn(`Failed to subscribe to location for ${uid}:`, error);
     }
+  };
 
-    const locationRef = doc(db, 'locations_current', uid);
+  startSnapshot();
 
-    const unsubscribe = onSnapshot(
-      locationRef,
-      (snap) => {
-        if (snap.exists()) {
-          callback(snap.data() as LocationUpdateData);
-        } else {
-          callback(null);
-        }
-      },
-      (error: any) => {
-        if (error?.code === 'permission-denied') {
-          logger.debug(`Location subscription for ${uid}: permission denied`);
-          return;
-        }
-        logger.warn(`Location subscription error for ${uid}:`, error);
-        onError?.(error);
-      },
-    );
+  // Return a composite unsubscribe that cleans up retries too
+  const compositeUnsub = () => {
+    isDisposed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    currentUnsub?.();
+  };
 
-    logger.info(`✅ Subscribed to location: locations_current/${uid}`);
-    return unsubscribe;
-  } catch (error) {
-    logger.warn(`Failed to subscribe to location for ${uid}:`, error);
-    return null;
-  }
+  return compositeUnsub;
 }
 
 /**
  * Subscribe to location using async Firestore instance.
  * Preferred over subscribeToLocation when Firestore may not be ready yet.
+ * Includes retry with exponential backoff on snapshot errors.
  */
 export async function subscribeToLocationAsync(
   uid: string,
   callback: (location: LocationUpdateData | null) => void,
   onError?: (error: any) => void,
 ): Promise<Unsubscribe | null> {
-  try {
-    const db = await getFirestoreInstanceAsync();
-    if (!db) {
-      logger.warn('Firestore not available for location subscription');
-      return null;
+  let isDisposed = false;
+  let currentUnsub: Unsubscribe | null = null;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const MAX_RETRIES = 20;
+
+  const startSnapshot = async () => {
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db || isDisposed) {
+        if (!db) logger.warn('Firestore not available for location subscription');
+        return;
+      }
+
+      const locationRef = doc(db, 'locations_current', uid);
+
+      const unsub = onSnapshot(
+        locationRef,
+        (snap) => {
+          if (isDisposed) return;
+          retryCount = 0; // Reset on successful snapshot
+          if (snap.exists()) {
+            callback(snap.data() as LocationUpdateData);
+          } else {
+            callback(null);
+          }
+        },
+        (error: any) => {
+          if (error?.code === 'permission-denied') {
+            logger.debug(`Location subscription for ${uid}: permission denied`);
+            return;
+          }
+          logger.warn(`Location subscription error for ${uid}:`, error);
+
+          // Retry with exponential backoff
+          if (isDisposed || retryCount >= MAX_RETRIES) {
+            if (retryCount >= MAX_RETRIES) {
+              logger.error(`Location subscription exhausted ${MAX_RETRIES} retries for ${uid}`);
+            }
+            onError?.(error);
+            return;
+          }
+          retryCount++;
+          const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+          logger.info(`Location subscription retry ${retryCount}/${MAX_RETRIES} for ${uid} in ${delay}ms`);
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isDisposed) startSnapshot();
+          }, delay);
+        },
+      );
+
+      if (isDisposed) {
+        unsub();
+        return;
+      }
+      // CRITICAL FIX: Clean up previous subscription before assigning new one on retry.
+      // Without this, the old onSnapshot listener leaks on every retry cycle.
+      if (currentUnsub) { try { currentUnsub(); } catch { /* no-op */ } }
+      currentUnsub = unsub;
+
+      logger.info(`Subscribed to location (async): locations_current/${uid}`);
+    } catch (error) {
+      logger.warn(`Failed to subscribe to location for ${uid}:`, error);
     }
+  };
 
-    const locationRef = doc(db, 'locations_current', uid);
+  await startSnapshot();
 
-    const unsubscribe = onSnapshot(
-      locationRef,
-      (snap) => {
-        if (snap.exists()) {
-          callback(snap.data() as LocationUpdateData);
-        } else {
-          callback(null);
-        }
-      },
-      (error: any) => {
-        if (error?.code === 'permission-denied') {
-          logger.debug(`Location subscription for ${uid}: permission denied`);
-          return;
-        }
-        logger.warn(`Location subscription error for ${uid}:`, error);
-        onError?.(error);
-      },
-    );
-
-    logger.info(`✅ Subscribed to location (async): locations_current/${uid}`);
-    return unsubscribe;
-  } catch (error) {
-    logger.warn(`Failed to subscribe to location for ${uid}:`, error);
-    return null;
-  }
+  return () => {
+    isDisposed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    currentUnsub?.();
+  };
 }

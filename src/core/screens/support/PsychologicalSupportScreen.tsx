@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../components/SafeBlurView';
 import Animated, { FadeInDown, FadeInUp, SlideInRight } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -268,7 +268,14 @@ export default function PsychologicalSupportScreen({ navigation }: { navigation:
     setBreathPhase('inhale');
     setBreathTimer(4);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // CRITICAL FIX: Stop running animations on cleanup. Without this, the 4-second
+      // RNAnimated.timing() calls continue running after isBreathing=false or unmount,
+      // causing state updates on an unmounted component and wasted native driver resources.
+      breathScale.stopAnimation();
+      breathOpacity.stopAnimation();
+    };
   }, [isBreathing, breathScale, breathOpacity]);
 
   const handleCall = useCallback((phone: string, title: string) => {

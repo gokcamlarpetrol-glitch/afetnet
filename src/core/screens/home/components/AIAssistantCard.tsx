@@ -29,7 +29,7 @@ const formatUpdateTime = (timestamp?: number | null) => {
     const minutes = Math.round(diff / (60 * 1000));
     return i18nService.t('ai.minutesAgo', { minutes: minutes.toString() });
   }
-  return new Date(timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return new Date(timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
 };
 
 export default function AIAssistantCard({ navigation }: AIAssistantCardProps) {
@@ -42,9 +42,9 @@ export default function AIAssistantCard({ navigation }: AIAssistantCardProps) {
   const panic = useAIAssistantStore((state) => state.panicAssistant);
 
   useEffect(() => {
-    aiAssistantCoordinator.ensureRiskScore().catch(() => { });
-    aiAssistantCoordinator.ensurePreparednessPlan().catch(() => { });
-    aiAssistantCoordinator.ensurePanicAssistant('earthquake').catch(() => { });
+    aiAssistantCoordinator.ensureRiskScore().catch(e => { if (__DEV__) logger.debug('ensureRiskScore failed:', e); });
+    aiAssistantCoordinator.ensurePreparednessPlan().catch(e => { if (__DEV__) logger.debug('ensurePreparednessPlan failed:', e); });
+    aiAssistantCoordinator.ensurePanicAssistant('earthquake').catch(e => { if (__DEV__) logger.debug('ensurePanicAssistant failed:', e); });
   }, []);
 
   const toggleExpanded = useCallback(() => {

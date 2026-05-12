@@ -238,7 +238,7 @@ class RegionalRiskService {
 
   async startLocationMonitoring() {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         logger.warn('Location permission not granted');
         return;
@@ -629,7 +629,8 @@ class RegionalRiskService {
   }
 
   private notifyCallbacks(risk: RegionalRisk) {
-    for (const callback of this.callbacks) {
+    // FIX: Spread to array before iterating — callbacks may unsubscribe during iteration
+    for (const callback of [...this.callbacks]) {
       try {
         callback(risk);
       } catch (error) {

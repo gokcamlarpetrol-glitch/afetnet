@@ -26,7 +26,13 @@ const IOS_INFO_PLIST_PATH = `${IOS_APP_DIR}/Info.plist`;
 const IOS_PRIVACY_MANIFEST_PATH = `${IOS_APP_DIR}/PrivacyInfo.xcprivacy`;
 const IOS_APP_ICON_CONTENTS_PATH = `${IOS_APP_DIR}/Images.xcassets/AppIcon.appiconset/Contents.json`;
 const CRITICAL_TEST_FILES = [
+  'src/core/stores/__tests__/onboardingAuthPersistence.test.ts',
+  'src/core/stores/__tests__/settingsStorePersistence.test.ts',
+  'src/core/ble/__tests__/HighPerformanceBle.test.ts',
+  'src/core/services/__tests__/HybridMessageDeliveryMatrix.test.ts',
+  'src/core/services/__tests__/SOSChannelRouter.test.ts',
   'src/core/services/__tests__/MessagingReliability.test.ts',
+  'src/core/services/__tests__/NotificationPermissionPromptSafety.test.ts',
   'src/core/services/__tests__/GroupChatService.test.ts',
   'src/core/services/__tests__/IdentityService.test.ts',
   'src/core/utils/__tests__/familyLocation.test.ts',
@@ -112,6 +118,28 @@ function checkRegex(relPath, pattern, description, required = true) {
     fail(`${description} (pattern not found: ${pattern})`);
   } else {
     warn(`${description} (pattern not found: ${pattern})`);
+  }
+}
+
+function checkNotRegex(relPath, pattern, description, required = true) {
+  if (!fileExists(relPath)) {
+    if (required) {
+      fail(`${description} (file missing: ${relPath})`);
+    } else {
+      warn(`${description} (file missing: ${relPath})`);
+    }
+    return;
+  }
+
+  const content = readFile(relPath);
+  if (pattern.test(content)) {
+    if (required) {
+      fail(`${description} (unexpected pattern found: ${pattern})`);
+    } else {
+      warn(`${description} (unexpected pattern found: ${pattern})`);
+    }
+  } else {
+    pass(description);
   }
 }
 
@@ -211,6 +239,7 @@ console.log('\n[1] Project structure');
   'src/core/screens/auth/EmailRegisterScreen.tsx',
   'src/core/screens/auth/ForgotPasswordScreen.tsx',
   'src/core/services/AuthService.ts',
+  'src/core/services/BackgroundLocationGuard.ts',
   'src/core/stores/authStore.ts',
   'src/core/services/HybridMessageService.ts',
   'src/core/services/FamilyTrackingService.ts',
@@ -237,13 +266,71 @@ checkContains('src/core/screens/auth/LoginScreen.tsx', 'EmailAuthService.login',
 checkContains('src/core/screens/auth/EmailRegisterScreen.tsx', 'EmailAuthService.register', 'EmailRegisterScreen uses EmailAuthService.register');
 checkContains('src/core/stores/authStore.ts', 'onAuthStateChanged', 'authStore subscribes Firebase auth state');
 
+console.log('\n[2.1] App Review permission + emergency disclaimers');
+checkContains(
+  'src/core/screens/onboarding/OnboardingScreen.tsx',
+  'scrollEnabled={false}',
+  'Onboarding disables swipe-bypass on permission slides',
+);
+checkContains(
+  'src/core/screens/onboarding/OnboardingScreen.tsx',
+  'Location.requestForegroundPermissionsAsync',
+  'Onboarding requests iOS foreground location via system prompt',
+);
+checkContains(
+  'src/core/screens/onboarding/OnboardingScreen.tsx',
+  "slide.action === 'location'",
+  'Onboarding exposes Terms link from location-permission step',
+);
+checkNotRegex(
+  'src/core/screens/onboarding/OnboardingScreen.tsx',
+  />\s*Atla\s*</,
+  'Onboarding does not render custom "Atla" bypass text button',
+);
+checkNotRegex(
+  'src/core/screens/onboarding/OnboardingScreen.tsx',
+  /buttonText:\s*['"]Atla['"]/,
+  'Onboarding slide data does not define an "Atla" CTA',
+);
+checkContains(
+  'src/core/screens/settings/TermsOfServiceScreen.tsx',
+  "DERHAL 112'yi arayın",
+  'Terms screen clearly directs users to call 112 for official emergency response',
+);
+checkContains(
+  'src/core/components/compliance/EULAModal.tsx',
+  'dogrudan entegre degildir',
+  'EULA states no direct integration with official emergency dispatch',
+);
+checkContains(
+  'src/core/services/notifications/NotificationCenter.ts',
+  'getPermissionStatus',
+  'NotificationCenter startup only checks notification status',
+);
+checkNotRegex(
+  'src/core/services/notifications/NotificationCenter.ts',
+  /async initialize\(\): Promise<void> \{[\s\S]*requestPermissions\(/,
+  'NotificationCenter initialize does not open notification prompt',
+);
+checkContains(
+  'src/core/services/FCMTokenService.ts',
+  'allowPermissionPrompt',
+  'FCMTokenService requires explicit opt-in before prompting',
+);
+checkContains(
+  'src/core/stores/authStore.ts',
+  "allowPermissionPrompt: false",
+  'Auth restore defers push permission prompt',
+);
+
 console.log('\n[3] Messaging, family, and map critical safeguards');
 checkContains('src/core/services/HybridMessageService.ts', 'private getSelfIdentityIds()', 'HybridMessageService defines self identity alias resolver');
 checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.id\)/, 'HybridMessageService tracks identity.id aliases');
 checkRegex('src/core/services/HybridMessageService.ts', /ids\.add\(identity\.deviceId\)/, 'HybridMessageService tracks identity.deviceId aliases');
 checkContains('src/core/services/HybridMessageService.ts', 'getDeviceIdFromLib', 'HybridMessageService includes physical device id fallback');
 checkContains('src/core/services/HybridMessageService.ts', 'toDeviceId: message.recipientId || \'broadcast\'', 'HybridMessageService writes cloud toDeviceId for routing');
-checkRegex('src/core/services/HybridMessageService.ts', /recipientId:\s*toDeviceId\s*&&\s*toDeviceId\s*!==\s*'broadcast'\s*\?\s*toDeviceId\s*:\s*undefined/, 'HybridMessageService restores recipientId from cloud payload');
+checkContains('src/core/services/HybridMessageService.ts', 'let resolvedToDeviceId = toDeviceId && toDeviceId !== \'broadcast\' ? toDeviceId : undefined;', 'HybridMessageService restores recipientId seed from cloud payload');
+checkContains('src/core/services/HybridMessageService.ts', 'recipientId: resolvedToDeviceId', 'HybridMessageService maps cloud recipientId using resolved target');
 checkContains('src/core/screens/messages/ConversationScreen.tsx', 'const selfIds = useMemo', 'ConversationScreen maintains selfIds set');
 checkContains('src/core/screens/messages/ConversationScreen.tsx', 'selfIds.has(msg.to)', 'ConversationScreen filters inbound by recipient');
 checkContains('src/core/screens/messages/SOSConversationScreen.tsx', 'selfIds.has(msg.to)', 'SOSConversationScreen filters inbound by recipient');
@@ -253,6 +340,11 @@ checkContains('src/core/services/FamilyTrackingService.ts', 'const targetMeshId'
 checkContains('src/core/services/FamilyTrackingService.ts', 'targetDeviceId: targetMeshId || targetCloudUid', 'FamilyTrackingService sends BLE check-in with resolved target id');
 checkContains('src/core/services/FamilyTrackingService.ts', 'getDeviceIdFromLib', 'FamilyTrackingService includes physical device id fallback');
 checkRegex('src/core/screens/map/MapScreen.tsx', /familyTrackingService\.stopTracking\([^)]*\)/, 'MapScreen stops tracking on cleanup');
+checkContains('src/core/init.ts', "stopLegacyBackgroundLocationTasks('initializeApp')", 'Init clears stale background location tasks on startup');
+checkContains('src/core/init.ts', "stopLegacyBackgroundLocationTasks('shutdownApp')", 'Shutdown clears stale background location tasks');
+checkContains('src/core/services/BackgroundLocationGuard.ts', 'LOCATION_TRACKING', 'Background location guard tracks legacy family task');
+checkContains('src/core/services/BackgroundLocationGuard.ts', 'AFETNET_EEW_LOCATION_TASK', 'Background location guard tracks legacy EEW task');
+checkContains('src/core/services/BackgroundLocationGuard.ts', 'SEISMIC_LOCATION_HEARTBEAT', 'Background location guard tracks legacy seismic task');
 
 console.log('\n[4] Firestore security rules');
 checkContains('firestore.rules', 'function isDeviceReadable(deviceId)', 'Rules define device readability helper');
@@ -344,7 +436,8 @@ if (placeholderFindings.length > 0) {
 
 console.log('\n[8] Static and unit quality gates');
 runCommand('npm run -s typecheck', 'TypeScript typecheck passes', true);
-runCommand(CRITICAL_TEST_CMD, 'Critical messaging/family/date tests pass', true);
+runCommand('npm run -s verify:native-config', 'Native/Firebase release config is synchronized', true);
+runCommand(CRITICAL_TEST_CMD, 'Critical auth/messaging/SOS/family/date tests pass', true);
 runCommand('npm run -s healthcheck', 'Healthcheck passes', true);
 
 console.log('\nSummary');

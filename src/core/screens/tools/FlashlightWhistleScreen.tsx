@@ -1,7 +1,6 @@
 /**
- * FLASHLIGHT & WHISTLE SCREEN - ELITE Emergency Tools
- * Premium emergency tools - Real flashlight, whistle sound, SOS patterns, Screen flashlight
- * %100 çalışır - eksik veya hata yok
+ * FLASHLIGHT & WHISTLE SCREEN - Emergency Tools
+ * Flashlight, whistle sound, SOS patterns, Screen flashlight
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -10,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { createLogger } from '../../utils/logger';
 import { flashlightService } from '../../services/FlashlightService';
@@ -28,6 +28,7 @@ interface FlashlightWhistleScreenProps {
 }
 
 export default function FlashlightWhistleScreen({ navigation }: FlashlightWhistleScreenProps) {
+  const insets = useSafeAreaInsets();
   const [flashlightOn, setFlashlightOn] = useState(false);
   const [sosMode, setSosMode] = useState(false);
   const [whistlePlaying, setWhistlePlaying] = useState(false);
@@ -66,9 +67,11 @@ export default function FlashlightWhistleScreen({ navigation }: FlashlightWhistl
 
     initializeServices();
 
-    // Cleanup on unmount
+    // Cleanup on unmount — call services unconditionally since closure state is stale
     return () => {
-      cleanup();
+      flashlightService.stop().catch(() => {});
+      flashlightService.turnOffScreenFlashlight().catch(() => {});
+      whistleService.stop().catch(() => {});
     };
   }, []);
 
@@ -154,16 +157,29 @@ export default function FlashlightWhistleScreen({ navigation }: FlashlightWhistl
       if (flashlightOn || sosMode) {
         // Turn off
         await flashlightService.stop();
+        await flashlightService.turnOffScreenFlashlight();
         setFlashlightOn(false);
         setSosMode(false);
+        setScreenFlashlightOn(false);
         pulseScale.value = 1;
         logger.info('✅ Flashlight OFF');
       } else {
-        // Turn on continuous
-        await flashlightService.turnOn();
-        setFlashlightOn(true);
-        setSosMode(false);
-        logger.info('✅ Flashlight ON');
+        // CRITICAL FIX: Check isAvailable() before calling turnOn().
+        // expo-torch is not installed and CameraView flash requires props (not method calls).
+        // Without this guard, turnOn() silently does nothing on most devices.
+        // Fallback to screen flashlight (max brightness white screen) which always works.
+        if (flashlightService.isAvailable()) {
+          await flashlightService.turnOn();
+          setFlashlightOn(true);
+          setSosMode(false);
+          logger.info('✅ Flashlight ON (hardware torch)');
+        } else {
+          await flashlightService.turnOnScreenFlashlight();
+          setFlashlightOn(true);
+          setScreenFlashlightOn(true);
+          setSosMode(false);
+          logger.info('✅ Flashlight ON (screen flashlight fallback)');
+        }
       }
     } catch (error) {
       logger.error('Flashlight toggle failed:', error);
@@ -330,7 +346,7 @@ export default function FlashlightWhistleScreen({ navigation }: FlashlightWhistl
       )}
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
@@ -561,8 +577,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: spacing[4],
-    paddingTop: 60,
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[4],
     backgroundColor: colors.background.secondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.primary,

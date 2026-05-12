@@ -56,7 +56,7 @@ const DISASTER_MODULES: PreparednessModule[] = [
       ],
       during: [
         'Sakin olun, panik yapmayın',
-        'Drop-Cover-Hold: Çök, kapan, tutun',
+        'Çök, Kapan, Tutun (ÇKT) tekniğini uygulayın',
         'Sabit bir mobilyanın yanına geçin',
         'Pencere ve camlardan uzak durun',
         'Asansör kullanmayın',
@@ -345,16 +345,16 @@ export default function DisasterPreparednessScreen({ navigation }: DisasterPrepa
             </Animated.View>
           )}
 
-          {/* Video Placeholder */}
+          {/* Educational Info Card */}
           {selectedPhase === 'during' && (
             <Animated.View entering={FadeInDown.delay(300)} style={styles.videoCard}>
               <View style={styles.videoPlaceholder}>
-                <Ionicons name="play-circle" size={64} color={colors.text.tertiary} />
-                <Text style={styles.videoPlaceholderText}>Eğitim Videosu</Text>
+                <Ionicons name="information-circle" size={48} color={colors.text.tertiary} />
+                <Text style={styles.videoPlaceholderText}>Eğitim Rehberi</Text>
                 <Text style={styles.videoPlaceholderSubtext}>
                   {selectedModule.type === 'earthquake'
-                    ? 'Drop-Cover-Hold adımları bu ekranda metin olarak sunuluyor.'
-                    : 'Eğitim içeriği bu ekranda adım adım metin olarak sunuluyor.'}
+                    ? 'Çök-Kapan-Tutun adımları yukarıdaki kontrol listesinde metin olarak sunulmaktadır.'
+                    : 'Eğitim içeriği yukarıdaki kontrol listesinde adım adım metin olarak sunulmaktadır.'}
                 </Text>
               </View>
             </Animated.View>

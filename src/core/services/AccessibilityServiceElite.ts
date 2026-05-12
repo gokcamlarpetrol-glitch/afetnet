@@ -187,6 +187,8 @@ class AccessibilityServiceElite {
     private settings: AccessibilitySettings = { ...DEFAULT_SETTINGS };
     private listeners: Set<(settings: AccessibilitySettings) => void> = new Set();
     private isInitialized = false;
+    private screenReaderSubscription: { remove: () => void } | null = null;
+    private reduceMotionSubscription: { remove: () => void } | null = null;
 
     // ==================== INITIALIZATION ====================
 
@@ -273,7 +275,7 @@ class AccessibilityServiceElite {
      */
     private setupSystemListeners(): void {
         // Screen reader changes
-        const screenReaderSubscription = AccessibilityInfo.addEventListener(
+        this.screenReaderSubscription = AccessibilityInfo.addEventListener(
             'screenReaderChanged',
             (isEnabled) => {
                 this.settings.screenReaderEnabled = isEnabled;
@@ -283,7 +285,7 @@ class AccessibilityServiceElite {
         );
 
         // Reduce motion changes
-        const reduceMotionSubscription = AccessibilityInfo.addEventListener(
+        this.reduceMotionSubscription = AccessibilityInfo.addEventListener(
             'reduceMotionChanged',
             (isEnabled) => {
                 this.settings.reduceMotion = isEnabled;
@@ -291,6 +293,19 @@ class AccessibilityServiceElite {
                 logger.info('Reduce motion changed:', isEnabled);
             }
         );
+    }
+
+    /**
+     * Cleanup system listeners and reset state
+     */
+    destroy(): void {
+        this.screenReaderSubscription?.remove();
+        this.screenReaderSubscription = null;
+        this.reduceMotionSubscription?.remove();
+        this.reduceMotionSubscription = null;
+        this.listeners.clear();
+        this.isInitialized = false;
+        logger.info('AccessibilityServiceElite destroyed');
     }
 
     // ==================== SETTINGS MANAGEMENT ====================

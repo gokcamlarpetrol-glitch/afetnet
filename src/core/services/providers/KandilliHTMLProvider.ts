@@ -31,9 +31,9 @@ export class KandilliHTMLProvider {
           }
 
           const controller = new AbortController();
-          // ELITE: Reduced timeout to 8s to prevent blocking main earthquake fetch
-          // If Kandilli is slow, skip and use AFAD data only
-          const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
+          // ELITE: Reduced timeout to 4s to prevent blocking main earthquake fetch
+          // If Kandilli is slow/down, skip quickly and use AFAD data only
+          const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
 
           const response = await fetch(url, {
             method: 'GET',

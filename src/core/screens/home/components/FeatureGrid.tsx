@@ -3,8 +3,8 @@
  * "Elite Color Edition" - Vibrant yet Elegant Gradients
  */
 
-import React, { useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions } from 'react-native';
+import React, { useRef, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions } from 'react-native';
 import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as haptics from '../../../utils/haptics';
@@ -13,10 +13,8 @@ import { colors } from '../../../theme';
 
 const logger = createLogger('FeatureGrid');
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-// ELITE: iPad-aware card sizing - max 180px per card prevents overly wide cards on iPad
-const CARD_WIDTH = Math.min((SCREEN_WIDTH - 52) / 2, 180); // 2 columns, capped for iPad
 const CARD_HEIGHT = 120;
+const GRID_GAP = 12;
 
 interface Feature {
   id: string;
@@ -94,9 +92,10 @@ const FEATURES: Feature[] = [
 interface FeatureCardProps {
   feature: Feature;
   onPress: () => void;
+  cardWidth: number;
 }
 
-function FeatureCard({ feature, onPress }: FeatureCardProps) {
+function FeatureCard({ feature, onPress, cardWidth }: FeatureCardProps) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
 
@@ -140,7 +139,7 @@ function FeatureCard({ feature, onPress }: FeatureCardProps) {
     <Animated.View
       style={[
         styles.cardWrapper,
-        { transform: [{ scale: scaleAnim }] },
+        { width: cardWidth, transform: [{ scale: scaleAnim }] },
       ]}
     >
       <TouchableOpacity
@@ -148,6 +147,8 @@ function FeatureCard({ feature, onPress }: FeatureCardProps) {
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={feature.title}
       >
         <LinearGradient
           colors={feature.gradient}
@@ -193,6 +194,24 @@ interface FeatureGridProps {
 }
 
 export default function FeatureGrid({ navigation }: FeatureGridProps) {
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // ELITE: iPad-safe — recompute card width on rotation / Split View resize
+  const { width: screenWidth } = useWindowDimensions();
+  const CARD_WIDTH = useMemo(() => {
+    // 2 columns with 12px gap, inside HomeScreen's 20px paddingHorizontal (40px total)
+    // Cap at 200px per card to prevent oversized cards on iPad
+    return Math.min((screenWidth - 40 - GRID_GAP) / 2, 200);
+  }, [screenWidth]);
+
+  // Cleanup unguarded setTimeout on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
+
   const handlePress = (feature: Feature) => {
     haptics.impactMedium();
     // Simple robust navigation
@@ -206,8 +225,8 @@ export default function FeatureGrid({ navigation }: FeatureGridProps) {
       }
     } catch (e) {
       logger.error('Nav Error', e);
-      // Retry
-      setTimeout(() => {
+      // Retry with cleanup guard
+      retryTimerRef.current = setTimeout(() => {
         try {
           navigation.navigate(feature.screen);
         } catch (retryError) {
@@ -226,6 +245,7 @@ export default function FeatureGrid({ navigation }: FeatureGridProps) {
           <FeatureCard
             key={feature.id}
             feature={feature}
+            cardWidth={CARD_WIDTH}
             onPress={() => handlePress(feature)}
           />
         ))}
@@ -248,10 +268,11 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: GRID_GAP,
+    justifyContent: 'center',
   },
   cardWrapper: {
-    width: CARD_WIDTH,
+    // width set dynamically via useWindowDimensions for iPad/rotation support
     height: CARD_HEIGHT,
   },
   card: {

@@ -1,65 +1,108 @@
-import React, { Suspense } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { Suspense, useEffect, useState } from 'react';
+import { View, ActivityIndicator, StyleSheet, Text, Pressable } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
-// ELITE: Auth is now handled centrally in CoreApp via authStore
-// No need for local auth state here
 
 import MainTabs from './MainTabs';
 
-// Feature Screens (Eager Load - Critical Path)
+// Eager Load — Critical Path (initial screen, high frequency, life safety)
 import { AllEarthquakesScreen, EarthquakeDetailScreen } from '../screens/earthquakes';
-
-import NewMessageScreen from '../screens/messages/NewMessageScreen';
 import ConversationScreen from '../screens/messages/ConversationScreen';
-import SOSConversationScreen from '../screens/messages/SOSConversationScreen';
-import CreateGroupScreen from '../screens/messages/CreateGroupScreen';
-
-// Lazy Load Heavy Screens - CRITICAL: Must have proper default export
-const DisasterMapScreen = React.lazy(() => import('../screens/map/DisasterMapScreen'));
-const MeshNetworkScreen = React.lazy(() => import('../screens/mesh/MeshNetworkScreen'));
-// CRITICAL: Eager import for AI Assistant screen to prevent lazy loading navigation issues
-import LocalAIAssistantScreen from '../screens/ai/LocalAIAssistantScreen';
-
-// CRITICAL: Eager import for P/S Wave screen to prevent lazy loading issues
-import WaveVisualizationScreen from '../screens/waves/WaveVisualizationScreen';
-
-// Other Screens (Keep eager for now or lazy if needed)
-import DrillModeScreen from '../screens/drill/DrillModeScreen';
-import UserReportsScreen from '../screens/reports/UserReportsScreen';
-import VolunteerModuleScreen from '../screens/volunteer/VolunteerModuleScreen';
-import AddFamilyMemberScreen from '../screens/family/AddFamilyMemberScreen';
-import FamilyGroupChatScreen from '../screens/family/FamilyGroupChatScreen';
-import HealthProfileScreen from '../screens/health/HealthProfileScreen';
-import MedicalInformationScreen from '../screens/medical/MedicalInformationScreen';
-import PsychologicalSupportScreen from '../screens/support/PsychologicalSupportScreen';
-import NewsDetailScreen from '../screens/news/NewsDetailScreen';
-import AllNewsScreen from '../screens/news/AllNewsScreen';
-import RiskScoreScreen from '../screens/ai/RiskScoreScreen';
-import PreparednessPlanScreen from '../screens/ai/PreparednessPlanScreen';
-import PanicAssistantScreen from '../screens/ai/PanicAssistantScreen';
-import EarthquakeSettingsScreen from '../screens/settings/EarthquakeSettingsScreen';
-import NotificationSettingsScreen from '../screens/settings/NotificationSettingsScreen';
-import DisasterPreparednessScreen from '../screens/preparedness/DisasterPreparednessScreen';
-import AssemblyPointsScreen from '../screens/assembly/AssemblyPointsScreen';
-import AddAssemblyPointScreen from '../screens/assembly/AddAssemblyPointScreen';
-// ELITE: Auth screens for in-app registration/password reset navigation
-import { EmailRegisterScreen } from '../screens/auth/EmailRegisterScreen';
-import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
-import SOSHistoryScreen from '../screens/sos/SOSHistoryScreen';
 import SOSHelpScreen from '../screens/sos/SOSHelpScreen';
-import FlashlightWhistleScreen from '../screens/tools/FlashlightWhistleScreen';
-import MyQRScreen from '../screens/profile/MyQRScreen';
 
-// ELITE: Settings Sub-Screens
-import OfflineMapSettingsScreen from '../screens/settings/OfflineMapSettingsScreen';
-import AdvancedSettingsScreen from '../screens/settings/AdvancedSettingsScreen';
-import AboutScreen from '../screens/settings/AboutScreen';
-import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
-import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
-import SecurityScreen from '../screens/settings/SecurityScreen';
-import EEWSettingsScreen from '../screens/settings/EEWSettingsScreen';
-import RescueTeamScreen from '../screens/rescue/RescueTeamScreen';
-import VoiceCallScreen from '../screens/messages/VoiceCallScreen';
+// ELITE: Per-screen Suspense wrapper — prevents tab bar disappearing during lazy load
+// Also catches import errors gracefully (network failure, bundle corruption)
+function withLazy(importFn: () => Promise<{ default: React.ComponentType<any> }>) {
+  const LazyComponent = React.lazy(importFn);
+  return function LazyScreen(props: any) {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <LazyScreenErrorBoundary>
+          <LazyComponent {...props} />
+        </LazyScreenErrorBoundary>
+      </Suspense>
+    );
+  };
+}
+
+// Error boundary for lazy-loaded screens — prevents whole app crash on import failure
+class LazyScreenErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) {
+    if (__DEV__) console.error('Lazy screen load failed:', error);
+  }
+  handleRetry = () => {
+    this.setState({ hasError: false });
+  };
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Ekran yüklenemedi.</Text>
+          <Pressable
+            style={styles.retryButton}
+            onPress={this.handleRetry}
+            accessibilityRole="button"
+            accessibilityLabel="Tekrar dene"
+          >
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Lazy Load — All other screens (per-screen Suspense, safe for React Navigation)
+const NewMessageScreen = withLazy(() => import('../screens/messages/NewMessageScreen'));
+const SOSConversationScreen = withLazy(() => import('../screens/messages/SOSConversationScreen'));
+const CreateGroupScreen = withLazy(() => import('../screens/messages/CreateGroupScreen'));
+const VoiceCallScreen = withLazy(() => import('../screens/messages/VoiceCallScreen'));
+
+const DisasterMapScreen = withLazy(() => import('../screens/map/DisasterMapScreen'));
+const MeshNetworkScreen = withLazy(() => import('../screens/mesh/MeshNetworkScreen'));
+const LocalAIAssistantScreen = withLazy(() => import('../screens/ai/LocalAIAssistantScreen'));
+const WaveVisualizationScreen = withLazy(() => import('../screens/waves/WaveVisualizationScreen'));
+
+const DrillModeScreen = withLazy(() => import('../screens/drill/DrillModeScreen'));
+const UserReportsScreen = withLazy(() => import('../screens/reports/UserReportsScreen'));
+const VolunteerModuleScreen = withLazy(() => import('../screens/volunteer/VolunteerModuleScreen'));
+
+const AddFamilyMemberScreen = withLazy(() => import('../screens/family/AddFamilyMemberScreen'));
+const FamilyGroupChatScreen = withLazy(() => import('../screens/family/FamilyGroupChatScreen'));
+const HealthProfileScreen = withLazy(() => import('../screens/health/HealthProfileScreen'));
+const MedicalInformationScreen = withLazy(() => import('../screens/medical/MedicalInformationScreen'));
+const PsychologicalSupportScreen = withLazy(() => import('../screens/support/PsychologicalSupportScreen'));
+
+const NewsDetailScreen = withLazy(() => import('../screens/news/NewsDetailScreen'));
+const AllNewsScreen = withLazy(() => import('../screens/news/AllNewsScreen'));
+const RiskScoreScreen = withLazy(() => import('../screens/ai/RiskScoreScreen'));
+const PreparednessPlanScreen = withLazy(() => import('../screens/ai/PreparednessPlanScreen'));
+const PanicAssistantScreen = withLazy(() => import('../screens/ai/PanicAssistantScreen'));
+
+const EarthquakeSettingsScreen = withLazy(() => import('../screens/settings/EarthquakeSettingsScreen'));
+const NotificationSettingsScreen = withLazy(() => import('../screens/settings/NotificationSettingsScreen'));
+const DisasterPreparednessScreen = withLazy(() => import('../screens/preparedness/DisasterPreparednessScreen'));
+const AssemblyPointsScreen = withLazy(() => import('../screens/assembly/AssemblyPointsScreen'));
+const AddAssemblyPointScreen = withLazy(() => import('../screens/assembly/AddAssemblyPointScreen'));
+const FlashlightWhistleScreen = withLazy(() => import('../screens/tools/FlashlightWhistleScreen'));
+const MyQRScreen = withLazy(() => import('../screens/profile/MyQRScreen'));
+
+const SOSHistoryScreen = withLazy(() => import('../screens/sos/SOSHistoryScreen'));
+
+// Settings Sub-Screens
+const OfflineMapSettingsScreen = withLazy(() => import('../screens/settings/OfflineMapSettingsScreen'));
+const AdvancedSettingsScreen = withLazy(() => import('../screens/settings/AdvancedSettingsScreen'));
+const AboutScreen = withLazy(() => import('../screens/settings/AboutScreen'));
+const PrivacyPolicyScreen = withLazy(() => import('../screens/settings/PrivacyPolicyScreen'));
+const TermsOfServiceScreen = withLazy(() => import('../screens/settings/TermsOfServiceScreen'));
+const SecurityScreen = withLazy(() => import('../screens/settings/SecurityScreen'));
+const EEWSettingsScreen = withLazy(() => import('../screens/settings/EEWSettingsScreen'));
+const RescueTeamScreen = withLazy(() => import('../screens/rescue/RescueTeamScreen'));
 
 const Stack = createStackNavigator();
 
@@ -69,28 +112,21 @@ const LoadingFallback = () => (
   </View>
 );
 
-// ELITE: MainNavigator assumes user is authenticated (checked in CoreApp)
 export default function MainNavigator() {
-  // Auth is centrally managed in CoreApp via authStore
-  // This component only renders when isAuthenticated === true
-
   return (
-    <Suspense fallback={<LoadingFallback />}>
       <Stack.Navigator
         id={undefined}
         screenOptions={{
           headerShown: false,
           cardStyle: { backgroundColor: '#000' },
-          headerBackTitle: ' ', // Hides "MainTabs" text
+          headerBackTitle: ' ',
           headerTintColor: '#1e293b',
           headerTitleStyle: { fontWeight: '600', color: '#0f172a' },
           headerTransparent: true,
-          // headerBlurEffect removed to satisfy TS strictly
         }}
       >
         <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
 
-        {/* ELITE: All screens use headerShown: false because they have custom headers */}
         <Stack.Screen name="RiskScore" component={RiskScoreScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AllEarthquakes" component={AllEarthquakesScreen} options={{ headerShown: false }} />
         <Stack.Screen name="EarthquakeDetail" component={EarthquakeDetailScreen} options={{ headerShown: false }} />
@@ -135,7 +171,6 @@ export default function MainNavigator() {
         <Stack.Screen name="MeshNetwork" component={MeshNetworkScreen} options={{ headerShown: false }} />
         <Stack.Screen name="MyQR" component={MyQRScreen} options={{ headerShown: false }} />
 
-        {/* ELITE: Settings Sub-Screens */}
         <Stack.Screen name="OfflineMapSettings" component={OfflineMapSettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AdvancedSettings" component={AdvancedSettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
@@ -146,7 +181,6 @@ export default function MainNavigator() {
         <Stack.Screen name="RescueTeam" component={RescueTeamScreen} options={{ headerShown: false }} />
         <Stack.Screen name="VoiceCall" component={VoiceCallScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
-    </Suspense>
   );
 }
 
@@ -163,5 +197,20 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     textAlign: 'center',
     paddingHorizontal: 32,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#1F4E79',
+    borderRadius: 12,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

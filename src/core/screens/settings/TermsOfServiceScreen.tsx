@@ -53,7 +53,7 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lastUpdated}>Son Güncelleme: 7 Şubat 2026 | Sürüm 2.0</Text>
+        <Text style={styles.lastUpdated}>Son Güncelleme: 1 Nisan 2026 | Sürüm 2.2</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. KABUL</Text>
@@ -117,7 +117,8 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
           <Text style={styles.paragraph}>
             • Yüklediğiniz içerikten siz sorumlusunuz{'\n'}
             • Yasadışı, zararlı veya hak ihlali içeren içerik yükleyemezsiniz{'\n'}
-            • İçeriğiniz otomatik olarak şifrelenir ve güvenli şekilde saklanır{'\n'}
+            • İçeriğiniz Firebase güvenlik kuralları ve Google Cloud altyapısı ile korunur{'\n'}
+            • Cihazlar arası mesh iletişimi uçtan uca şifrelenir{'\n'}
             • Acil durumlarda içeriğiniz paylaşılabilir
           </Text>
         </View>
@@ -185,6 +186,81 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
           </Text>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>12. ACİL DURUM HİZMETLERİ VE KONUM SERVİSLERİ — SORUMLULUK REDDİ</Text>
+
+          <View style={styles.emergencyBanner}>
+            <Text style={styles.emergencyBannerText}>
+              ÖNEMLİ: AfetNet resmî bir acil durum servisi DEĞİLDİR.{'\n'}
+              Hayatî tehlike durumunda DERHAL 112'yi arayın.
+            </Text>
+          </View>
+
+          <Text style={styles.subsectionTitle}>12.1. AfetNet Resmî Acil Servis Değildir</Text>
+          <Text style={styles.paragraph}>
+            AfetNet bir topluluk güvenliği ve afet iletişim uygulamasıdır. Uygulama, 112 Acil Çağrı
+            Merkezi, itfaiye, ambulans, polis, jandarma, AFAD, Kızılay veya herhangi bir resmî acil
+            servis birimiyle doğrudan entegre DEĞİLDİR ve bu kurumlara bağlı değildir.
+            {'\n\n'}
+            Uygulama:{'\n'}
+            • Acil çağrı merkezlerine bildirim göndermez{'\n'}
+            • Acil servislere çağrı iletmez{'\n'}
+            • Resmî kurtarma operasyonları başlatamaz{'\n'}
+            • Acil servis birimlerinin konumunuzu alacağını veya size müdahale edeceğini garanti edemez
+          </Text>
+
+          <Text style={styles.subsectionTitle}>12.2. Uygulamanın Sunduğu Acil Durum Özellikleri</Text>
+          <Text style={styles.paragraph}>
+            AfetNet'in SOS ve acil durum özellikleri yalnızca aşağıdaki işlevleri sağlar:{'\n\n'}
+            • Konum ve durum bilginizi uygulama içerisinde belirlediğiniz aile üyeleri ve yakın çevre kişilerine iletir{'\n'}
+            • BLE mesh ağı üzerinden internet kesintisi sırasında yakın çevredeki diğer AfetNet kullanıcılarına mesaj iletir{'\n'}
+            • Deprem erken uyarı bildirimlerini uygulama içerisinde iletir (resmî uyarı sistemlerinden bağımsız){'\n'}
+            • Afet hazırlığı, ilk yardım rehberliği ve toplanma noktası bilgisi sağlar{'\n\n'}
+            Bu özellikler topluluk temelli iletişim araçlarıdır; resmî acil müdahale hizmetlerinin yerini tutmaz ve tutamaz.
+          </Text>
+
+          <Text style={styles.subsectionTitle}>12.3. Acil Servis Sevk ve Müdahale Garantisi Yoktur</Text>
+          <Text style={styles.paragraph}>
+            AfetNet, herhangi bir acil servis biriminin SOS sinyalinizi alacağını, konumunuzu tespit
+            edeceğini veya size müdahale edeceğini garanti etmez ve edemez. Uygulama üzerinden
+            gönderilen SOS sinyalleri YALNIZCA uygulama içerisinde kayıtlı diğer kullanıcılara
+            (aile, yakınlar) iletilir. Resmî acil servisler bu sinyalleri almaz.
+          </Text>
+
+          <Text style={styles.subsectionTitle}>12.4. Konum Doğruluğu ve Sınırlamaları</Text>
+          <Text style={styles.paragraph}>
+            Konum bilgisinin doğruluğu aşağıdaki faktörlere bağlıdır ve garanti edilemez:{'\n\n'}
+            • GPS sinyal kalitesi (açık alan, kapalı alan, bodrum kat, tünel, enkaz altı vb.){'\n'}
+            • İnternet ve mobil ağ bağlantısı durumu{'\n'}
+            • Cihaz sensörünün hassasiyeti ve yazılım sürümü{'\n'}
+            • Hava koşulları ve çevresel engeller{'\n'}
+            • Kullanıcı tarafından verilen konum izni seviyesi (ön plan / arka plan){'\n\n'}
+            Enkaz altı, kapalı yapı ve GPS sinyalinin zayıf olduğu ortamlarda konum doğruluğu
+            önemli ölçüde düşebilir, gecikebilir veya konum hiç iletilmeyebilir. Geliştirici,
+            iletilen konum bilgisinin doğruluğunu, zamanlılığını veya eksiksizliğini garanti etmez.
+          </Text>
+
+          <Text style={styles.subsectionTitle}>12.5. Kullanıcı Sorumluluğu</Text>
+          <Text style={styles.paragraph}>
+            Bu uygulamayı kullanarak aşağıdakileri açıkça kabul etmiş olursunuz:{'\n\n'}
+            • Hayatî tehlike içeren her türlü acil durumda DERHAL 112'yi arayacağınızı{'\n'}
+            • AfetNet'in 112 veya diğer resmî acil servislerin yerini tutmadığını ve ASLA onların ikamesi olarak kullanılmayacağını{'\n'}
+            • SOS ve konum paylaşımı özelliklerinin yalnızca uygulama içerisindeki kullanıcılara (aile, yakınlar) bildirim yaptığını; resmî acil servislere HİÇBİR bildirim göndermediğini{'\n'}
+            • Konum bilgisinin hatalı, gecikmeli veya eksik olabileceğini ve bunun sonucu olarak konumunuzun tespit edilemeyebileceğini{'\n'}
+            • Uygulamanın internet, Bluetooth veya cihaz arıza durumlarında çalışmayabileceğini{'\n'}
+            • Geliştiricinin, uygulamanın kullanımından veya kullanılamamasından kaynaklanan hiçbir doğrudan, dolaylı, özel veya sonuçsal zarardan sorumlu tutulamayacağını
+          </Text>
+
+          <Text style={styles.subsectionTitle}>12.6. Konum Verisi Güvenliği</Text>
+          <Text style={styles.paragraph}>
+            Konum verileriniz:{'\n\n'}
+            • Yalnızca belirlediğiniz kişilerle (aile, yakın çevre) paylaşılır{'\n'}
+            • Firebase altyapısı ve güvenlik kuralları ile korunarak iletilir{'\n'}
+            • Üçüncü taraf reklam veya analitik sistemlere satılmaz{'\n'}
+            • Hesap silindiğinde konum geçmişi de silinir
+          </Text>
+        </View>
+
         <View style={styles.footer}>
           <Text style={styles.footerText}>
             Bu koşulları kabul ederek uygulamayı kullanmaya başlayabilirsiniz.
@@ -249,6 +325,21 @@ const styles = StyleSheet.create({
   paragraph: {
     fontSize: 15,
     color: '#cbd5e1',
+    lineHeight: 24,
+  },
+  emergencyBanner: {
+    backgroundColor: 'rgba(220, 38, 38, 0.15)',
+    borderWidth: 2,
+    borderColor: '#dc2626',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  emergencyBannerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fca5a5',
+    textAlign: 'center',
     lineHeight: 24,
   },
   footer: {

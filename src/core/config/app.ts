@@ -6,7 +6,7 @@
 export const APP_CONFIG = {
   // App Identity
   name: 'AfetNet',
-  version: '1.0.2',
+  version: '1.4.0',
   bundleId: 'com.gokhancamci.afetnetapp',
 
   // EAS
@@ -22,7 +22,7 @@ export const APP_CONFIG = {
 
   // Feature Flags
   features: {
-    eewEnabled: false, // Earthquake Early Warning (disabled for now)
+    eewEnabled: true, // Earthquake Early Warning
     eewNativeAlarm: false,
   },
 };

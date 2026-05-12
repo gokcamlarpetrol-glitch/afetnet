@@ -14,6 +14,7 @@ import { onDeviceEEWService } from './seismic/OnDeviceEEWService';
 
 const logger = createLogger('SeismicSensorService');
 const LOCATION_TASK_NAME = 'SEISMIC_LOCATION_HEARTBEAT';
+const SEISMIC_BACKGROUND_HEARTBEAT_ENABLED = process.env.EXPO_PUBLIC_SEISMIC_BACKGROUND_HEARTBEAT === 'true';
 
 // ELITE: Proper type for TaskManager location data
 interface LocationTaskData {
@@ -76,14 +77,7 @@ class SeismicSensorService {
 
     logger.info('Starting Seismic Service & Background Heartbeat...');
 
-    // 1. Request ALWAYS Permissions (Critical for 24/7)
-    const { status } = await Location.requestBackgroundPermissionsAsync();
-    if (status !== 'granted') {
-      logger.warn('Background Location Permission denied! 24/7 monitoring will fail.');
-      // Proceed anyway with foreground only
-    }
-
-    // 2. Start Engine (Accelerometer)
+    // 1. Start Engine (Accelerometer)
     // The engine itself runs in JS. It needs the JS thread to be alive.
     seismicEngine.start(this.handleDetection.bind(this));
     onDeviceEEWService.start();
@@ -96,26 +90,34 @@ class SeismicSensorService {
       logger.warn('Failed to start Activity Guard:', e);
     }
 
-    // 3. Start "Heartbeat" via Background Location
-    // On iOS, "Background Location" mode keeps the app running essentially forever
-    // as long as we request updates.
-    try {
-      await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-        accuracy: Location.Accuracy.Balanced, // Enough for city-level, saves some battery
-        timeInterval: 10000, // Update every 10s (Heartbeat rate)
-        distanceInterval: 50, // Or every 50 meters
-        showsBackgroundLocationIndicator: true, // REQUIRED by Apple for continuous background use
-        foregroundService: {
-          notificationTitle: "Deprem İzleme Aktif",
-          notificationBody: "AfetNet sizi ve sevdiklerinizi korumak için arka planda çalışıyor.",
-          notificationColor: "#ef4444",
-        },
-        pausesUpdatesAutomatically: false, // CRITICAL: Don't let OS stop it
-        activityType: Location.ActivityType.Other, // Generic
-      });
-      logger.info('Background Heartbeat Activated');
-    } catch (e) {
-      logger.error('Failed to start Background Heartbeat:', e);
+    // 2. Optional keep-alive heartbeat (default OFF for non-intrusive UX).
+    if (!SEISMIC_BACKGROUND_HEARTBEAT_ENABLED) {
+      logger.info('Seismic background heartbeat disabled (sensor works in foreground)');
+    } else {
+      try {
+        // Do not trigger "Always" permission prompt automatically.
+        const { status } = await Location.getBackgroundPermissionsAsync();
+        if (status !== 'granted') {
+          logger.warn('Background location permission not granted; seismic heartbeat skipped');
+        } else {
+          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+            accuracy: Location.Accuracy.Balanced, // Enough for city-level, saves some battery
+            timeInterval: 60000, // Update every 60s
+            distanceInterval: 50, // Or every 50 meters
+            showsBackgroundLocationIndicator: false,
+            foregroundService: {
+              notificationTitle: "Deprem İzleme Aktif",
+              notificationBody: "AfetNet sizi ve sevdiklerinizi korumak için arka planda çalışıyor.",
+              notificationColor: "#ef4444",
+            },
+            pausesUpdatesAutomatically: false,
+            activityType: Location.ActivityType.Other,
+          });
+          logger.info('Background Heartbeat Activated');
+        }
+      } catch (e) {
+        logger.error('Failed to start Background Heartbeat:', e);
+      }
     }
 
     this.isServiceRunning = true;
@@ -174,7 +176,7 @@ class SeismicSensorService {
     }
 
     // 3. Notify callbacks
-    for (const callback of this.detectionCallbacks) {
+    for (const callback of [...this.detectionCallbacks]) {
       try {
         callback(event);
       } catch (err) {

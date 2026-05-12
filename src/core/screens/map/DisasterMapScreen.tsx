@@ -24,7 +24,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // expo-location used via useLiveLocation hook
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../components/SafeBlurView';
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import Animated, {
@@ -34,6 +34,7 @@ import Animated, {
   withRepeat,
   withTiming,
   withSpring,
+  cancelAnimation,
   Easing,
 } from 'react-native-reanimated';
 import { styles, PREMIUM_COLORS } from './DisasterMapScreen.styles';
@@ -46,6 +47,7 @@ import { useLiveLocation } from '../../hooks/useLiveLocation';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { ClusterMarker } from '../../components/map/ClusterMarker';
 import { MapClusterEngine, MapPoint } from '../../utils/MapClusterEngine';
+import { mapPOIService, MapPOI } from '../../services/map/MapPOIService';
 import { MapLegend, getMagnitudeColor } from '../../components/map/MapLegend';
 import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 // NOTE: Premium overlays removed for stability (AssemblyPointMarkers, WavePropagationOverlay, RiskOverlay)
@@ -97,7 +99,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-import MapView, { Marker, Circle } from 'react-native-maps';
+import MapView, { Marker, Circle, Polyline } from 'react-native-maps';
 
 // Dimensions available via Dimensions.get('window') when needed
 
@@ -111,6 +113,9 @@ interface DisasterMapScreenProps {
 
 // ELITE: Premium color palette (Modern Calm Trust)
 // PREMIUM_COLORS imported from DisasterMapScreen.styles.ts
+
+// PERF: Static gradient color arrays — prevent re-creation on every render
+const HEADER_GRADIENT_COLORS: [string, string] = ['rgba(255,252,247,0.95)', 'rgba(244,239,231,0.9)'];
 
 // PREMIUM: Status colors with Modern Calm Trust palette
 const STATUS_COLORS: Record<string, string> = {
@@ -144,6 +149,10 @@ const PulseMarker = ({ color = PREMIUM_COLORS.trustBlue, size = 80 }: { color?: 
       -1,
       false
     );
+    return () => {
+      cancelAnimation(scale);
+      cancelAnimation(opacity);
+    };
   }, []);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -263,6 +272,7 @@ const EEWStatusBadge = () => {
       -1,
       true
     );
+    return () => { cancelAnimation(pulseOpacity); };
   }, []);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -302,6 +312,12 @@ const SOSSignalMarker = ({
       -1,
       false
     );
+
+    // ELITE: Cancel infinite animations on unmount to prevent memory leak
+    return () => {
+      cancelAnimation(pulseScale);
+      cancelAnimation(pulseOpacity);
+    };
   }, []);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -380,6 +396,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
   }, []);
 
   // Route params from notification tap (SOS + family location focus)
+  const routeEarthquake = route?.params?.earthquake as { latitude?: number; longitude?: number; magnitude?: number } | undefined;
   const focusOnSOS = route?.params?.focusOnSOS;
   const focusOnFamily = route?.params?.focusOnFamily;
   const sosLatitude = toFiniteNumber(route?.params?.sosLatitude);
@@ -404,17 +421,67 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
   const [isInitialized, setIsInitialized] = useState(false);
   const [viewMode, setViewMode] = useState<'family' | 'earthquake'>('family');
 
+  // PREMIUM POI Layer State
+  const [pois, setPois] = useState<MapPOI[]>([]);
+  const [poiFilter, setPoiFilter] = useState<'none' | 'hospital' | 'assembly_point'>('none');
+  const [selectedPOI, setSelectedPOI] = useState<MapPOI | null>(null);
+
+  // Focus on selected POI when tapped
+  const handlePOIPress = useCallback((poi: MapPOI) => {
+    haptics.impactMedium();
+    setSelectedPOI(poi);
+    setSelectedMember(null);
+    setSelectedQuake(null);
+    setSelectedSOS(null);
+
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: poi.latitude - 0.002,
+        longitude: poi.longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      }, 500);
+    }
+    bottomSheetRef.current?.snapToIndex(1);
+  }, []);
+
   // Auto-focus on location when navigated from notification
+  // isInitialized is required in deps so this re-runs after map is ready
   useEffect(() => {
-    if (shouldFocusRouteLocation && targetLatitude !== null && targetLongitude !== null && mapRef.current) {
+    if (!shouldFocusRouteLocation || targetLatitude === null || targetLongitude === null) return;
+    if (!isInitialized || !mapRef.current) return;
+
+    // Small delay to let the map finish its own initialization animation
+    const t = setTimeout(() => {
+      if (!mapRef.current) return;
       mapRef.current.animateToRegion({
         latitude: targetLatitude,
         longitude: targetLongitude,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
-      }, 1000);
-    }
-  }, [shouldFocusRouteLocation, targetLatitude, targetLongitude]);
+      }, 800);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [shouldFocusRouteLocation, targetLatitude, targetLongitude, isInitialized]);
+
+  // Auto-focus on earthquake when navigated from HomeScreen or AllEarthquakes
+  useEffect(() => {
+    if (!routeEarthquake?.latitude || !routeEarthquake?.longitude) return;
+    if (!isInitialized || !mapRef.current) return;
+    if (shouldFocusRouteLocation) return; // SOS/family focus takes priority
+
+    setViewMode('earthquake');
+    const t = setTimeout(() => {
+      if (!mapRef.current) return;
+      mapRef.current.animateToRegion({
+        latitude: routeEarthquake.latitude!,
+        longitude: routeEarthquake.longitude!,
+        latitudeDelta: 0.5,
+        longitudeDelta: 0.5,
+      }, 800);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [routeEarthquake, isInitialized, shouldFocusRouteLocation]);
 
   // Stores
   const familyMembers = useFamilyStore((state) => state.members);
@@ -505,23 +572,26 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
     });
   }, []);
 
-  // FIX #2: Location initialization is now handled by useLiveLocation hook
+  // FIX #2: Location initialization — only set region on FIRST GPS fix
+  // Subsequent GPS updates must NOT override user's manual pan/zoom
   useEffect(() => {
     if (userLocation) {
-      const initialRegion = {
-        ...userLocation,
-        ...DEFAULT_DELTA,
-      };
-      setRegion(initialRegion);
-      setIsInitialized(true);
+      if (!isInitialized) {
+        const initialRegion = {
+          ...userLocation,
+          ...DEFAULT_DELTA,
+        };
+        setRegion(initialRegion);
+        setIsInitialized(true);
 
-      if (mapRef.current && !isInitialized) {
-        mapRef.current.animateToRegion(initialRegion, 500);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(initialRegion, 500);
+        }
       }
     } else {
       // Fallback: if no location after 3 seconds, show Turkey overview
       const timer = setTimeout(() => {
-        if (!userLocation) {
+        if (!isInitialized) {
           setRegion({
             latitude: 39.0,
             longitude: 35.0,
@@ -534,6 +604,19 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
       return () => clearTimeout(timer);
     }
   }, [userLocation]);
+
+  // Fetch POIs when filter changes or location initializes
+  useEffect(() => {
+    if (userLocation && poiFilter !== 'none') {
+      mapPOIService.getNearbyPOIs(userLocation.latitude, userLocation.longitude, 10)
+        .then(fetchedPois => {
+          setPois(fetchedPois.filter(p => p.type === poiFilter));
+        })
+        .catch(err => logger.error('Failed to fetch POIs:', err));
+    } else {
+      setPois([]);
+    }
+  }, [userLocation, poiFilter]);
 
   // Update earthquake clusters
   useEffect(() => {
@@ -667,6 +750,117 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
     bottomSheetRef.current?.snapToIndex(1);
   }, []);
 
+  // PERF: Memoized marker elements — prevents JSX re-creation on every pan/zoom
+  const familyMarkerElements = useMemo(() => familyMembers.map((member) => {
+    const lat = member.location?.latitude ?? member.latitude;
+    const lng = member.location?.longitude ?? member.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) return null;
+    return (
+      <Marker
+        key={member.uid}
+        coordinate={{ latitude: lat, longitude: lng }}
+        anchor={{ x: 0.5, y: 0.9 }}
+        zIndex={selectedMember?.uid === member.uid ? 100 : 10}
+        tracksViewChanges={false}
+      >
+        <FamilyMemberMarker
+          member={member}
+          isSelected={selectedMember?.uid === member.uid}
+          onPress={() => focusOnMember(member)}
+        />
+      </Marker>
+    );
+  }), [familyMembers, selectedMember, focusOnMember]);
+
+  const earthquakeHeatmapElements = useMemo(() => earthquakes.slice(0, 20).map((eq) => (
+    <Circle
+      key={`heatmap-${eq.id}`}
+      center={{ latitude: eq.latitude, longitude: eq.longitude }}
+      radius={eq.magnitude * 8000}
+      fillColor={getMagnitudeColor(eq.magnitude) + '25'}
+      strokeColor={getMagnitudeColor(eq.magnitude)}
+      strokeWidth={2}
+    />
+  )), [earthquakes]);
+
+  const earthquakeClusterElements = useMemo(() => clusters.map((item) => {
+    const { geometry, properties } = item;
+    const coordinate = {
+      latitude: geometry.coordinates[1],
+      longitude: geometry.coordinates[0],
+    };
+    if (properties.cluster) {
+      return (
+        <ClusterMarker
+          key={`cluster-${properties.cluster_id}`}
+          cluster={{
+            ...properties,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            point_count: properties.point_count,
+          }}
+          onPress={() => handleClusterPress(properties.cluster_id, coordinate)}
+        />
+      );
+    }
+    return (
+      <Marker
+        key={`quake-${properties.pointId}`}
+        coordinate={coordinate}
+        onPress={() => handleQuakePress(properties as unknown as MapPoint)}
+        tracksViewChanges={false}
+      >
+        <EarthquakeMarker
+          magnitude={properties.magnitude || 3.0}
+          selected={selectedQuake?.id === properties.pointId}
+        />
+      </Marker>
+    );
+  }), [clusters, selectedQuake, handleClusterPress, handleQuakePress]);
+
+  const poiMarkerElements = useMemo(() => pois.map((poi) => (
+    <Marker
+      key={poi.id}
+      coordinate={{ latitude: poi.latitude, longitude: poi.longitude }}
+      onPress={() => handlePOIPress(poi)}
+      tracksViewChanges={false}
+      zIndex={selectedPOI?.id === poi.id ? 200 : 50}
+    >
+      <View style={[
+        styles.poiMarker,
+        { backgroundColor: poi.type === 'hospital' ? '#EF4444' : '#10B981' },
+      ]}>
+        <Ionicons
+          name={poi.type === 'hospital' ? 'medical' : 'shield-checkmark'}
+          size={20}
+          color="#fff"
+        />
+      </View>
+    </Marker>
+  )), [pois, selectedPOI, handlePOIPress]);
+
+  const sosMarkerElements = useMemo(() => allSOSSignals.map((signal) => (
+    <Marker
+      key={`sos-${signal.id}`}
+      coordinate={{ latitude: signal.latitude, longitude: signal.longitude }}
+      onPress={() => {
+        haptics.impactMedium();
+        setSelectedSOS(signal);
+        bottomSheetRef.current?.snapToIndex(1);
+      }}
+      tracksViewChanges={false}
+    >
+      <SOSSignalMarker
+        signal={signal}
+        onPress={() => {
+          setSelectedSOS(signal);
+          bottomSheetRef.current?.snapToIndex(1);
+        }}
+        userLocation={userLocation}
+      />
+    </Marker>
+  )), [allSOSSignals, userLocation]);
+
   // Helper functions
   const getRelativeTime = (timestamp: number | string | Date | null | undefined): string =>
     formatLastSeen(timestamp);
@@ -762,113 +956,46 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
           </Marker>
         )}
 
-        {/* Family Members */}
-        {familyMembers.map((member) => {
-          const lat = member.location?.latitude ?? member.latitude;
-          const lng = member.location?.longitude ?? member.longitude;
+        {/* Family Members — PERF: memoized to avoid re-creation on pan/zoom */}
+        {familyMarkerElements}
 
-          if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) return null;
+        {/* Earthquake Heatmap Circles — PERF: memoized */}
+        {viewMode === 'earthquake' && earthquakeHeatmapElements}
 
-          return (
-            <Marker
-              key={member.uid}
-              coordinate={{ latitude: lat, longitude: lng }}
-              anchor={{ x: 0.5, y: 0.9 }}
-              zIndex={selectedMember?.uid === member.uid ? 100 : 10}
-              tracksViewChanges={false}
-            >
-              <FamilyMemberMarker
-                member={member}
-                isSelected={selectedMember?.uid === member.uid}
-                onPress={() => focusOnMember(member)}
-              />
-            </Marker>
-          );
-        })}
+        {/* Earthquake Markers — PERF: memoized */}
+        {viewMode === 'earthquake' && earthquakeClusterElements}
 
-        {/* Earthquake Heatmap Circles */}
-        {viewMode === 'earthquake' && earthquakes.slice(0, 20).map((eq) => (
-          <Circle
-            key={`heatmap-${eq.id}`}
-            center={{ latitude: eq.latitude, longitude: eq.longitude }}
-            radius={eq.magnitude * 8000}
-            fillColor={getMagnitudeColor(eq.magnitude) + '25'}
-            strokeColor={getMagnitudeColor(eq.magnitude)}
-            strokeWidth={2}
+        {/* POI Markers — PERF: memoized */}
+        {poiMarkerElements}
+
+        {/* PREMIUM: SOS Signal Markers — PERF: memoized */}
+        {sosMarkerElements}
+
+        {/* ============================================================================ */}
+        {/* ELITE V2: IN-APP RESCUE ROUTING (POLYLINE)                                   */}
+        {/* ============================================================================ */}
+        {shouldFocusRouteLocation && userLocation && targetLatitude !== null && targetLongitude !== null && (
+          <Polyline
+            coordinates={[
+              { latitude: userLocation.latitude, longitude: userLocation.longitude },
+              { latitude: targetLatitude, longitude: targetLongitude },
+            ]}
+            strokeColor="#DC2626" // Red for emergency route
+            strokeWidth={4}
+            lineDashPattern={[10, 10]} // Dashed line to indicate direct path
+            geodesic={true}
           />
-        ))}
-
-        {/* Earthquake Markers */}
-        {viewMode === 'earthquake' && clusters.map((item) => {
-          const { geometry, properties } = item;
-          const coordinate = {
-            latitude: geometry.coordinates[1],
-            longitude: geometry.coordinates[0],
-          };
-
-          if (properties.cluster) {
-            return (
-              <ClusterMarker
-                key={`cluster-${properties.cluster_id}`}
-                cluster={{
-                  ...properties,
-                  latitude: coordinate.latitude,
-                  longitude: coordinate.longitude,
-                  point_count: properties.point_count,
-                }}
-                onPress={() => handleClusterPress(properties.cluster_id, coordinate)}
-              />
-            );
-          }
-
-          return (
-            <Marker
-              key={`quake-${properties.pointId}`}
-              coordinate={coordinate}
-              onPress={() => handleQuakePress(properties as unknown as MapPoint)}
-              tracksViewChanges={false}
-            >
-              <EarthquakeMarker
-                magnitude={properties.magnitude || 3.0}
-                selected={selectedQuake?.id === properties.pointId}
-              />
-            </Marker>
-          );
-        })}
-
-        {/* PREMIUM: SOS Signal Markers - Always visible in both modes */}
-        {allSOSSignals.map((signal) => (
-          <Marker
-            key={`sos-${signal.id}`}
-            coordinate={{ latitude: signal.latitude, longitude: signal.longitude }}
-            onPress={() => {
-              haptics.impactMedium();
-              setSelectedSOS(signal);
-              bottomSheetRef.current?.snapToIndex(1);
-            }}
-            tracksViewChanges={false}  // FIX #4: Performance — SOS markers don't need per-frame re-render
-          >
-            <SOSSignalMarker
-              signal={signal}
-              onPress={() => {
-                haptics.impactMedium();
-                setSelectedSOS(signal);
-                bottomSheetRef.current?.snapToIndex(1);
-              }}
-              userLocation={userLocation}
-            />
-          </Marker>
-        ))}
+        )}
 
         {/* NOTE: Premium overlays removed for stability. 
-            Will be re-added with lazy loading in future update. */}
+                  Will be re-added with lazy loading in future update. */}
       </MapView>
 
       {/* PREMIUM: Header with glassmorphism */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <BlurView intensity={40} tint="light" style={styles.headerBlur}>
           <LinearGradient
-            colors={['rgba(255,252,247,0.95)', 'rgba(244,239,231,0.9)']}
+            colors={HEADER_GRADIENT_COLORS}
             style={styles.headerGradient}
           >
             {/* Back Button - only when navigated from Stack */}
@@ -939,6 +1066,8 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
               </Pressable>
             </View>
 
+            {/* POI Filter Toggles - Disabled until real data source is integrated */}
+
             {/* EEW Status Badge */}
             <EEWStatusBadge />
           </LinearGradient>
@@ -1008,7 +1137,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
       >
         <BottomSheetScrollView style={styles.sheetContent}>
           {/* Family Members List (default view) */}
-          {!selectedMember && !selectedQuake && (
+          {!selectedMember && !selectedQuake && !selectedSOS && !selectedPOI && (
             <>
               <Text style={styles.sheetTitle}>
                 {viewMode === 'family' ? 'Aile Üyeleri' : 'Deprem Aktivitesi'}
@@ -1334,7 +1463,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
                         const lng = hasLocation ? memberLng : selectedMember.lastKnownLocation?.longitude;
                         if (lat && lng) {
                           const url = Platform.OS === 'ios'
-                            ? `http://maps.apple.com/?daddr=${lat},${lng}`
+                            ? `https://maps.apple.com/?daddr=${lat},${lng}`
                             : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
                           Linking.openURL(url).catch(err => logger.error('Maps:', err));
                         } else {
@@ -1404,7 +1533,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
                 <Text style={styles.quakeLocation}>{selectedQuake.location}</Text>
                 <Text style={styles.quakeTime}>
                   {selectedQuake.time
-                    ? new Date(selectedQuake.time).toLocaleString('tr-TR')
+                    ? new Date(selectedQuake.time).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
                     : 'Zaman bilinmiyor'}
                 </Text>
               </View>
@@ -1560,7 +1689,7 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
               {/* ACTION BUTTONS — Life-saving actions */}
               <View style={styles.actionButtons}>
 
-                {/* 🧭 KONUMA GİT — Turn-by-turn navigation with walking/driving choice */}
+                {/* 🗺️ KONUMA GİT — Open in-app SOSHelp screen with live map */}
                 <LinearGradient
                   colors={['#DC2626', '#B91C1C']}
                   style={styles.actionBtnPrimary}
@@ -1569,36 +1698,21 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
                     style={styles.actionBtnInner}
                     onPress={() => {
                       haptics.impactHeavy();
-                      const lat = selectedSOS.latitude;
-                      const lng = selectedSOS.longitude;
-                      Alert.alert(
-                        'Yol Tarifi',
-                        'Nasıl gitmek istiyorsunuz?',
-                        [
-                          {
-                            text: 'Yürüyerek',
-                            onPress: () => {
-                              const url = Platform.OS === 'ios'
-                                ? `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=w`
-                                : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
-                              Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
-                            },
-                          },
-                          {
-                            text: 'Araçla',
-                            onPress: () => {
-                              const url = Platform.OS === 'ios'
-                                ? `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`
-                                : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
-                              Linking.openURL(url).catch(err => logger.error('Failed to open maps:', err));
-                            },
-                          },
-                          { text: 'İptal', style: 'cancel' },
-                        ],
-                      );
+                      navigation.navigate('SOSHelp', {
+                        signalId: selectedSOS.signalId || selectedSOS.id,
+                        senderUid: selectedSOS.senderUid || selectedSOS.userId,
+                        senderDeviceId: selectedSOS.senderDeviceId,
+                        senderName: selectedSOS.name || selectedSOS.userName || 'SOS',
+                        latitude: selectedSOS.latitude,
+                        longitude: selectedSOS.longitude,
+                        message: selectedSOS.message,
+                        trapped: selectedSOS.trapped,
+                        battery: selectedSOS.battery,
+                        healthInfo: selectedSOS.healthInfo,
+                      });
                     }}
                   >
-                    <Ionicons name="navigate" size={20} color="#fff" />
+                    <Ionicons name="map" size={20} color="#fff" />
                     <Text style={styles.actionBtnPrimaryText}>Konuma Git</Text>
                   </Pressable>
                 </LinearGradient>
@@ -1671,8 +1785,66 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
               </View>
             </View>
           )}
+
+          {/* POI Selected Detail */}
+          {selectedPOI && (
+            <View style={styles.detailView}>
+              <Pressable
+                style={styles.backBtn}
+                onPress={() => setSelectedPOI(null)}
+              >
+                <Ionicons name="chevron-back" size={20} color={PREMIUM_COLORS.trustBlue} />
+                <Text style={styles.backBtnText}>Geri</Text>
+              </Pressable>
+
+              <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                <View style={{
+                  backgroundColor: selectedPOI.type === 'hospital' ? '#FEF2F2' : '#ECFDF5',
+                  width: 80,
+                  height: 80,
+                  borderRadius: 40,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 12,
+                  borderWidth: 2,
+                  borderColor: selectedPOI.type === 'hospital' ? '#FCA5A5' : '#6EE7B7',
+                }}>
+                  <Ionicons
+                    name={selectedPOI.type === 'hospital' ? 'medical' : 'shield-checkmark'}
+                    size={40}
+                    color={selectedPOI.type === 'hospital' ? '#EF4444' : '#10B981'}
+                  />
+                </View>
+                <Text style={{ fontSize: 22, fontWeight: '800', color: PREMIUM_COLORS.textPrimary, textAlign: 'center' }}>
+                  {selectedPOI.title}
+                </Text>
+                <Text style={{ fontSize: 15, color: PREMIUM_COLORS.textSecondary, marginTop: 4 }}>
+                  {selectedPOI.type === 'hospital' ? 'Sağlık Kuruluşu' : 'Resmi Toplanma Alanı'}
+                </Text>
+              </View>
+
+              <LinearGradient
+                colors={[PREMIUM_COLORS.trustBlue, PREMIUM_COLORS.trustBlueDark]}
+                style={styles.actionBtnPrimary}
+              >
+                <Pressable
+                  style={styles.actionBtnInner}
+                  onPress={() => {
+                    haptics.impactMedium();
+                    const url = Platform.OS === 'ios'
+                      ? `https://maps.apple.com/?daddr=${selectedPOI.latitude},${selectedPOI.longitude}`
+                      : `https://www.google.com/maps/dir/?api=1&destination=${selectedPOI.latitude},${selectedPOI.longitude}`;
+                    Linking.openURL(url).catch(err => logger.error('Maps failed:', err));
+                  }}
+                >
+                  <Ionicons name="navigate" size={20} color="#fff" />
+                  <Text style={styles.actionBtnPrimaryText}>Yol Tarifi Al</Text>
+                </Pressable>
+              </LinearGradient>
+            </View>
+          )}
         </BottomSheetScrollView>
       </BottomSheet>
-    </View>
+    </View >
   );
 }

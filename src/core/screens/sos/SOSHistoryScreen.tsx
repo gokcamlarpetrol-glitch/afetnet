@@ -63,7 +63,7 @@ const formatDate = (timestamp: number): string => {
     yesterday.setDate(yesterday.getDate() - 1);
     const isYesterday = date.toDateString() === yesterday.toDateString();
 
-    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
 
     if (isToday) return `Bugün ${timeStr}`;
     if (isYesterday) return `Dün ${timeStr}`;
@@ -198,7 +198,7 @@ export default function SOSHistoryScreen({ navigation }: SOSHistoryScreenProps) 
                     default: `https://maps.google.com/?q=${signal.location.latitude},${signal.location.longitude}`,
                 });
                 if (url) {
-                    Linking.openURL(url).catch(() => { });
+                    Linking.openURL(url).catch(e => { if (__DEV__) console.debug('Open SOS location URL failed:', e); });
                 }
             }
         },

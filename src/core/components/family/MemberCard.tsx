@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
   withRepeat,
   withTiming,
+  cancelAnimation,
   FadeInDown,
 } from 'react-native-reanimated';
 
@@ -29,6 +30,10 @@ interface MemberCardProps {
 // Staleness thresholds
 const STALE_WARN_MS = 30 * 60 * 1000;  // 30 minutes → orange
 const STALE_OLD_MS = 2 * 60 * 60 * 1000; // 2 hours → red "Konum eski"
+// Safety status (Güvende / Yardım Bekliyor) staleness — 24h is the maximum trust window.
+// After 24h a self-reported "safe" status must be treated as stale; family members
+// should re-confirm rather than rely on multi-day-old positive status.
+const STATUS_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export const MemberCard = React.memo(function MemberCard({
   member, onPress, index, onEdit, onDelete, onMessage, onLocate,
@@ -46,8 +51,10 @@ export const MemberCard = React.memo(function MemberCard({
         true,
       );
     } else {
+      cancelAnimation(pulseOpacity);
       pulseOpacity.value = withTiming(1, { duration: 200 });
     }
+    return () => { cancelAnimation(pulseOpacity); };
   }, [member.status, pulseOpacity]);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -122,10 +129,25 @@ export const MemberCard = React.memo(function MemberCard({
   const normalizedLastSeen = normalizeTimestampMs(member.lastSeen);
 
   // Staleness calculation
-  const locationTimestamp = member.location?.timestamp ?? member.lastKnownLocation?.timestamp ?? normalizedLastSeen;
-  const locationAgeMs = locationTimestamp ? Date.now() - locationTimestamp : null;
+  const locationTimestamp = member.location?.timestamp ?? member.lastKnownLocation?.timestamp ?? null;
+  const normalizedLocTs = locationTimestamp ? normalizeTimestampMs(locationTimestamp) : null;
+  const locationAgeMs = normalizedLocTs ? Date.now() - normalizedLocTs : null;
   const isLocationStale = locationAgeMs !== null && locationAgeMs > STALE_WARN_MS;
   const isLocationVeryStale = locationAgeMs !== null && locationAgeMs > STALE_OLD_MS;
+
+  // Safety status staleness — applies to self-reported status fields (safe / need-help).
+  // 'critical', 'danger', 'offline' are auto-generated and don't need staleness gating.
+  const statusUpdateTs = member.statusUpdatedAt
+    ? normalizeTimestampMs(member.statusUpdatedAt)
+    : null;
+  const statusAgeMs = statusUpdateTs ? Date.now() - statusUpdateTs : null;
+  const isSelfReportedStatus = member.status === 'safe' || member.status === 'need-help';
+  const isStatusStale = isSelfReportedStatus && statusAgeMs !== null && statusAgeMs > STATUS_STALE_MS;
+  const statusStaleDays = isStatusStale ? Math.floor((statusAgeMs ?? 0) / (24 * 60 * 60 * 1000)) : 0;
+
+  // HATA 5 FIX: Pending approval state — KVKK + stalking koruma
+  const isPendingApproval = member.approvalState === 'pending';
+  const isDeclinedApproval = member.approvalState === 'declined';
 
   // Avatar
   const initial = member.name.charAt(0).toUpperCase();
@@ -204,11 +226,26 @@ export const MemberCard = React.memo(function MemberCard({
               </View>
 
               <View style={styles.metaRow}>
-                {/* Status badge */}
-                <View style={[styles.statusBadge, { backgroundColor: color + '14' }]}>
-                  <Ionicons name={icon} size={11} color={color} />
-                  <Text style={[styles.statusText, { color }]}>{statusText}</Text>
-                </View>
+                {/* HATA 5 FIX: Pending/declined approval badge takes priority over status */}
+                {isPendingApproval ? (
+                  <View style={[styles.statusBadge, { backgroundColor: '#fbbf24' + '20' }]}>
+                    <Ionicons name="hourglass" size={11} color="#d97706" />
+                    <Text style={[styles.statusText, { color: '#d97706' }]}>Onay Bekliyor</Text>
+                  </View>
+                ) : isDeclinedApproval ? (
+                  <View style={[styles.statusBadge, { backgroundColor: '#94a3b8' + '14' }]}>
+                    <Ionicons name="close-circle" size={11} color="#64748b" />
+                    <Text style={[styles.statusText, { color: '#64748b' }]}>Reddedildi</Text>
+                  </View>
+                ) : (
+                  /* Status badge — degraded if stale (>24h self-reported) */
+                  <View style={[styles.statusBadge, { backgroundColor: (isStatusStale ? '#94a3b8' : color) + '14' }]}>
+                    <Ionicons name={isStatusStale ? 'help-circle' : icon} size={11} color={isStatusStale ? '#94a3b8' : color} />
+                    <Text style={[styles.statusText, { color: isStatusStale ? '#94a3b8' : color }]}>
+                      {isStatusStale ? `${statusText} (${statusStaleDays}g önce)` : statusText}
+                    </Text>
+                  </View>
+                )}
                 {/* Time with staleness color */}
                 <View style={styles.timeBadge}>
                   <Ionicons name="time-outline" size={10} color={isLocationVeryStale ? '#ef4444' : isLocationStale ? '#f59e0b' : '#94a3b8'} />

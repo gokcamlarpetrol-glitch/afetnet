@@ -9,6 +9,7 @@ import { createLogger } from '../utils/logger';
 import { multiChannelAlertService } from './MultiChannelAlertService';
 import { useEEWStore } from '../../eew/store';
 import { eliteWaveCalculationService, type EliteWaveCalculationResult } from './EliteWaveCalculationService';
+import { formatTurkeyApiDateTime, parseAFADDate } from '../utils/timeUtils';
 
 const logger = createLogger('EEWService');
 
@@ -59,10 +60,9 @@ class EEWService {
 
   // Get AFAD poll URL (dynamically generated for last 10 minutes)
   private getAfadPollUrl(): string {
-    const tenMinAgo = new Date();
-    tenMinAgo.setMinutes(tenMinAgo.getMinutes() - 10);
-    const startDate = tenMinAgo.toISOString().replace('Z', '');
-    const endDate = new Date().toISOString().replace('Z', '');
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
+    const startDate = formatTurkeyApiDateTime(tenMinAgo);
+    const endDate = formatTurkeyApiDateTime();
     return `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1&limit=20`;
   }
 
@@ -623,7 +623,7 @@ class EEWService {
         return null;
       }
 
-      const issuedAt = eventDate ? new Date(eventDate).getTime() : Date.now();
+      const issuedAt = eventDate ? parseAFADDate(String(eventDate)) : Date.now();
 
       return {
         id: `afad-${eventId}`,
@@ -692,6 +692,49 @@ class EEWService {
       if (__DEV__ && magnitude >= settings.eewMinMagnitude - 0.5) {
         logger.debug(`EEW magnitude threshold not met: ${magnitude} < ${settings.eewMinMagnitude}`);
       }
+      return;
+    }
+
+    // SPRINT 3: Additional false-positive guards — physical plausibility checks.
+    // Any of these returning true means the event is malformed/spoofed/parse-error
+    // and must NOT trigger a life-safety alert. Better to miss a fake than alarm civilians falsely.
+
+    // Magnitude sanity bounds — earthquakes recorded historically have NEVER exceeded M9.5.
+    // Above 10 is parse error or malicious data.
+    if (magnitude > 10.0) {
+      logger.warn(`EEW rejected: impossible magnitude ${magnitude} (>10.0)`);
+      return;
+    }
+
+    // Origin time sanity — must be within last 5 minutes (5min = AFAD typical detection latency upper bound).
+    // Older events are historical, not "early warning" anymore.
+    const eventAgeMs = Date.now() - (event.issuedAt || 0);
+    if (eventAgeMs > 5 * 60 * 1000) {
+      logger.warn(`EEW rejected: event too old (${Math.round(eventAgeMs / 1000)}s ago)`);
+      return;
+    }
+    if (eventAgeMs < -60 * 1000) {
+      // Event timestamp is in the future — impossible. Likely client clock skew.
+      logger.warn(`EEW rejected: event from future (${Math.round(eventAgeMs / 1000)}s)`);
+      return;
+    }
+
+    // Location sanity — Turkey is between ~36-42°N, ~26-45°E.
+    // Allow neighboring countries (±10° margin) but reject completely missing or impossible.
+    const lat = event.latitude;
+    const lng = event.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      logger.warn('EEW rejected: missing or invalid coordinates');
+      return;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      logger.warn(`EEW rejected: coordinates out of bounds (${lat}, ${lng})`);
+      return;
+    }
+
+    // Depth sanity — earthquakes occur 0-700km depth. Above 700 is implausible.
+    if (typeof event.depth === 'number' && (event.depth < 0 || event.depth > 700)) {
+      logger.warn(`EEW rejected: implausible depth ${event.depth}km`);
       return;
     }
 
@@ -892,6 +935,20 @@ class EEWService {
     if (settings.notificationPush) {
       try {
         const { notificationCenter } = await import('./notifications/NotificationCenter');
+        // Sprint Audit FIX A4: EEW Lead-Time Telemetry.
+        // Measures detection-to-delivery latency to verify the "5-60s warning" promise
+        // in real-world. Logged to Sentry as breadcrumb + metric for monitoring.
+        const eewDeliveryStartMs = Date.now();
+        const detectionLatencyMs = eewDeliveryStartMs - (event.issuedAt || eewDeliveryStartMs);
+        try {
+          const { sentryService } = await import('./SentryService');
+          sentryService.addBreadcrumb(
+            `EEW notify path: source=${event.source}, mag=${magnitude.toFixed(1)}, detectLatencyMs=${detectionLatencyMs}`,
+            'eew',
+            'info',
+          );
+        } catch { /* sentry not available */ }
+
         await notificationCenter.notify('eew', {
           magnitude,
           location: event.region || 'Bilinmeyen bölge',
@@ -903,6 +960,20 @@ class EEWService {
           latitude: event.latitude,
           longitude: event.longitude,
         }, 'EEWService');
+
+        // Capture end-to-end delivery latency for the lead-time promise.
+        const deliveryLatencyMs = Date.now() - eewDeliveryStartMs;
+        const totalLatencyMs = Date.now() - (event.issuedAt || Date.now());
+        logger.info(`⚡ EEW delivered: detection=${detectionLatencyMs}ms, dispatch=${deliveryLatencyMs}ms, total=${totalLatencyMs}ms`);
+        try {
+          const { sentryService } = await import('./SentryService');
+          sentryService.addBreadcrumb(
+            `EEW delivered: total=${totalLatencyMs}ms`,
+            'eew',
+            totalLatencyMs > 5000 ? 'warning' : 'info',
+          );
+        } catch { /* */ }
+
         magnitudeNotificationSent = true;
 
         // CRITICAL: Trigger countdown directly for locally-detected earthquakes.

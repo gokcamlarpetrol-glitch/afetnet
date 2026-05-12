@@ -17,6 +17,7 @@
 import { AppState, AppStateStatus } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { createLogger } from '../../utils/logger';
+import { getFirebaseAuth } from '../../../lib/firebase';
 
 const logger = createLogger('SessionSecurityService');
 
@@ -63,10 +64,14 @@ type SessionEventCallback = (event: SessionEvent, state: SessionState) => void;
 // CONSTANTS
 // ============================================================
 
-const STORAGE_KEYS = {
-    SESSION_STATE: '@afetnet:session_state',
-    SESSION_CONFIG: '@afetnet:session_config',
-} as const;
+/** User-scoped storage keys to prevent cross-account data leak */
+function getStorageKeys() {
+    const uid = getFirebaseAuth()?.currentUser?.uid || 'anonymous';
+    return {
+        SESSION_STATE: `@afetnet:session_state:${uid}`,
+        SESSION_CONFIG: `@afetnet:session_config:${uid}`,
+    };
+}
 
 const DEFAULT_CONFIG: SessionConfig = {
     inactivityTimeoutMs: 15 * 60 * 1000, // 15 minutes
@@ -414,7 +419,7 @@ class SessionSecurityService {
 
     private async loadConfig(): Promise<void> {
         try {
-            const stored = await SecureStore.getItemAsync(STORAGE_KEYS.SESSION_CONFIG);
+            const stored = await SecureStore.getItemAsync(getStorageKeys().SESSION_CONFIG);
             if (stored) {
                 this.config = { ...DEFAULT_CONFIG, ...JSON.parse(stored) };
             }
@@ -426,7 +431,7 @@ class SessionSecurityService {
     private async saveConfig(): Promise<void> {
         try {
             await SecureStore.setItemAsync(
-                STORAGE_KEYS.SESSION_CONFIG,
+                getStorageKeys().SESSION_CONFIG,
                 JSON.stringify(this.config)
             );
         } catch {
@@ -454,6 +459,10 @@ class SessionSecurityService {
 
         this.eventListeners.clear();
         this.endSession();
+
+        // CRITICAL FIX: Reset isInitialized so the service can be re-initialized
+        // after stop() is called (e.g., after logout + re-login)
+        this.isInitialized = false;
 
         logger.info('SessionSecurityService stopped');
     }

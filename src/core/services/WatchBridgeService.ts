@@ -302,7 +302,7 @@ class WatchBridgeService {
         message: 'Yüksek nabız algılandı. İyi misin?',
         timestamp: Date.now(),
       },
-    }).catch(() => { /* ignore */ });
+    }).catch(e => { if (__DEV__) logger.debug('Watch heart rate alert failed:', e); });
 
     // Note: In a real implementation, this would show a confirmation
     // dialog on the Watch before triggering SOS

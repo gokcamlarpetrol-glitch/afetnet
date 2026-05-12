@@ -195,7 +195,9 @@ class PresenceService {
                         lastChanged: Date.now(),
                     };
 
-                    callbacks.forEach(cb => cb(userId, resolvedStatus));
+                    // FIX: Spread to array before iterating — a callback may subscribe/unsubscribe,
+                    // modifying the callbacks array mid-iteration.
+                    [...callbacks].forEach(cb => cb(userId, resolvedStatus));
                 });
 
                 this.unsubscribers.set(userId, unsubscribe);
@@ -260,13 +262,19 @@ class PresenceService {
      * Cleanup on logout
      */
     async cleanup(): Promise<void> {
-        // Set offline before cleanup
-        await this.setOffline();
-
-        // Remove app state listener
+        // CRITICAL FIX: Remove AppState listener BEFORE setOffline() to prevent
+        // handleAppStateChange from firing during cleanup and overwriting the
+        // offline status with online/away.
         if (this.appStateSubscription) {
             this.appStateSubscription.remove();
             this.appStateSubscription = null;
+        }
+
+        // Set offline — wrapped in try/catch so the rest of cleanup always runs
+        try {
+            await this.setOffline();
+        } catch (err) {
+            logger.warn('PresenceService: setOffline failed during cleanup, continuing:', err);
         }
 
         // Clear all listeners
@@ -279,6 +287,15 @@ class PresenceService {
         this.activeUid = null;
 
         logger.info('🗑️ PresenceService cleaned up');
+    }
+
+    /**
+     * Destroy — alias for cleanup, used by shutdownApp() for consistent interface.
+     * CRITICAL: Must be called on app shutdown to prevent privacy leak
+     * (old user's presence stays 'online' after account switch).
+     */
+    async destroy(): Promise<void> {
+        await this.cleanup();
     }
 }
 

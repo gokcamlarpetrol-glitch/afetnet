@@ -153,7 +153,7 @@ export const useRiskStore = create<RiskState>()(
           // 4. Building data - requires user input (not yet implemented)
           const buildingFactor: RiskFactor = {
             name: 'Bina Durumu',
-            description: 'Bina bilgisi henuz mevcut degil. Bu ozellik yakinda eklenecek.',
+            description: 'Bina bilgisi eklenmedigi icin bu faktor risk puanina katilmadi.',
             impact: 0,
             status: 'neutral',
           };

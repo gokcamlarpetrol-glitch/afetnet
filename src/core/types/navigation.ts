@@ -15,7 +15,7 @@ export type MainStackParamList = {
     MainTabs: undefined;
     RiskScore: undefined;
     AllEarthquakes: undefined;
-    EarthquakeDetail: { earthquake?: Record<string, unknown> } | undefined;
+    EarthquakeDetail: { earthquake?: Record<string, unknown>; id?: string } | undefined;
     DisasterMap: {
         earthquake?: Record<string, unknown>;
         focusOnSOS?: boolean;
@@ -72,7 +72,7 @@ export type MainStackParamList = {
     NotificationSettings: undefined;
     DisasterPreparedness: undefined;
     AssemblyPoints: undefined;
-    AddAssemblyPoint: { pointId?: string } | undefined;
+    AddAssemblyPoint: { editLocationId?: string; initialLocation?: { latitude: number; longitude: number } } | undefined;
     FlashlightWhistle: undefined;
     PsychologicalSupport: undefined;
     MeshNetwork: undefined;

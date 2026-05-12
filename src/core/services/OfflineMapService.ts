@@ -106,6 +106,7 @@ class OfflineMapService {
 
       await this.saveToCache();
       await this.markCityDownloaded(cityName);
+      DirectStorage.setString(`${this.STORAGE_KEY}:last_update`, String(Date.now()));
 
       if (!silent) this.notifyProgress(city, 1.0, newLocations.length, true);
       logger.info(`Downloaded ${newLocations.length} locations for ${city}`);
@@ -122,11 +123,6 @@ class OfflineMapService {
   // Re-using optimized fetch logic from original file but scoped to city
 
   private async fetchAssemblyPoints(city: string): Promise<MapLocation[]> {
-    // In a real scenario, we would append ?city=${city} to the API
-    // Since AFAD API returns all, we fetch all then filter client-side (streaming in future)
-    // For this demo, we simulate a city-based fetch by filtering the sample 'fetchFromRealAPIs' logic
-
-    // Note: Calling the monolithic fetch logic but filtering it
     const allLocations = await this.fetchFromRealAPIs(city);
     return allLocations.filter(l => l.type === 'assembly');
   }
@@ -137,29 +133,12 @@ class OfflineMapService {
   }
 
   /**
-   * Adapted from original: Fetch from real APIs with Citiy Filter
+   * Fetch location data - real API integration pending.
+   * Returns empty array until a real data source (AFAD API, etc.) is configured.
    */
-  private async fetchFromRealAPIs(cityFilter?: string): Promise<MapLocation[]> {
-    const locations: MapLocation[] = [];
-    // ... [Original fetch code logic would go here, optimized] ...
-    // For Elite Demo, return High-Quality Mock Data for key cities if API fails
-
-    // Fallback Mock Data based on City
-    if (cityFilter?.includes('istanbul')) {
-      return [
-        { id: 'ist-1', type: 'assembly', name: 'Taksim Meydanı', address: 'Beyoğlu', latitude: 41.0369, longitude: 28.9850, city: 'istanbul' },
-        { id: 'ist-2', type: 'hospital', name: 'Çapa Tıp Fakültesi', address: 'Fatih', latitude: 41.0082, longitude: 28.9784, city: 'istanbul' },
-        { id: 'ist-3', type: 'assembly', name: 'Maçka Demokrasi Parkı', address: 'Şişli', latitude: 41.0456, longitude: 28.9950, city: 'istanbul' },
-      ];
-    } else if (cityFilter?.includes('izmir')) {
-      return [
-        { id: 'izm-1', type: 'assembly', name: 'Gündoğdu Meydanı', address: 'Alsancak', latitude: 38.4372, longitude: 27.1424, city: 'izmir' },
-        { id: 'izm-2', type: 'hospital', name: 'Ege Üni. Hastanesi', address: 'Bornova', latitude: 38.4563, longitude: 27.2287, city: 'izmir' },
-      ];
-    }
-
-    // return previous sample data if no city matched or fetch failed
-    return this.locations;
+  private async fetchFromRealAPIs(_cityFilter?: string): Promise<MapLocation[]> {
+    // No real API configured yet - return empty to avoid showing unverified locations
+    return [];
   }
 
   // ... [Keep existing Storage/Cache methods] ...
@@ -188,8 +167,11 @@ class OfflineMapService {
   }
 
   // Progress Listener Support
-  onDownloadProgress(callback: (status: DownloadStatus) => void) {
+  onDownloadProgress(callback: (status: DownloadStatus) => void): () => void {
     this.downloadListeners.push(callback);
+    return () => {
+      this.downloadListeners = this.downloadListeners.filter(cb => cb !== callback);
+    };
   }
 
   private notifyProgress(city: string, progress: number, total: number, isComplete: boolean) {

@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.anonymous.afetnetfunctions"
+  },
+  "ios": {
+    "bundleIdentifier": "com.anonymous.afetnetfunctions"
+  }
+}

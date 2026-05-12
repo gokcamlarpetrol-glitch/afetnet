@@ -34,7 +34,7 @@ export const PaperBackground = ({ children, style }: PaperBackgroundProps) => {
 
       {/* Micro-grain Noise (Simulated via image if available, else subtle pattern) */}
       <Image
-        source={require('../../../../assets/images/background_paper_gradient.png')}
+        source={require('../../../../assets/images/background_paper_gradient.jpg')}
         style={[StyleSheet.absoluteFill, { opacity: 0.6 }]}
         resizeMode="cover"
         // Silent failure if asset missing

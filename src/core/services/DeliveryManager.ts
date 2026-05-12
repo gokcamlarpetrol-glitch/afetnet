@@ -13,10 +13,11 @@
 import { createLogger } from '../utils/logger';
 import { useMeshStore, MeshMessage } from './mesh/MeshStore';
 import { DirectStorage } from '../utils/storage';
+import { identityService } from './IdentityService';
 
 const logger = createLogger('DeliveryManager');
 
-// Storage key
+// Storage key base — scoped per user in getScopedKey()
 const DELIVERY_TRACKING_KEY = '@afetnet:delivery_tracking';
 
 // ELITE: Delivery status
@@ -41,9 +42,9 @@ export type DeliveryCallback = (messageId: string, status: DeliveryStatus) => vo
 
 // ELITE: Retry configuration
 const RETRY_CONFIG = {
-    maxRetries: 5,
-    ackTimeout: 10000, // 10 seconds to wait for ACK
-    retryDelays: [1000, 2000, 4000, 8000, 16000], // Exponential backoff
+    maxRetries: 10,
+    ackTimeout: 30000, // 30 seconds to wait for ACK (BLE mesh multi-hop needs more time)
+    retryDelays: [1000, 2000, 4000, 8000, 16000, 30000, 30000, 60000, 60000, 120000], // Exponential backoff
 };
 
 class DeliveryManager {
@@ -62,6 +63,9 @@ class DeliveryManager {
         await this.loadRecords();
         this.startAckMonitor();
         this.isInitialized = true;
+
+        // Cleanup old records to prevent unbounded growth
+        this.clearOldRecords(7).catch(e => { if (__DEV__) logger.debug('Clear old records failed:', e); });
 
         logger.info('🚀 DeliveryManager initialized');
     }
@@ -188,6 +192,14 @@ class DeliveryManager {
         // Trigger resend via MeshStore
         useMeshStore.getState().retryMessage(messageId);
 
+        // FIX: Also trigger HybridMessageService queue processing.
+        // MeshStore.retryMessage only updates local state — it does NOT actually
+        // re-send the message over the network. HybridMessageService handles that.
+        try {
+            const { hybridMessageService } = require('./HybridMessageService');
+            hybridMessageService.retryAllFailed();
+        } catch { /* best-effort */ }
+
         logger.info(`Retrying message: ${messageId}, attempt ${record.retryCount}`);
         return true;
     }
@@ -289,12 +301,17 @@ class DeliveryManager {
 
         // Check if we should retry
         if (record.retryCount < RETRY_CONFIG.maxRetries) {
-            // Schedule retry with backoff
-            const delay = RETRY_CONFIG.retryDelays[record.retryCount] || RETRY_CONFIG.retryDelays[RETRY_CONFIG.retryDelays.length - 1];
+            // FIX: Set status to 'failed' before scheduling retry.
+            // retryFailed() checks `record.status !== 'failed'` and returns false
+            // if status is still 'ack_waiting' → retry was silently skipped.
+            record.status = 'failed';
+            record.failedReason = 'ACK timeout';
+            this.deliveryRecords.set(messageId, record);
+            this.saveRecords();
 
+            const delay = RETRY_CONFIG.retryDelays[record.retryCount] || RETRY_CONFIG.retryDelays[RETRY_CONFIG.retryDelays.length - 1];
             logger.debug(`ACK timeout for ${messageId}, scheduling retry in ${delay}ms`);
 
-            // ELITE: Track retry timer for cleanup
             const timer = setTimeout(() => {
                 this.ackTimeouts.delete(messageId);
                 this.retryFailed(messageId);
@@ -364,16 +381,46 @@ class DeliveryManager {
     private notifyCallbacks(messageId: string, status: DeliveryStatus) {
         const callbacks = this.deliveryCallbacks.get(messageId);
         if (callbacks) {
-            callbacks.forEach(cb => cb(messageId, status));
+            // FIX: Spread to array before iterating — a callback may call onDeliveryUpdate()
+            // or its unsubscribe function, modifying the callbacks array mid-iteration.
+            [...callbacks].forEach(cb => cb(messageId, status));
         }
+    }
+
+    // User-scoped storage key to prevent cross-account delivery record bleed
+    private getScopedKey(): string {
+        const uid = identityService.getUid?.();
+        return uid ? `${DELIVERY_TRACKING_KEY}:${uid}` : DELIVERY_TRACKING_KEY;
     }
 
     private async loadRecords() {
         try {
-            const data = DirectStorage.getString(DELIVERY_TRACKING_KEY);
+            const scopedKey = this.getScopedKey();
+            let data = DirectStorage.getString(scopedKey);
+
+            // Legacy migration: if scoped key is empty, check unscoped key
+            if (!data && scopedKey !== DELIVERY_TRACKING_KEY) {
+                data = DirectStorage.getString(DELIVERY_TRACKING_KEY);
+                if (data) {
+                    // Migrate to scoped key and clear legacy
+                    DirectStorage.setString(scopedKey, data);
+                    DirectStorage.delete(DELIVERY_TRACKING_KEY);
+                    logger.info('Migrated delivery records to user-scoped storage');
+                }
+            }
+
             if (data) {
                 const records: DeliveryRecord[] = JSON.parse(data);
                 records.forEach(r => this.deliveryRecords.set(r.messageId, r));
+            }
+
+            // Cap records to prevent unbounded memory growth
+            if (this.deliveryRecords.size > 10000) {
+                const sorted = Array.from(this.deliveryRecords.entries())
+                    .sort((a, b) => b[1].sentAt - a[1].sentAt);
+                this.deliveryRecords = new Map(sorted.slice(0, 5000));
+                this.saveRecords();
+                logger.info(`Capped delivery records from ${sorted.length} to 5000`);
             }
         } catch (error) {
             logger.error('Failed to load delivery records:', error);
@@ -383,7 +430,7 @@ class DeliveryManager {
     private async saveRecords() {
         try {
             const records = Array.from(this.deliveryRecords.values());
-            DirectStorage.setString(DELIVERY_TRACKING_KEY, JSON.stringify(records));
+            DirectStorage.setString(this.getScopedKey(), JSON.stringify(records));
         } catch (error) {
             logger.error('Failed to save delivery records:', error);
         }
@@ -397,7 +444,7 @@ class DeliveryManager {
         let cleared = 0;
 
         for (const [messageId, record] of this.deliveryRecords) {
-            if (record.sentAt < cutoff && (record.status === 'delivered' || record.status === 'read')) {
+            if (record.sentAt < cutoff && (record.status === 'delivered' || record.status === 'read' || record.status === 'failed' || record.status === 'ack_waiting')) {
                 this.deliveryRecords.delete(messageId);
                 cleared++;
             }

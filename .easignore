@@ -87,4 +87,8 @@ Thumbs.db
 .env.local
 .env.*.local
 .env.bak
-# Include Firebase config files (removed from gitignore)
+# Ensure Firebase native config files are bundled in EAS archives
+!GoogleService-Info.plist
+!ios/AfetNetAcilletiim/GoogleService-Info.plist
+!google-services.json
+!android/app/google-services.json

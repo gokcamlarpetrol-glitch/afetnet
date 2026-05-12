@@ -164,7 +164,7 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
     // ELITE: Request location permission
     const requestLocationPermission = async () => {
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
+            const { status } = await Location.getForegroundPermissionsAsync();
             if (status === 'granted') {
                 const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
                 setUserLocation({

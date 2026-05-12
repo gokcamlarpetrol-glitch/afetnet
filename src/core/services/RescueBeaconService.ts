@@ -5,7 +5,7 @@
  */
 
 import { createLogger } from '../utils/logger';
-import { bleMeshService } from './BLEMeshService';
+import { meshNetworkService } from './mesh/MeshNetworkService';
 import { useRescueStore } from '../stores/rescueStore';
 import { useUserStatusStore } from '../stores/userStatusStore';
 import { locationService } from './LocationService';
@@ -33,6 +33,8 @@ class RescueBeaconService {
   private isActive = false;
   private beaconInterval: NodeJS.Timeout | null = null;
   private intervalMs = 10000; // Default: 10 seconds
+  private statusUnsubscribe: (() => void) | null = null;
+  private rescueUnsubscribe: (() => void) | null = null;
 
   /**
    * Initialize beacon service
@@ -41,8 +43,12 @@ class RescueBeaconService {
     try {
       logger.info('Initializing rescue beacon service...');
 
+      // Clean up previous subscriptions (idempotent re-init)
+      if (this.statusUnsubscribe) { this.statusUnsubscribe(); this.statusUnsubscribe = null; }
+      if (this.rescueUnsubscribe) { this.rescueUnsubscribe(); this.rescueUnsubscribe = null; }
+
       // Listen to user status changes
-      useUserStatusStore.subscribe((state, prevState) => {
+      this.statusUnsubscribe = useUserStatusStore.subscribe((state, prevState) => {
         if (state.status === 'trapped' && prevState.status !== 'trapped') {
           // Auto-start beacon when user is trapped
           this.startBeacon();
@@ -53,7 +59,7 @@ class RescueBeaconService {
       });
 
       // Listen to rescue store changes
-      useRescueStore.subscribe((state, prevState) => {
+      this.rescueUnsubscribe = useRescueStore.subscribe((state, prevState) => {
         if (state.beaconInterval !== prevState.beaconInterval) {
           this.setInterval(state.beaconInterval * 1000);
         }
@@ -85,10 +91,21 @@ class RescueBeaconService {
       // Broadcast immediately
       await this.broadcastBeacon();
 
-      // Start interval broadcasting
-      this.beaconInterval = setInterval(async () => {
-        await this.broadcastBeacon();
-      }, this.intervalMs);
+      // Start interval broadcasting with concurrency guard
+      // Use recursive setTimeout to prevent overlapping broadcasts
+      const scheduleNextBeacon = () => {
+        if (!this.isActive) return;
+        this.beaconInterval = setTimeout(async () => {
+          if (!this.isActive) return;
+          try {
+            await this.broadcastBeacon();
+          } catch (err) {
+            logger.warn('Beacon broadcast error (will retry):', err);
+          }
+          scheduleNextBeacon(); // Schedule next only after current completes
+        }, this.intervalMs);
+      };
+      scheduleNextBeacon();
 
       logger.info(`SOS beacon started (interval: ${this.intervalMs}ms)`);
     } catch (error) {
@@ -107,7 +124,7 @@ class RescueBeaconService {
       logger.info('Stopping SOS beacon...');
 
       if (this.beaconInterval) {
-        clearInterval(this.beaconInterval);
+        clearTimeout(this.beaconInterval);
         this.beaconInterval = null;
       }
 
@@ -190,9 +207,17 @@ class RescueBeaconService {
       // ELITE: Broadcast via BLE Mesh with validation
       try {
         // ELITE: Validate BLE mesh service is running
-        if (!bleMeshService.getIsRunning()) {
-          logger.warn('BLE Mesh service not running - SOS beacon not broadcasted');
-          return;
+        if (!meshNetworkService.getIsRunning()) {
+          logger.warn('BLE Mesh service not running — attempting auto-start for SOS beacon');
+          try {
+            await Promise.race([
+              meshNetworkService.start(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Mesh start timeout')), 5000)),
+            ]);
+          } catch {
+            logger.warn('Mesh auto-start failed for beacon');
+            return;
+          }
         }
 
         // ELITE: Validate payload before stringifying
@@ -207,12 +232,8 @@ class RescueBeaconService {
           return;
         }
 
-        await bleMeshService.broadcastMessage({
-          type: 'sos',
-          content: payloadString,
-          ttl: 10,
-          priority: 'critical',
-        }).catch((error) => {
+        const { MeshMessageType } = require('./mesh/MeshProtocol');
+        await meshNetworkService.broadcastMessage(payloadString, MeshMessageType.SOS).catch((error: any) => {
           logger.error('Error broadcasting SOS beacon:', error);
           // Don't throw - SOS beacon failure shouldn't break the service
         });
@@ -255,9 +276,11 @@ class RescueBeaconService {
         // d = 10 ^ ((Measured Power - RSSI) / (10 * N))
         // Measured Power = -59 dBm (at 1 meter)
         // N = 2 (path loss exponent)
+        // Clamp RSSI to valid BLE range [-100, -30] to avoid nonsensical distances
+        const clampedRssi = Math.max(-100, Math.min(-30, rssi));
         const measuredPower = -59;
         const pathLossExponent = 2;
-        distance = Math.pow(10, (measuredPower - rssi) / (10 * pathLossExponent));
+        distance = Math.pow(10, (measuredPower - clampedRssi) / (10 * pathLossExponent));
       }
 
       // Add or update trapped user in store
@@ -281,6 +304,16 @@ class RescueBeaconService {
     } catch (error) {
       logger.error('Failed to handle received beacon:', error);
     }
+  }
+
+  /**
+   * Destroy service — clean up all subscriptions and timers
+   */
+  destroy() {
+    this.stopBeacon();
+    if (this.statusUnsubscribe) { this.statusUnsubscribe(); this.statusUnsubscribe = null; }
+    if (this.rescueUnsubscribe) { this.rescueUnsubscribe(); this.rescueUnsubscribe = null; }
+    logger.info('RescueBeaconService destroyed');
   }
 
   /**

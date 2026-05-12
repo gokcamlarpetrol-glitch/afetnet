@@ -209,7 +209,7 @@ export function validateMessage(content: string): {
     const suspicious = containsSuspiciousContent(sanitized);
     if (suspicious.suspicious) {
         // Still valid, but log for monitoring
-        console.warn('Suspicious message content:', suspicious.reasons);
+        if (__DEV__) console.warn('Suspicious message content:', suspicious.reasons);
     }
 
     return { valid: true, sanitized };

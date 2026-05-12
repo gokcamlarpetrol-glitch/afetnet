@@ -14,6 +14,7 @@ import { createLogger } from '../../utils/logger';
 import { SOSSignal, ChannelStatus, useSOSStore } from './SOSStateManager';
 import NetInfo from '@react-native-community/netinfo';
 import * as Battery from 'expo-battery';
+import { isApprovedFamilyMember } from '../../utils/familyApproval';
 
 const logger = createLogger('SOSChannelRouter');
 
@@ -155,9 +156,87 @@ class SOSChannelRouter {
             } catch { /* best-effort */ }
         } else if (failedChannels.length > 0) {
             logger.warn(`⚠️ SOS broadcast partial: ✅ ${succeededChannels.join(', ')} | ❌ ${failedChannels.join(', ')}`);
+
+            // Sprint Audit FIX A7: Auto-retry transient channel failures after 30s.
+            // SOS is life-safety; brief network blips should not leave channels permanently 'failed'.
+            // Only retry if SOS is STILL active when the timeout fires (user did not cancel).
+            this.scheduleChannelRetry(signal, failedChannels);
         } else {
             logger.info('✅ SOS broadcast completed on all channels');
         }
+    }
+
+    /**
+     * Sprint Audit FIX A7: Schedule retry for transient channel failures.
+     * Retries Firebase + push + backend channels after 30s, max 3 retry rounds.
+     * Mesh is fire-and-forget (no retry needed — packet sits in queue).
+     */
+    private channelRetryRound = 0;
+    private static readonly MAX_CHANNEL_RETRY_ROUNDS = 3;
+    private static readonly CHANNEL_RETRY_DELAY_MS = 30_000;
+    private channelRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    private scheduleChannelRetry(signal: SOSSignal, failedChannels: string[]): void {
+        if (this.channelRetryRound >= SOSChannelRouter.MAX_CHANNEL_RETRY_ROUNDS) {
+            logger.warn('SOS channel retry: max rounds reached');
+            this.channelRetryRound = 0;
+            return;
+        }
+        if (this.channelRetryTimer) clearTimeout(this.channelRetryTimer);
+        this.channelRetryRound++;
+        const round = this.channelRetryRound;
+        logger.info(`SOS channel retry scheduled (round ${round}/${SOSChannelRouter.MAX_CHANNEL_RETRY_ROUNDS}): ${failedChannels.join(', ')}`);
+        this.channelRetryTimer = setTimeout(async () => {
+            // Verify SOS is still active before retrying
+            const store = useSOSStore.getState();
+            if (!store.isActive || !store.currentSignal) {
+                logger.info('SOS no longer active — skipping channel retry');
+                this.channelRetryRound = 0;
+                return;
+            }
+            logger.warn(`🔄 SOS channel retry round ${round}: ${failedChannels.join(', ')}`);
+            const retryPromises: Promise<unknown>[] = [];
+            for (const ch of failedChannels) {
+                switch (ch) {
+                    case 'firebase':
+                        retryPromises.push(this.broadcastViaFirebase(signal, store.updateChannelStatus));
+                        break;
+                    case 'backend':
+                        retryPromises.push(this.broadcastViaBackend(signal, store.updateChannelStatus));
+                        break;
+                    case 'push':
+                        retryPromises.push(this.broadcastViaPush(signal, store.updateChannelStatus));
+                        break;
+                    case 'family':
+                        retryPromises.push(this.broadcastToFamily(signal));
+                        break;
+                    case 'nearbyUsers':
+                        retryPromises.push(this.broadcastToNearbyUsers(signal));
+                        break;
+                    // 'mesh' is fire-and-forget — no retry needed
+                }
+            }
+            await Promise.allSettled(retryPromises);
+            // Check if still failures and schedule next round
+            const updatedSignal = useSOSStore.getState().currentSignal;
+            if (updatedSignal) {
+                const stillFailed = Object.entries(updatedSignal.channels)
+                    .filter(([, status]) => status === 'failed')
+                    .map(([ch]) => ch);
+                if (stillFailed.length > 0) {
+                    this.scheduleChannelRetry(updatedSignal, stillFailed);
+                }
+            }
+        }, SOSChannelRouter.CHANNEL_RETRY_DELAY_MS);
+    }
+
+    /** Cancel any pending channel retry — called when SOS deactivated. */
+    cancelChannelRetry(): void {
+        if (this.channelRetryTimer) {
+            clearTimeout(this.channelRetryTimer);
+            this.channelRetryTimer = null;
+        }
+        this.channelRetryRound = 0;
     }
 
     // ============================================================================
@@ -327,6 +406,18 @@ class SOSChannelRouter {
                 return;
             }
 
+            // CRITICAL FIX (SOS-C3): NetInfo check BEFORE setDoc to avoid memory-cache evaporation.
+            // Firestore RN SDK has NO persistent cache; offline setDoc() resolves from memory cache,
+            // but if app is killed before reconnect, data is LOST. Pre-check prevents misleading
+            // 'sent' status when delivery is actually impossible. Mesh channel is still attempted.
+            const netInfoPre = await NetInfo.fetch();
+            const isOnline = !!netInfoPre.isConnected && netInfoPre.isInternetReachable !== false;
+            if (!isOnline) {
+                updateStatus('firebase', 'failed');
+                logger.warn('⚠️ Firebase SOS skipped — offline (mesh + push fallback active)');
+                return;
+            }
+
             const { doc, setDoc } = await import('firebase/firestore');
 
             // CRITICAL FIX: Include healthInfo in sos_signals so rescue teams
@@ -349,17 +440,8 @@ class SOSChannelRouter {
                 healthInfo,
             });
 
-            // CRITICAL FIX: Firestore on RN has NO persistent cache (memory-only).
-            // setDoc() resolves immediately from memory cache even when offline,
-            // but data evaporates on app kill. Only report 'sent' if actually online.
-            const netInfo = await NetInfo.fetch();
-            if (netInfo.isConnected && netInfo.isInternetReachable !== false) {
-                updateStatus('firebase', 'sent');
-                logger.info('✅ SOS saved to global sos_signals collection');
-            } else {
-                updateStatus('firebase', 'pending');
-                logger.warn('⚠️ SOS queued in Firestore memory cache (offline) — will sync when online');
-            }
+            updateStatus('firebase', 'sent');
+            logger.info('✅ SOS saved to global sos_signals collection');
         } catch (error) {
             logger.error('❌ Firebase broadcast failed:', error);
             updateStatus('firebase', 'failed');
@@ -448,12 +530,12 @@ class SOSChannelRouter {
         try {
             // Get family members from store
             const { useFamilyStore } = await import('../../stores/familyStore');
-            let members = useFamilyStore.getState().members;
+            let members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
 
             // If members empty (cold-start recovery), wait briefly for hydration
             if (members.length === 0) {
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                members = useFamilyStore.getState().members;
+                members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
             }
 
             if (members.length === 0) {
@@ -687,13 +769,10 @@ class SOSChannelRouter {
                 senderName = 'Kullanıcı';
             }
 
-            // STEP 4.6: Load health profile (life-saving)
-            const healthInfo = await this.loadHealthProfile();
-
             // STEP 5: Build document
             const hasLocation = signal.location != null;
             if (!hasLocation) {
-                logger.warn('Global SOS broadcast: NO location — sending to ALL devices (global fallback)');
+                logger.warn('Global SOS broadcast: NO location — public proximity broadcast will rely on family/backend/mesh fallbacks');
             }
 
             // CRITICAL FIX: Use the ACTUAL Firebase Auth UID for senderUid, not signal.userId.
@@ -716,7 +795,6 @@ class SOSChannelRouter {
                 battery: signal.device.batteryLevel,
                 timestamp: signal.timestamp,
                 status: signal.status === 'cancelled' ? 'cancelled' : 'active',
-                healthInfo,
             };
 
             logger.debug(`[SOS] Step 5 - Document data:`, JSON.stringify({
@@ -944,6 +1022,15 @@ class SOSChannelRouter {
         emergencyNotes?: string;
     } | null> {
         try {
+            try {
+                const { emergencyHealthSharingService } = await import('../EmergencyHealthSharingService');
+                if (!emergencyHealthSharingService.isHealthSharingEnabled()) {
+                    return null;
+                }
+            } catch {
+                return null;
+            }
+
             const { DirectStorage } = await import('../../utils/storage');
 
             // CRITICAL FIX: healthProfileStore uses scoped key '@afetnet:health_profile:user:{uid}'

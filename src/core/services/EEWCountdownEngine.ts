@@ -135,6 +135,10 @@ class EEWCountdownEngine {
     private sirenSound: AudioPlayer | null = null;
     private startTime: number = 0;
     private currentLanguage: 'tr' | 'en' | 'ar' = 'tr';
+    // CRITICAL FIX (EEW-C3): generation counter prevents stale tick() from overwriting new countdown state.
+    // When startCountdown() restarts mid-tick, the prior tick's pending notifyListeners() can leak the old state.
+    // Each countdown gets a unique generation; tick() checks generation matches before mutating state.
+    private generation: number = 0;
 
     // ==================== INITIALIZATION ====================
 
@@ -178,6 +182,12 @@ class EEWCountdownEngine {
 
         logger.info(`🚨 STARTING EEW COUNTDOWN: ${config.warningTime}s, M${config.magnitude}, ${config.location}`);
 
+        // CRITICAL FIX (EEW-C3): Increment generation BEFORE setting state.
+        // Prior in-flight tick() captured the old generation; any stale tick after this
+        // increment is silently dropped (checked in tick() and notifyListeners()).
+        this.generation++;
+        const myGeneration = this.generation;
+
         this.isActive = true;
         this.currentConfig = config;
         this.startTime = Date.now();
@@ -205,9 +215,14 @@ class EEWCountdownEngine {
 
         // Start countdown interval
         // FIX: Guard against overlapping async tick() calls — announce() with TTS can take >1s
+        // Also check generation in case startCountdown was called again mid-loop.
         let tickRunning = false;
         this.countdownInterval = setInterval(() => {
             if (tickRunning) return;
+            if (myGeneration !== this.generation) {
+                // Stale interval from previous countdown — should have been cleared but defense-in-depth
+                return;
+            }
             tickRunning = true;
             try { this.tick().finally(() => { tickRunning = false; }); } catch (e) { tickRunning = false; if (__DEV__) logger.debug('EEW countdown tick error:', e); }
         }, 1000);
@@ -312,13 +327,15 @@ class EEWCountdownEngine {
             }, 5000);
         }
 
-        // Announce impact
-        const messages = this.getMessages();
-        await Speech.speak(messages[0] || 'DEPREM!', {
-            language: this.currentLanguage === 'ar' ? 'ar-SA' : this.currentLanguage === 'en' ? 'en-US' : 'tr-TR',
-            rate: 1.2,
-            pitch: 1.2,
-        });
+        // Announce impact — only when app is foreground (Apple: no 'audio' background mode)
+        if (AppState.currentState === 'active') {
+            const messages = this.getMessages();
+            await Speech.speak(messages[0] || 'DEPREM!', {
+                language: this.currentLanguage === 'ar' ? 'ar-SA' : this.currentLanguage === 'en' ? 'en-US' : 'tr-TR',
+                rate: 1.2,
+                pitch: 1.2,
+            });
+        }
 
         // Update state to impact phase
         this.currentState = {
@@ -454,6 +471,8 @@ class EEWCountdownEngine {
      * Announce countdown
      */
     private async announce(seconds: number): Promise<void> {
+        if (AppState.currentState !== 'active') return;
+
         const messages = this.getMessages();
         const message = messages[seconds];
 
@@ -562,6 +581,14 @@ class EEWCountdownEngine {
     }
 
     /**
+     * Get current config (epicenter, magnitude, location, etc.)
+     * Returns null when no countdown is active.
+     */
+    getConfig(): CountdownConfig | null {
+        return this.currentConfig;
+    }
+
+    /**
      * Check if countdown is active
      */
     isCountdownActive(): boolean {
@@ -583,18 +610,28 @@ import { useState, useEffect } from 'react';
  */
 export function useEEWCountdown() {
     const [state, setState] = useState<CountdownState | null>(null);
+    const [config, setConfig] = useState<CountdownConfig | null>(null);
 
     useEffect(() => {
-        const unsubscribe = eewCountdownEngine.subscribe(setState);
+        const unsubscribe = eewCountdownEngine.subscribe((s) => {
+            setState(s);
+            // Re-read config whenever state changes (cheap, no listener overhead)
+            setConfig(eewCountdownEngine.getConfig());
+        });
         return unsubscribe;
     }, []);
 
     return {
         state,
+        config,
         isActive: state?.isActive ?? false,
         secondsRemaining: state?.secondsRemaining ?? 0,
         phase: state?.phase ?? 'ended',
         urgencyLevel: state?.urgencyLevel ?? 'low',
         urgencyColor: state ? eewCountdownEngine.getUrgencyColor(state.urgencyLevel) : '#00CC00',
+        magnitude: config?.magnitude ?? null,
+        location: config?.location ?? null,
+        epicentralDistance: config?.epicentralDistance ?? null,
+        estimatedIntensity: config?.estimatedIntensity ?? null,
     };
 }

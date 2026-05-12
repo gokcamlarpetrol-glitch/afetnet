@@ -1,73 +1,62 @@
-name: Deploy Backend to Render
+name: Deploy Firebase Backend
 
 on:
   push:
     branches:
       - main
-      - feat-ai-integration  # Geçici olarak bu branch'e de deploy edebilir
     paths:
-      - 'server/**'
+      - 'functions/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'database.rules.json'
+      - 'storage.rules'
+      - 'firebase.json'
       - '.github/workflows/deploy-backend.yml'
-      - 'render.yaml'
-  workflow_dispatch:  # Manuel tetikleme için
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
-    name: Deploy to Render.com
+    name: Build and deploy Firebase backend
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat-ai-integration'
-    
+    environment: production
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           cache: 'npm'
-          cache-dependency-path: server/package-lock.json
-      
-      - name: Install dependencies
-        working-directory: ./server
-        run: npm ci
-      
-      - name: Build
-        working-directory: ./server
-        run: npm run build
-        env:
-          NODE_ENV: production
-      
-      - name: Run tests
-        working-directory: ./server
-        run: npm test || echo "Tests skipped or failed (non-blocking)"
-        continue-on-error: true
-      
-      - name: Deploy to Render
-        # Note: Render.com automatically deploys on git push
-        # This step is kept for future manual deployment if needed
-        # For now, Render.com auto-deploys from GitHub, so this step is skipped
-        run: |
-          echo "Render.com automatically deploys on git push"
-          echo "No manual deployment needed"
-          echo "Service URL: https://afetnet-backend.onrender.com"
-        continue-on-error: true
-      
-      - name: Health Check
-        run: |
-          echo "Waiting for deployment to complete..."
-          sleep 30
-          curl -f https://afetnet-backend.onrender.com/health || echo "Health check failed (deployment may still be in progress)"
-        continue-on-error: true
-      
-      - name: Deployment Summary
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Build Functions
+        run: npm --prefix functions run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFETNET_4A6B6 }}'
+
+      - name: Deploy Functions and rules
+        run: >
+          npx firebase-tools@latest deploy
+          --project afetnet-4a6b6
+          --only functions,firestore:rules,firestore:indexes,storage,database
+          --non-interactive
+
+      - name: Deployment summary
         if: always()
         run: |
-          echo "## 🚀 Backend Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Render.com otomatik deploy ediyor. Bu workflow sadece build ve test kontrolü yapar." >> $GITHUB_STEP_SUMMARY
-
+          echo "## Firebase Backend Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** ${{ github.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Status:** ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

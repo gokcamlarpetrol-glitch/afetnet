@@ -3,7 +3,7 @@
  * React hook for device compass/magnetometer
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('useCompass');
@@ -86,18 +86,27 @@ export function useCompass(options: UseCompassOptions = {}): CompassData {
     }
   }, [updateInterval]);
 
+  const subscriptionRef = useRef<{ remove: () => void } | null>(null);
+
   useEffect(() => {
     if (!enabled) return;
 
-    let subscription: { remove: () => void } | null = null;
+    let cancelled = false;
 
     updateHeading().then(sub => {
-      subscription = sub;
+      if (cancelled) {
+        // Component unmounted before subscription was ready - clean up immediately
+        sub?.remove();
+      } else {
+        subscriptionRef.current = sub;
+      }
     });
 
     return () => {
-      if (subscription) {
-        subscription.remove();
+      cancelled = true;
+      if (subscriptionRef.current) {
+        subscriptionRef.current.remove();
+        subscriptionRef.current = null;
       }
     };
   }, [enabled, updateHeading]);

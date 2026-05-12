@@ -25,28 +25,32 @@ export class AFADHTMLProvider {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout - ELITE: Faster timeout for instant updates
 
-      // CRITICAL: Always fetch fresh data - no cache, no stale data
-      // AFAD site updates every few seconds, we need instant updates
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-        },
-        signal: controller.signal,
-        cache: 'no-store', // CRITICAL: Never cache - always fetch fresh
-      });
+      let response: Response;
+      let html: string;
+      try {
+        // CRITICAL: Always fetch fresh data - no cache, no stale data
+        // AFAD site updates every few seconds, we need instant updates
+        response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+          },
+          signal: controller.signal,
+          cache: 'no-store', // CRITICAL: Never cache - always fetch fresh
+        });
 
-      clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        html = await response.text();
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      const html = await response.text();
 
       if (!html || html.length < 100) {
         throw new Error('Empty or invalid response');

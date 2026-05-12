@@ -141,7 +141,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
     // CRITICAL: Location fetching with timeout and comprehensive error handling
     try {
       // Request permission with timeout
-      const permissionPromise = Location.requestForegroundPermissionsAsync();
+      const permissionPromise = Location.getForegroundPermissionsAsync();
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Permission timeout')), 10000),
       );
@@ -169,14 +169,20 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
       // Get position with timeout and fallback
       try {
+        let positionTimeoutId: ReturnType<typeof setTimeout> | null = null;
         const positionPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        const positionTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Position timeout')), 15000),
-        );
+        const positionTimeoutPromise = new Promise<never>((_, reject) => {
+          positionTimeoutId = setTimeout(() => reject(new Error('Position timeout')), 15000);
+        });
 
-        const location = await Promise.race([positionPromise, positionTimeoutPromise]) as any;
+        const location = await Promise.race([positionPromise, positionTimeoutPromise]);
+        if (positionTimeoutId) clearTimeout(positionTimeoutId);
+
+        if (!location || !location.coords) {
+          throw new Error('Location result missing coords');
+        }
 
         setUserLocation({
           latitude: location.coords.latitude,
@@ -231,7 +237,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
       try {
         // Try Apple Maps on iOS
         if (Platform.OS === 'ios') {
-          const appleMapsUrl = `http://maps.apple.com/?daddr=${point.latitude},${point.longitude}`;
+          const appleMapsUrl = `https://maps.apple.com/?daddr=${point.latitude},${point.longitude}`;
           const canOpen = await Linking.canOpenURL(appleMapsUrl);
           if (canOpen) {
             await Linking.openURL(appleMapsUrl);
@@ -593,7 +599,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
         <View style={styles.emergencyResourcesRow}>
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:112').catch(() => { })}
+            onPress={() => Linking.openURL('tel:112').catch(e => { if (__DEV__) logger.debug('Open tel:112 failed:', e); })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fee2e2' }]}>
               <Ionicons name="medical" size={18} color="#ef4444" />
@@ -604,7 +610,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:110').catch(() => { })}
+            onPress={() => Linking.openURL('tel:110').catch(e => { if (__DEV__) logger.debug('Open tel:110 failed:', e); })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#fef3c7' }]}>
               <Ionicons name="flame" size={18} color="#f59e0b" />
@@ -615,7 +621,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:155').catch(() => { })}
+            onPress={() => Linking.openURL('tel:155').catch(e => { if (__DEV__) logger.debug('Open tel:155 failed:', e); })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dbeafe' }]}>
               <Ionicons name="shield" size={18} color="#3b82f6" />
@@ -626,7 +632,7 @@ export default function AssemblyPointsScreen({ navigation }: AssemblyPointsScree
 
           <Pressable
             style={styles.emergencyResource}
-            onPress={() => Linking.openURL('tel:122').catch(() => { })}
+            onPress={() => Linking.openURL('tel:122').catch(e => { if (__DEV__) logger.debug('Open tel:122 failed:', e); })}
           >
             <View style={[styles.emergencyResourceIcon, { backgroundColor: '#dcfce7' }]}>
               <Ionicons name="call" size={18} color="#22c55e" />

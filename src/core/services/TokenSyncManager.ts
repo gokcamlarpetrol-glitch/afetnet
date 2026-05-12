@@ -22,9 +22,8 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/fi
 import { firebaseService } from './FirebaseService';
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
-import { getAuth } from 'firebase/auth';
 import { getInstallationId } from '../../lib/installationId';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirebaseAuth } from '../../lib/firebase';
 
 const logger = createLogger('TokenSyncManager');
 
@@ -52,12 +51,11 @@ class TokenSyncManager {
       }
 
       // 2. Get Firebase Auth UID — MANDATORY
-      const app = initializeFirebase();
-      if (!app) {
-        logger.debug('Skipping token sync: Firebase app unavailable');
+      const auth = getFirebaseAuth();
+      if (!auth) {
+        logger.debug('Skipping token sync: Firebase auth unavailable');
         return;
       }
-      const auth = getAuth(app);
       const currentUser = auth.currentUser;
       if (!currentUser?.uid) {
         logger.debug('Skipping token sync: no authenticated user');
@@ -115,7 +113,8 @@ class TokenSyncManager {
         }
       }
 
-      // 5. LEGACY COMPAT: Also write to devices/{deviceId} doc for old CFs
+      // 5. LEGACY COMPAT: Also write to devices/{publicCode} doc for old CFs.
+      // CANONICAL: push_tokens/{uid}/devices/{installationId} is the PRIMARY path.
       // This dual-write will be removed when all CFs are migrated.
       try {
         const { identityService } = await import('./IdentityService');

@@ -146,7 +146,7 @@ class NativeSecurity {
 
       await Promise.all(
         secureStoreKeys.map(key =>
-          SecureStore.deleteItemAsync(key).catch(() => { }),
+          SecureStore.deleteItemAsync(key).catch(e => { if (__DEV__) logger.debug(`SecureStore delete ${key} failed:`, e); }),
         ),
       );
       logger.info('✓ SecureStore cleared');
@@ -158,36 +158,16 @@ class NativeSecurity {
 
       // 3. Clear Firestore persistence cache (if using offline persistence)
       try {
-        const { clearIndexedDbPersistence, getFirestore } = require('firebase/firestore');
-        const { initializeFirebase } = require('../../lib/firebase');
-        const app = initializeFirebase();
-        if (app) {
-          const db = getFirestore(app);
+        const { clearIndexedDbPersistence } = require('firebase/firestore');
+        const { getFirestoreInstanceAsync } = require('../services/firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (db) {
           await clearIndexedDbPersistence(db);
           logger.info('✓ Firestore cache cleared');
         }
       } catch (e) {
         // Firestore clear may fail if not initialized, ignore
         logger.debug('Firestore cache clear skipped (not initialized)');
-      }
-
-      // 4. Clear React Query cache (if used)
-      try {
-        const { QueryClient } = require('@tanstack/react-query');
-        const queryClient = new QueryClient();
-        queryClient.clear();
-        logger.info('✓ Query cache cleared');
-      } catch (e) {
-        // React Query may not be installed
-      }
-
-      // 5. Clear any in-memory caches in services
-      try {
-        // Location store
-        const { useLocationStore } = require('../stores/locationStore');
-        useLocationStore.getState().clearLocation?.();
-      } catch (e) {
-        // ELITE: Location store may not be available - non-critical for security wipe
       }
 
       logger.info('🔐 Security wipe complete');

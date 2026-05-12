@@ -77,6 +77,8 @@ class EliteSecurityService {
     private policy: SecurityPolicy = DEFAULT_POLICY;
     private eventListeners: Set<SecurityEventCallback> = new Set();
     private lastStatus: EliteSecurityStatus | null = null;
+    // CRITICAL FIX: Track session event listener unsubscribe to prevent leak on re-init
+    private sessionEventUnsub: (() => void) | null = null;
 
     // ==================== INITIALIZATION ====================
 
@@ -112,7 +114,12 @@ class EliteSecurityService {
             ]);
 
             // Set up session event listener
-            sessionSecurityService.addEventListener((event, state) => {
+            // CRITICAL FIX: Clean up previous listener to prevent leak on re-init
+            if (this.sessionEventUnsub) {
+                this.sessionEventUnsub();
+                this.sessionEventUnsub = null;
+            }
+            this.sessionEventUnsub = sessionSecurityService.addEventListener((event, state) => {
                 if (event === 'reauth_required' || event === 'session_locked') {
                     this.emitSecurityEvent();
                 }
@@ -395,9 +402,16 @@ class EliteSecurityService {
      * Stop all security services
      */
     async stop(): Promise<void> {
+        // CRITICAL FIX: Clean up session event listener
+        if (this.sessionEventUnsub) {
+            this.sessionEventUnsub();
+            this.sessionEventUnsub = null;
+        }
         sessionSecurityService.stop();
         await screenProtectionService.stop();
         this.eventListeners.clear();
+        // CRITICAL FIX: Reset isInitialized so the service can be re-initialized
+        this.isInitialized = false;
         logger.info('🛡️ Elite Security Suite stopped');
     }
 

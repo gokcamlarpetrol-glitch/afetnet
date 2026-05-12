@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "language": "العربية",
+    "locale": "ar",
+    "version": "0.1.0",
+    "completeness": 0.05,
+    "note": "هيكل أولي — فقط النصوص الحيوية المتعلقة بالسلامة. الترجمة الكاملة معلقة لتنفيذ Sprint 9.",
+    "rtl": true
+  },
+  "common": {
+    "ok": "موافق",
+    "cancel": "إلغاء",
+    "retry": "إعادة المحاولة",
+    "close": "إغلاق",
+    "save": "حفظ",
+    "delete": "حذف",
+    "share": "مشاركة",
+    "yes": "نعم",
+    "no": "لا",
+    "loading": "جارٍ التحميل…",
+    "error": "خطأ"
+  },
+  "eew": {
+    "earthquake_approaching": "زلزال قادم",
+    "drop_cover_hold": "انبطح — احتمِ — تمسّك",
+    "seconds": "ثانية",
+    "warning_ended": "انتهى التحذير",
+    "early_warning_beta": "نظام الإنذار المبكر",
+    "intensity_estimate": "تقدير الشدة المحلية",
+    "disclaimer": "هذا تقدير من مستشعر الجهاز. الحجم الرسمي يقدمه مرصد AFAD/Kandilli."
+  },
+  "sos": {
+    "send_sos": "إرسال نداء استغاثة",
+    "cancel_sos": "إلغاء النداء",
+    "sos_not_sent": "لم يتم إرسال النداء",
+    "all_channels_failed": "فشلت جميع القنوات ({{count}}). فرق الإنقاذ غير مبلّغة.",
+    "call_112": "اتصل بـ 112",
+    "retry_send": "إعادة المحاولة"
+  },
+  "family": {
+    "title": "العائلة",
+    "add_member": "إضافة فرد من العائلة",
+    "status_safe": "بأمان",
+    "status_need_help": "يحتاج المساعدة",
+    "status_unknown": "غير معروف",
+    "battery": "البطارية",
+    "location": "الموقع",
+    "status_stale": "آخر تحديث منذ {{days}} يوم"
+  },
+  "notification": {
+    "permission_title": "فعّل الإشعارات",
+    "permission_subtitle": "ثوانٍ تنقذ الحياة تعتمد عليها",
+    "permission_benefit_eew": "تلقَّ تحذيرات الزلازل حتى عندما يكون الجهاز صامتاً",
+    "permission_benefit_sos": "تلقَّ إشارات استغاثة العائلة",
+    "enable": "فعّل",
+    "later": "لاحقاً",
+    "device_clock_wrong": "ساعة الجهاز غير صحيحة",
+    "clock_skew_message": "ساعتك متأخرة/متقدمة بحوالي {{minutes}} دقيقة. قد تفشل الرسائل وإشارات الاستغاثة."
+  },
+  "kvkk": {
+    "title": "مشاركة البيانات (قانون KVKK المادة 6)",
+    "subtitle": "بيانات صحتك مخزنة فقط على هذا الجهاز افتراضياً. لا يتم رفعها إلى أي خادم ما لم تفعّل الخيارات أدناه.",
+    "cloud_sync": "النسخ الاحتياطي السحابي",
+    "cloud_sync_description": "نسخ مشفّر إلى Firebase لاستعادة الجهاز",
+    "backend_share": "مشاركة مع فرق الإنقاذ",
+    "backend_share_description": "مشاركة مع فرق 112/AFAD أثناء النداء",
+    "explicit_consent": "أعطي موافقتي الصريحة",
+    "withdraw_consent": "سحب الموافقة"
+  },
+  "errors": {
+    "network": "انقطع الاتصال بالشبكة",
+    "auth_failed": "فشل التحقق من الهوية",
+    "permission_denied": "تم رفض الإذن",
+    "unknown": "حدث خطأ غير متوقع"
+  }
+}

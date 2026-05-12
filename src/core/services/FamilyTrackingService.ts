@@ -223,12 +223,15 @@ class FamilyTrackingService {
   }
 
   /**
-     * Start location tracking and sharing
+     * Start location tracking and sharing.
+     * CRITICAL FIX (MSG-C3): Returns boolean — caller must check before persisting
+     * "location sharing enabled" preference. Without this, UI shows "Konum Açık"
+     * but tracking never started (permission denied) → false reassurance.
      */
-  async startTracking(consumerId: string = 'default') {
+  async startTracking(consumerId: string = 'default'): Promise<boolean> {
     if (!useSettingsStore.getState().locationEnabled) {
       logger.info('Family tracking start skipped: location disabled in settings');
-      return;
+      return false;
     }
 
     // UID is preferred for cloud writes, but mesh/offline tracking must still work
@@ -237,13 +240,13 @@ class FamilyTrackingService {
     const fallbackId = identityService.getMyId() || await getDeviceIdFromLib();
     if (!uid && !fallbackId) {
       logger.error('❌ Family tracking start aborted: no resolvable identity');
-      return;
+      return false;
     }
     logger.info(`🏠 Family tracking starting with identity: ${uid || fallbackId}`);
 
     this.trackingConsumers.add(consumerId);
     if (this.isTracking) {
-      return;
+      return true; // Already tracking
     }
 
     logger.info('Starting Family Tracking');
@@ -256,7 +259,7 @@ class FamilyTrackingService {
       // Permission should be requested via user-triggered action in onboarding/settings.
       logger.warn('Foreground location permission not granted — skipping family tracking');
       this.trackingConsumers.delete(consumerId);
-      return; // Don't set isTracking
+      return false; // Caller must NOT save "location sharing ON" preference
     }
 
     // CRITICAL: Only set isTracking after permissions are granted
@@ -311,6 +314,7 @@ class FamilyTrackingService {
 
     // Share immediately
     await this.shareMyLocation({ force: true, reason: 'startTracking' });
+    return true; // Tracking active — caller can persist "location sharing ON"
   }
 
   /**

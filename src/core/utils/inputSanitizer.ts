@@ -114,8 +114,9 @@ export function sanitizeFilename(input: string): string {
 export function sanitizeText(input: string, allowedChars: string = ''): string {
   if (!input) return '';
 
-  // Sadece alfanumerik, boşluk ve izin verilen karakterlere izin ver
-  const regex = new RegExp(`[^a-zA-Z0-9\\s${allowedChars}]`, 'g');
+  // SECURITY FIX: Escape allowedChars to prevent regex injection / ReDoS
+  const escapedAllowed = allowedChars.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`[^a-zA-Z0-9\\s${escapedAllowed}]`, 'g');
   return input.replace(regex, '');
 }
 
@@ -125,8 +126,9 @@ export function sanitizeText(input: string, allowedChars: string = ''): string {
 export function sanitizeTurkishText(input: string, allowedChars: string = ''): string {
   if (!input) return '';
 
-  // Türkçe karakterler + alfanumerik + izin verilen karakterler
-  const regex = new RegExp(`[^a-zA-Z0-9\\sğüşıöçĞÜŞİÖÇ${allowedChars}]`, 'g');
+  // SECURITY FIX: Escape allowedChars to prevent regex injection / ReDoS
+  const escapedAllowed = allowedChars.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`[^a-zA-Z0-9\\sğüşıöçĞÜŞİÖÇ${escapedAllowed}]`, 'g');
   return input.replace(regex, '');
 }
 
@@ -167,8 +169,9 @@ export function sanitizeJSON<T = any>(input: string): T | null {
       if (depth > maxDepth) return false;
       if (typeof obj !== 'object' || obj === null) return true;
 
-      for (const key in obj) {
-        if (!checkDepth(obj[key], depth + 1)) return false;
+      // SECURITY FIX: Use Object.keys instead of for...in to avoid prototype pollution
+      for (const key of Object.keys(obj as Record<string, unknown>)) {
+        if (!checkDepth((obj as Record<string, unknown>)[key], depth + 1)) return false;
       }
       return true;
     };

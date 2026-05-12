@@ -63,6 +63,13 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
  */
 export async function setOnboardingCompleted(): Promise<void> {
   try {
+    DirectStorage.setString(
+      ONBOARDING_STORE_KEY,
+      JSON.stringify({
+        state: { completed: true, isHydrated: true },
+        version: 0,
+      }),
+    );
     DirectStorage.setString(LEGACY_ONBOARDING_COMPLETED_KEY, '1');
     useOnboardingStore.setState({ completed: true, isHydrated: true });
     logger.info('Onboarding marked as completed');

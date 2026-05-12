@@ -31,6 +31,58 @@ const MAX_PROCESSED_IDS = 200;
 let currentUnsubscribe: (() => void) | null = null;
 let isListening = false;
 let isStarting = false; // Race condition guard
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let revivalTimer: ReturnType<typeof setTimeout> | null = null;
+let retryCount = 0;
+let lastDeviceId: string | null = null; // For retry after error
+let listenerStartedAt = 0; // Timestamp when listener was started — skip ACKs before this
+const MAX_RETRIES = 15;
+const MAX_BACKOFF_MS = 60000;
+const REVIVAL_INTERVAL_MS = 30_000; // 30 seconds — life-safety: trapped person must know rescue is coming
+
+/**
+ * Schedule a retry after listener error (exponential backoff).
+ * CRITICAL: For a trapped person, rescue ACKs are life-saving information.
+ * After exhausting retries, schedule a revival attempt every 10 minutes.
+ */
+function scheduleRetry(): void {
+    if (retryCount >= MAX_RETRIES) {
+        logger.error(`SOSAckListener: exhausted ${MAX_RETRIES} retries — scheduling revival in ${REVIVAL_INTERVAL_MS / 60000}min`);
+        scheduleRevival();
+        return;
+    }
+    if (retryTimer) { clearTimeout(retryTimer); }
+    retryCount++;
+    const delay = Math.min(3000 * Math.pow(2, retryCount - 1), MAX_BACKOFF_MS);
+    logger.info(`SOSAckListener: retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+    retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (lastDeviceId && !isListening && !isStarting) {
+            startSOSAckListener(lastDeviceId).catch(e => {
+                logger.error('SOSAckListener retry failed:', e);
+            });
+        }
+    }, delay);
+}
+
+/**
+ * Revival mechanism: After exhausting all retries, try once every 10 minutes.
+ * For a trapped person under rubble, the network may recover after hours.
+ * Without revival, rescue ACKs are permanently lost.
+ */
+function scheduleRevival(): void {
+    if (revivalTimer) { clearTimeout(revivalTimer); }
+    revivalTimer = setTimeout(() => {
+        revivalTimer = null;
+        if (lastDeviceId && !isListening && !isStarting) {
+            logger.info('SOSAckListener: revival attempt — resetting retry count');
+            retryCount = 0; // Reset for fresh retry cycle
+            startSOSAckListener(lastDeviceId).catch(e => {
+                logger.error('SOSAckListener revival failed:', e);
+            });
+        }
+    }, REVIVAL_INTERVAL_MS);
+}
 
 /**
  * Start listening for rescue ACKs on this device's Firestore path.
@@ -51,6 +103,7 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
 
     // Set starting flag IMMEDIATELY to prevent concurrent starts
     isStarting = true;
+    lastDeviceId = myDeviceId; // Save for retry
 
     // Clean up any stale listener
     stopSOSAckListenerInternal(false); // Don't clear processedAckIds on restart
@@ -91,7 +144,15 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
 
                 const ackTimestamp = normalizeTimestampMs(ackData.timestamp) ?? 0;
                 const ackAge = Date.now() - ackTimestamp;
+                // Skip ACKs older than 1 hour
                 if (ackAge > 60 * 60 * 1000) {
+                    processedAckIds.add(ackId);
+                    continue;
+                }
+                // CRITICAL FIX: Skip ACKs that predate this listener session.
+                // onSnapshot fires for ALL existing docs on initial load (type='added').
+                // Without this, every app restart replays all recent ACKs as new notifications.
+                if (ackTimestamp > 0 && ackTimestamp < listenerStartedAt) {
                     processedAckIds.add(ackId);
                     continue;
                 }
@@ -159,6 +220,18 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
             }
 
             logger.error(`ACK listener error for ${pathLabel}:${targetId}:`, error);
+
+            // ELITE: onSnapshot error kills subscription permanently — schedule retry
+            // This is critical for SOS: if listener dies, rescue ACKs are never received
+            // CRITICAL FIX: Stop ALL listeners before retry to prevent duplicate subscriptions.
+            // Without this, only the failed listener is dead but working listeners continue,
+            // and scheduleRetry() re-creates ALL of them — causing duplicates.
+            if (isListening) {
+                stopSOSAckListenerInternal(false);
+            }
+            if (lastDeviceId) {
+                scheduleRetry();
+            }
         };
 
         for (const targetId of targetIds) {
@@ -197,10 +270,16 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
 
         isListening = true;
         isStarting = false;
+        retryCount = 0; // Reset retry count on successful start
+        listenerStartedAt = Date.now(); // Record start time to filter pre-existing ACKs
         logger.info(`✅ SOS ACK listener started for ${targetIds.size} target IDs: ${Array.from(targetIds).join(', ')}`);
     } catch (error) {
         isStarting = false;
         logger.error('Failed to start ACK listener:', error);
+        // Schedule retry on start failure
+        if (lastDeviceId) {
+            scheduleRetry();
+        }
     }
 }
 
@@ -226,8 +305,13 @@ function stopSOSAckListenerInternal(clearProcessed: boolean): void {
     isListening = false;
     isStarting = false;
 
-    // Clear dedup set to prevent memory leak
+    // Clear retry state on full stop
     if (clearProcessed) {
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        if (revivalTimer) { clearTimeout(revivalTimer); revivalTimer = null; }
+        retryCount = 0;
+        lastDeviceId = null;
+        listenerStartedAt = 0;
         processedAckIds.clear();
     }
 }

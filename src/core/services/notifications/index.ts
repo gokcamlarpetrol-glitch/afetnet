@@ -71,14 +71,21 @@ const logger = createLogger('NotificationsIndex');
 /**
  * ELITE: Initialize the notification system
  * Call this once during app startup
+ *
+ * CRITICAL FIX: Changed from requestPermissions() to getPermissionStatus().
+ * requestPermissions() triggers the OS notification permission dialog, which
+ * violates Apple guideline 5.1.1 if called during init (before user action).
+ * Startup must only CHECK existing status — explicit user actions (onboarding
+ * button tap) call requestPermissions() when the user is ready.
  */
 export async function initializeNotifications(): Promise<boolean> {
   try {
-    // Request permissions first
-    const permResult = await requestPermissions();
+    // Check existing permissions (does NOT trigger OS dialog)
+    const { getPermissionStatus: checkStatus } = await import('./NotificationPermissionHandler');
+    const permResult = await checkStatus();
 
     if (permResult.status !== 'granted') {
-      logger.debug('Notification permissions not granted');
+      logger.debug('Notification permissions not granted — channels deferred');
       return false;
     }
 

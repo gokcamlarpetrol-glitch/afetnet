@@ -166,7 +166,7 @@ class StorageManagementService {
       for (const key of keys) {
         const value = DirectStorage.getString(key);
         if (value) {
-          totalSize += new Blob([value]).size;
+          totalSize += value.length * 2;
         }
       }
 
@@ -274,7 +274,7 @@ class StorageManagementService {
       for (const key of aiCacheKeys) {
         const value = DirectStorage.getString(key);
         if (value) {
-          cleanedBytes += new Blob([value]).size;
+          cleanedBytes += value.length * 2;
         }
         DirectStorage.delete(key);
       }
@@ -284,7 +284,7 @@ class StorageManagementService {
       for (const key of newsKeys) {
         const value = DirectStorage.getString(key);
         if (value) {
-          cleanedBytes += new Blob([value]).size;
+          cleanedBytes += value.length * 2;
         }
         DirectStorage.delete(key);
       }
@@ -312,11 +312,11 @@ class StorageManagementService {
       if (earthquakesData) {
         const earthquakes = JSON.parse(earthquakesData);
         if (Array.isArray(earthquakes) && earthquakes.length > 100) {
-          const oldSize = new Blob([earthquakesData]).size;
+          const oldSize = earthquakesData.length * 2;
           const trimmed = earthquakes.slice(0, 100);
           DirectStorage.setString(earthquakesKey, JSON.stringify(trimmed));
           const newData = DirectStorage.getString(earthquakesKey);
-          const newSize = newData ? new Blob([newData]).size : 0;
+          const newSize = newData ? newData.length * 2 : 0;
           cleanedBytes += oldSize - newSize;
         }
       }
@@ -328,11 +328,11 @@ class StorageManagementService {
         const messages = JSON.parse(messagesData);
         if (!Array.isArray(messages)) return cleanedBytes;
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        const oldSize = new Blob([messagesData]).size;
+        const oldSize = messagesData.length * 2;
         const filtered = messages.filter((msg: any) => msg.timestamp > thirtyDaysAgo);
         DirectStorage.setString(messagesKey, JSON.stringify(filtered));
         const newData = DirectStorage.getString(messagesKey);
-        const newSize = newData ? new Blob([newData]).size : 0;
+        const newSize = newData ? newData.length * 2 : 0;
         cleanedBytes += oldSize - newSize;
       }
 
@@ -342,6 +342,13 @@ class StorageManagementService {
       logger.error('Failed to cleanup medium priority data:', error);
       return 0;
     }
+  }
+
+  /**
+   * Destroy service — stop monitoring and release resources
+   */
+  destroy() {
+    this.stopMonitoring();
   }
 
   /**

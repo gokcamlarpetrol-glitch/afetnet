@@ -66,6 +66,26 @@ function checkRegex(relPath, pattern, name) {
     : { passed: false, error: `${name} pattern missing: ${pattern}` };
 }
 
+function checkAnyContains(relPath, markers, name) {
+  if (!exists(relPath)) {
+    return { passed: false, error: `${name} file missing (${relPath})` };
+  }
+  const content = read(relPath);
+  return markers.some((marker) => content.includes(marker))
+    ? { passed: true }
+    : { passed: false, error: `${name} markers missing: ${markers.join(' | ')}` };
+}
+
+function checkAnyRegex(relPath, patterns, name) {
+  if (!exists(relPath)) {
+    return { passed: false, error: `${name} file missing (${relPath})` };
+  }
+  const content = read(relPath);
+  return patterns.some((pattern) => pattern.test(content))
+    ? { passed: true }
+    : { passed: false, error: `${name} patterns missing: ${patterns.map((p) => p.toString()).join(' | ')}` };
+}
+
 function runCommand(command, name, required = true) {
   try {
     execSync(command, {
@@ -149,7 +169,25 @@ function scenarioFamilyFlow() {
     { name: 'Family store exists', check: () => checkFile('src/core/stores/familyStore.ts', 'familyStore') },
     { name: 'Family tracking service exists', check: () => checkFile('src/core/services/FamilyTrackingService.ts', 'FamilyTrackingService') },
     { name: 'QR parse call exists', check: () => checkContains('src/core/screens/family/AddFamilyMemberScreen.tsx', 'parseQRPayload', 'QR parse') },
-    { name: 'Self-add guard exists', check: () => checkContains('src/core/screens/family/AddFamilyMemberScreen.tsx', 'Kendi kimliğinizi aile üyesi olarak ekleyemezsiniz.', 'Self-add guard') },
+    {
+      name: 'Self-add guard exists',
+      check: () => {
+        const warningCheck = checkAnyContains(
+          'src/core/screens/family/AddFamilyMemberScreen.tsx',
+          [
+            'const SELF_MEMBER_WARNING',
+            'kendi profilinizi aile üyesi olarak ekleyemezsiniz',
+          ],
+          'Self-add warning',
+        );
+        if (!warningCheck.passed) return warningCheck;
+        return checkRegex(
+          'src/core/screens/family/AddFamilyMemberScreen.tsx',
+          /\bisSelfIdentifier\s*\(/,
+          'Self-add identity guard',
+        );
+      },
+    },
     { name: 'Check-in cloud UID resolution exists', check: () => checkRegex('src/core/services/FamilyTrackingService.ts', /\btargetCloudUid\s*=/, 'targetCloudUid') },
     { name: 'Check-in mesh target resolution exists', check: () => checkContains('src/core/services/FamilyTrackingService.ts', 'const targetMeshId', 'targetMeshId') },
     { name: 'Unified family location resolver exists', check: () => checkFile('src/core/utils/familyLocation.ts', 'familyLocation resolver') },
@@ -167,7 +205,17 @@ function scenarioMessagingFlow() {
     { name: 'Group chat service exists', check: () => checkFile('src/core/services/GroupChatService.ts', 'GroupChatService') },
     { name: 'Self identity alias resolver exists', check: () => checkContains('src/core/services/HybridMessageService.ts', 'private getSelfIdentityIds()', 'self identity aliases') },
     { name: 'Cloud writes include toDeviceId', check: () => checkContains('src/core/services/HybridMessageService.ts', 'toDeviceId: message.recipientId || \'broadcast\'', 'toDeviceId mapping') },
-    { name: 'Cloud read restores recipientId', check: () => checkRegex('src/core/services/HybridMessageService.ts', /recipientId:\s*toDeviceId/, 'recipientId restore') },
+    {
+      name: 'Cloud read restores recipientId',
+      check: () => checkAnyRegex(
+        'src/core/services/HybridMessageService.ts',
+        [
+          /recipientId:\s*toDeviceId/,
+          /recipientId:\s*resolvedToDeviceId/,
+        ],
+        'recipientId restore',
+      ),
+    },
     { name: 'Conversation recipient isolation exists', check: () => checkContains('src/core/screens/messages/ConversationScreen.tsx', 'selfIds.has(msg.to)', 'Conversation selfIds filter') },
     { name: 'SOS conversation isolation exists', check: () => checkContains('src/core/screens/messages/SOSConversationScreen.tsx', 'selfIds.has(msg.to)', 'SOS selfIds filter') },
   ]);

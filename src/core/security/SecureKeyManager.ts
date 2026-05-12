@@ -63,13 +63,18 @@ async function checkSecureStoreAvailable(): Promise<boolean> {
 
 /**
  * ELITE: Get SecureStore options based on platform
+ *
+ * CRITICAL: Uses AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY so that auth tokens
+ * and API keys remain accessible after device reboot (before screen unlock).
+ * WHEN_UNLOCKED would make these values unavailable until the user unlocks,
+ * causing auth failures on background launches and push notification handling.
+ * This matches the accessibility level used for MMKV encryption keys in storage.ts.
  */
 function getStoreOptions(): SecureStore.SecureStoreOptions {
   const options: SecureStore.SecureStoreOptions = {};
 
   if (Platform.OS === 'ios') {
-    // Use keychain with app-level security
-    options.keychainAccessible = SecureStore.WHEN_UNLOCKED;
+    options.keychainAccessible = SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY;
   }
 
   return options;

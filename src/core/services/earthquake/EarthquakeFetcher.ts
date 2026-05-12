@@ -10,6 +10,7 @@ import { afadHTMLProvider } from '../providers/AFADHTMLProvider';
 import { kandilliHTMLProvider } from '../providers/KandilliHTMLProvider';
 import { networkResilienceService } from '../NetworkResilienceService';
 import { processAFADEvents } from './EarthquakeDataProcessor';
+import { formatTurkeyApiDate } from '../../utils/timeUtils';
 
 const logger = createLogger('EarthquakeFetcher');
 
@@ -29,6 +30,8 @@ export interface FetchResult {
     kandilliHTML: boolean;
     afadAPI: boolean;
     kandilliAPI: boolean;
+    usgsAPI: boolean;
+    emscAPI: boolean;
   };
 }
 
@@ -89,10 +92,12 @@ export async function fetchAllEarthquakes(
         kandilliHTML: false,
         afadAPI: false,
         kandilliAPI: false,
+        usgsAPI: false,
+        emscAPI: false,
       },
     };
   }
-  const shouldFetchUnified = options.sourceUSGS || options.sourceEMSC || options.sourceCommunity || (!sourceAFAD && !sourceKOERI);
+  const shouldFetchUnified = options.sourceCommunity || (!sourceAFAD && !sourceKOERI && !options.sourceUSGS && !options.sourceEMSC);
 
   if (__DEV__) {
     logger.info(`🚀 fetchAllEarthquakes() başlatıldı (AFAD: ${sourceAFAD}, KOERI: ${sourceKOERI}, Unified: ${shouldFetchUnified})`);
@@ -105,6 +110,8 @@ export async function fetchAllEarthquakes(
       kandilliHTML: false,
       afadAPI: false,
       kandilliAPI: false,
+      usgsAPI: false,
+      emscAPI: false,
     },
   };
 
@@ -112,15 +119,19 @@ export async function fetchAllEarthquakes(
   // Use Promise.allSettled with shorter timeouts for faster initial load
   // ELITE: Multi-tier strategy for fastest and most reliable data
   // Fetch from ALL sources in parallel for cross-verification
-  const [unifiedData, afadHTMLData, afadAPIData, kandilliAPIData] = await Promise.allSettled([
+  const [unifiedData, afadHTMLData, afadAPIData, kandilliAPIData, usgsAPIData, emscAPIData] = await Promise.allSettled([
     shouldFetchUnified ? unifiedEarthquakeAPI.fetchRecent() : Promise.resolve([]), // Tier 1: Unified API
     sourceAFAD ? afadHTMLProvider.fetchRecent() : Promise.resolve([]), // Tier 2: AFAD HTML
     sourceAFAD ? fetchFromAFAD() : Promise.resolve([]), // Tier 3: Direct AFAD API
     sourceKOERI ? fetchFromKandilli() : Promise.resolve([]), // Tier 4: Kandilli API
+    options.sourceUSGS ? fetchFromUSGSAPI() : Promise.resolve([]), // Tier 5: USGS FDSN
+    options.sourceEMSC ? fetchFromEMSCAPI() : Promise.resolve([]), // Tier 6: EMSC FDSN
   ]);
 
   let afadList: Earthquake[] = [];
   let kandilliList: Earthquake[] = [];
+  let usgsList: Earthquake[] = [];
+  let emscList: Earthquake[] = [];
   const unifiedList = unifiedData.status === 'fulfilled' ? unifiedData.value : [];
 
   // --- 1. PROCESS AFAD DATA ---
@@ -162,6 +173,19 @@ export async function fetchAllEarthquakes(
     }
   }
 
+  // --- 3. PROCESS GLOBAL/REGIONAL OFFICIAL DATA ---
+  if (options.sourceUSGS && usgsAPIData.status === 'fulfilled' && usgsAPIData.value.length > 0) {
+    usgsList = usgsAPIData.value;
+    result.sources.usgsAPI = true;
+    if (__DEV__) logger.info(`✅ USGS: ${usgsList.length} veri`);
+  }
+
+  if (options.sourceEMSC && emscAPIData.status === 'fulfilled' && emscAPIData.value.length > 0) {
+    emscList = emscAPIData.value;
+    result.sources.emscAPI = true;
+    if (__DEV__) logger.info(`✅ EMSC: ${emscList.length} veri`);
+  }
+
   // If both official sources are disabled, use selected observatory from unified feed as fallback.
   if (!sourceAFAD && !sourceKOERI && unifiedList.length > 0) {
     const unifiedAfad = unifiedList.filter((eq) => eq.source === 'AFAD');
@@ -178,7 +202,7 @@ export async function fetchAllEarthquakes(
     result.sources.unified = true;
   }
 
-  // --- 3. FUSION & VERIFICATION ---
+  // --- 4. FUSION & VERIFICATION ---
   // Lazy import to avoid circular dependency issues if any
   const { earthquakeFusionService } = require('./EarthquakeFusionService');
 
@@ -187,13 +211,142 @@ export async function fetchAllEarthquakes(
     : (sourceAFAD || afadList.length > 0 ? 'AFAD' : 'KANDILLI');
 
   // Fuse the lists!
-  result.earthquakes = earthquakeFusionService.fuse(afadList, kandilliList, primarySource);
+  result.earthquakes = [
+    ...earthquakeFusionService.fuse(afadList, kandilliList, primarySource),
+    ...usgsList,
+    ...emscList,
+  ].sort((a, b) => b.time - a.time);
 
   if (__DEV__) {
-    logger.info(`🧬 FÜZYON SONUCU: ${afadList.length} AFAD + ${kandilliList.length} Kandilli -> ${result.earthquakes.length} Birleştirilmiş Deprem (primary: ${primarySource})`);
+    logger.info(`🧬 FÜZYON SONUCU: ${afadList.length} AFAD + ${kandilliList.length} Kandilli + ${usgsList.length} USGS + ${emscList.length} EMSC -> ${result.earthquakes.length} Birleştirilmiş Deprem (primary: ${primarySource})`);
   }
 
   return result;
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'User-Agent': 'AfetNet/1.0',
+      },
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function isValidEarthquake(eq: Earthquake): boolean {
+  return Number.isFinite(eq.time) && eq.time > 0 &&
+    Number.isFinite(eq.magnitude) && eq.magnitude >= 0 && eq.magnitude <= 10 &&
+    Number.isFinite(eq.latitude) && eq.latitude >= -90 && eq.latitude <= 90 &&
+    Number.isFinite(eq.longitude) && eq.longitude >= -180 && eq.longitude <= 180;
+}
+
+/**
+ * Fetch Turkey-region earthquakes from USGS FDSN.
+ */
+export async function fetchFromUSGSAPI(): Promise<Earthquake[]> {
+  try {
+    const startTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const params = [
+      'format=geojson',
+      `starttime=${encodeURIComponent(startTime)}`,
+      'minmagnitude=1',
+      'minlatitude=35',
+      'maxlatitude=43',
+      'minlongitude=25',
+      'maxlongitude=45',
+      'limit=100',
+      'orderby=time',
+    ].join('&');
+    const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?${params}`;
+    const response = await fetchWithTimeout(url, 15000);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const features = Array.isArray(data?.features) ? data.features : [];
+    return features.map((feature: any): Earthquake | null => {
+      const props = feature?.properties || {};
+      const coords = feature?.geometry?.coordinates || [];
+      const time = Number(props.time || 0);
+      const earthquake: Earthquake = {
+        id: `usgs-${feature.id || `${time}-${coords[1]}-${coords[0]}`}`,
+        magnitude: Number(props.mag || 0),
+        location: String(props.place || 'Türkiye'),
+        depth: Number(coords[2] || 10),
+        time,
+        latitude: Number(coords[1]),
+        longitude: Number(coords[0]),
+        source: 'USGS',
+      };
+      return isValidEarthquake(earthquake) ? earthquake : null;
+    }).filter((eq: Earthquake | null): eq is Earthquake => Boolean(eq));
+  } catch (error: unknown) {
+    if (__DEV__) {
+      logger.debug('USGS fetch başarısız:', getErrorMessage(error));
+    }
+    return [];
+  }
+}
+
+/**
+ * Fetch Turkey-region earthquakes from EMSC FDSN.
+ */
+export async function fetchFromEMSCAPI(): Promise<Earthquake[]> {
+  try {
+    const startTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const params = [
+      'format=json',
+      `start=${encodeURIComponent(startTime)}`,
+      'minmag=1',
+      'minlatitude=35',
+      'maxlatitude=43',
+      'minlongitude=25',
+      'maxlongitude=45',
+      'limit=100',
+      'orderby=time',
+    ].join('&');
+    const url = `https://www.seismicportal.eu/fdsnws/event/1/query?${params}`;
+    const response = await fetchWithTimeout(url, 15000);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const features = Array.isArray(data?.features) ? data.features : [];
+    return features.map((feature: any): Earthquake | null => {
+      const props = feature?.properties || {};
+      const coords = feature?.geometry?.coordinates || [];
+      const time = new Date(props.time).getTime();
+      const earthquake: Earthquake = {
+        id: `emsc-${props.source_id || feature.id || `${time}-${coords[1]}-${coords[0]}`}`,
+        magnitude: Number(props.mag || 0),
+        location: String(props.flynn_region || props.place || 'Türkiye'),
+        depth: Number(coords[2] || 10),
+        time,
+        latitude: Number(coords[1]),
+        longitude: Number(coords[0]),
+        source: 'EMSC',
+      };
+      return isValidEarthquake(earthquake) ? earthquake : null;
+    }).filter((eq: Earthquake | null): eq is Earthquake => Boolean(eq));
+  } catch (error: unknown) {
+    if (__DEV__) {
+      logger.debug('EMSC fetch başarısız:', getErrorMessage(error));
+    }
+    return [];
+  }
 }
 
 /**
@@ -205,17 +358,11 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
     // AFAD API uses Turkey local time. toISOString() returns UTC which can be
     // 1 day behind Turkey time (e.g., UTC 21:00 = Turkey 00:00 next day).
     // This caused endDate to be yesterday's date → today's earthquakes missing.
-    const now = new Date();
-    const turkeyOffset = 3 * 60 * 60 * 1000; // UTC+3
-    const turkeyNow = new Date(now.getTime() + turkeyOffset);
-    const turkeySevenDaysAgo = new Date(turkeyNow.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const now = Date.now();
+    const startDate = formatTurkeyApiDate(now - 7 * 24 * 60 * 60 * 1000);
     // Add 1 day to endDate to ensure we capture all of today's earthquakes
-    const turkeyTomorrow = new Date(turkeyNow.getTime() + 24 * 60 * 60 * 1000);
-    const startDate = turkeySevenDaysAgo.toISOString().split('T')[0];
-    const endDate = turkeyTomorrow.toISOString().split('T')[0];
+    const endDate = formatTurkeyApiDate(now + 24 * 60 * 60 * 1000);
     const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${startDate}&end=${endDate}&minmag=1&limit=500`;
-
-    const fallbackUrl = 'https://deprem.afad.gov.tr/apiv2/event/latest?limit=500';
 
     if (__DEV__) {
       logger.debug('📡 AFAD API çağrılıyor:', url);
@@ -272,52 +419,9 @@ export async function fetchFromAFADAPI(): Promise<Earthquake[]> {
       return processAFADEvents(events);
     } catch (resilienceError: unknown) {
       if (__DEV__) {
-        logger.warn('⚠️ Primary AFAD endpoint failed with resilience, trying fallback...');
+        logger.warn('⚠️ AFAD API endpoint failed with resilience, HTML fallback deneniyor...');
       }
-
-      const fallbackData = await networkResilienceService.executeWithResilience<Earthquake[]>(
-        endpoint,
-        fallbackUrl,
-        async () => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-          try {
-            const response = await fetch(fallbackUrl, {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/json',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-                'User-Agent': 'AfetNet/1.0',
-              },
-              signal: controller.signal,
-              cache: 'no-store',
-            });
-            clearTimeout(timeoutId);
-            return response;
-          } catch (fetchError: unknown) {
-            clearTimeout(timeoutId);
-            if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-              throw new Error('Request timeout');
-            }
-            throw fetchError;
-          }
-        },
-      );
-
-      let events: any[] = Array.isArray(fallbackData) ? fallbackData : [];
-      events = events.sort((a: any, b: any) => {
-        const dateA = a.eventDate || a.date || a.originTime || '';
-        const dateB = b.eventDate || b.date || b.originTime || '';
-        return dateB.localeCompare(dateA);
-      });
-
-      if (events.length === 0) {
-        throw new Error('Both AFAD endpoints returned empty data');
-      }
-
-      return processAFADEvents(events);
+      throw resilienceError;
     }
   } catch (error: unknown) {
     const errMsg = getErrorMessage(error);

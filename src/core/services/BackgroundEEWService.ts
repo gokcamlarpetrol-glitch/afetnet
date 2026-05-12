@@ -20,12 +20,15 @@
 
 import { Platform, AppState, AppStateStatus } from 'react-native';
 import { createLogger } from '../utils/logger';
+import { calculateDistance } from '../utils/locationUtils';
+import { formatTurkeyApiDateTime, parseAFADDate } from '../utils/timeUtils';
 
 const logger = createLogger('BackgroundEEWService');
 
 // Task names
 const TASK_EEW_FETCH = 'AFETNET_EEW_BACKGROUND_FETCH';
 const TASK_EEW_LOCATION = 'AFETNET_EEW_LOCATION_TASK';
+const EEW_LOCATION_KEEPALIVE_ENABLED = process.env.EXPO_PUBLIC_EEW_LOCATION_KEEPALIVE === 'true';
 
 // Lazy load modules
 let TaskManager: typeof import('expo-task-manager') | null = null;
@@ -72,8 +75,14 @@ class BackgroundEEWService {
             // Register background fetch
             await this.registerBackgroundFetch();
 
-            // Register location task for aggressive keep-alive
-            await this.registerLocationTask();
+            // Optional aggressive location keep-alive.
+            // Default OFF to avoid persistent background location indicator/noise.
+            if (EEW_LOCATION_KEEPALIVE_ENABLED) {
+                await this.registerLocationTask();
+            } else {
+                await this.stopLocationTaskIfRunning();
+                logger.info('⏭️ EEW location keep-alive disabled (background fetch only)');
+            }
 
             // Listen to app state
             this.setupAppStateListener();
@@ -88,18 +97,20 @@ class BackgroundEEWService {
     // ==================== TASK DEFINITIONS ====================
 
     /**
+     * Define background tasks early (called from index.ts at module level)
+     */
+    defineBackgroundTasksEarly(): void {
+        this.defineBackgroundTasks().catch(() => {});
+    }
+
+    /**
      * Define background tasks
      */
     private async defineBackgroundTasks(): Promise<void> {
         if (!TaskManager) return;
 
-        // CRITICAL FIX: Tasks may already be defined in index.ts (entry point).
-        // Calling defineTask twice for the same name crashes iOS production builds.
-        const isEEWFetchDefined = TaskManager.isTaskDefined(TASK_EEW_FETCH);
-        const isEEWLocationDefined = TaskManager.isTaskDefined(TASK_EEW_LOCATION);
-
-        // Define EEW fetch task (only if not already defined)
-        if (!isEEWFetchDefined) {
+        // Define EEW fetch task (guard against double-define on iOS)
+        if (!TaskManager.isTaskDefined(TASK_EEW_FETCH)) {
             TaskManager.defineTask(TASK_EEW_FETCH, async () => {
                 try {
                     logger.info('⏰ Background EEW fetch triggered');
@@ -110,19 +121,17 @@ class BackgroundEEWService {
                     return BackgroundFetch?.BackgroundFetchResult.Failed;
                 }
             });
-        } else {
-            logger.debug('EEW fetch task already defined (from index.ts)');
         }
 
-        // Define location task (only if not already defined)
-        if (!isEEWLocationDefined) {
+        // Define location task (guard against double-define on iOS)
+        if (!TaskManager.isTaskDefined(TASK_EEW_LOCATION)) {
             TaskManager.defineTask(TASK_EEW_LOCATION, async ({ data, error }) => {
                 if (error) {
                     logger.error('Location task error:', error);
                     return;
                 }
                 if (!data || !Array.isArray((data as any).locations) || !(data as any).locations[0]?.coords) {
-                    return; // Invalid data, skip
+                    return;
                 }
                 const { locations } = data as { locations: { coords: { latitude: number; longitude: number } }[] };
                 if (locations.length > 0) {
@@ -131,8 +140,6 @@ class BackgroundEEWService {
                     await this.performBackgroundEEWCheck(location.coords);
                 }
             });
-        } else {
-            logger.debug('EEW location task already defined (from index.ts)');
         }
 
         logger.info('✅ Background tasks defined');
@@ -215,6 +222,23 @@ class BackgroundEEWService {
         }
     }
 
+    private async stopLocationTaskIfRunning(): Promise<void> {
+        if (!Location || !TaskManager) return;
+
+        try {
+            const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_EEW_LOCATION);
+            if (!isRegistered) return;
+
+            const hasStarted = await Location.hasStartedLocationUpdatesAsync(TASK_EEW_LOCATION);
+            if (hasStarted) {
+                await Location.stopLocationUpdatesAsync(TASK_EEW_LOCATION);
+                logger.info('Stopped existing EEW background location task');
+            }
+        } catch (error) {
+            logger.debug('Failed to stop legacy EEW location task:', error);
+        }
+    }
+
     // ==================== EEW CHECK ====================
 
     /**
@@ -227,12 +251,14 @@ class BackgroundEEWService {
             // Fetch latest earthquakes
             const events = await this.fetchLatestEarthquakes();
 
+            // REVIEW FIX: Single source-of-truth — EEW_THRESHOLDS unified across all pipelines
+            const { EEW_THRESHOLDS } = await import('./messaging/constants');
             for (const event of events) {
                 // Check if significant and not already notified
-                if (event.magnitude >= 4.0) {
+                if (event.magnitude >= EEW_THRESHOLDS.MIN_NOTIFY_MAGNITUDE) {
                     // Check distance if location available
                     if (location) {
-                        const distance = this.calculateDistance(
+                        const distance = calculateDistance(
                             location.latitude,
                             location.longitude,
                             event.latitude,
@@ -268,30 +294,41 @@ class BackgroundEEWService {
         latitude: number;
         longitude: number;
         location: string;
+        time: number;
     }>> {
         try {
-            const now = new Date();
-            const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+            const now = Date.now();
+            const fiveMinutesAgo = now - 5 * 60 * 1000;
+            const start = encodeURIComponent(formatTurkeyApiDateTime(fiveMinutesAgo));
+            const end = encodeURIComponent(formatTurkeyApiDateTime(now));
+            const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${start}&end=${end}&minmag=3&limit=10`;
 
-            const formatDate = (d: Date) => d.toISOString().split('T')[0];
-
-            const url = `https://deprem.afad.gov.tr/apiv2/event/filter?start=${formatDate(fiveMinutesAgo)}%2000:00:00&end=${formatDate(now)}%2023:59:59&minmag=3&limit=10`;
-
+            // CRITICAL FIX: Add 10s timeout — background tasks have limited execution time
+            // (iOS ~30s). A hanging fetch without timeout wastes the entire window.
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
             const response = await fetch(url, {
                 headers: { 'User-Agent': 'AfetNet/1.0' },
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
 
             const data = await response.json();
 
             if (!Array.isArray(data)) return [];
 
-            return data.map((item: Record<string, unknown>) => ({
-                id: String(item.eventID || item.id || `afad-${Date.now()}`),
-                magnitude: Number(item.magnitude || item.mag || 0),
-                latitude: Number(item.latitude || item.lat || 0),
-                longitude: Number(item.longitude || item.lng || 0),
-                location: String(item.location || item.region || 'Unknown'),
-            }));
+            return data.map((item: Record<string, unknown>) => {
+                const eventDate = item.date || item.eventDate || item.originTime;
+                const time = eventDate ? parseAFADDate(String(eventDate)) : NaN;
+                return {
+                    id: String(item.eventID || item.id || `afad-${Date.now()}`),
+                    magnitude: Number(item.magnitude || item.mag || 0),
+                    latitude: Number(item.latitude || item.lat || 0),
+                    longitude: Number(item.longitude || item.lng || 0),
+                    location: String(item.location || item.region || 'Unknown'),
+                    time,
+                };
+            }).filter((item) => Number.isFinite(item.time));
         } catch (error) {
             logger.error('Failed to fetch earthquakes:', error);
             return [];
@@ -312,13 +349,14 @@ class BackgroundEEWService {
         latitude: number;
         longitude: number;
         location: string;
+        time: number;
     }): Promise<void> {
         try {
             const { notificationCenter } = await import('./notifications/NotificationCenter');
             await notificationCenter.notify('earthquake', {
                 magnitude: event.magnitude,
                 location: event.location,
-                timestamp: Date.now(),
+                timestamp: event.time,
                 source: 'AFAD',
                 latitude: event.latitude,
                 longitude: event.longitude,
@@ -332,31 +370,7 @@ class BackgroundEEWService {
 
     // ==================== HELPERS ====================
 
-    /**
-     * Calculate distance between two points (Haversine)
-     */
-    private calculateDistance(
-        lat1: number,
-        lon1: number,
-        lat2: number,
-        lon2: number
-    ): number {
-        const R = 6371; // Earth radius in km
-        const dLat = this.toRad(lat2 - lat1);
-        const dLon = this.toRad(lon2 - lon1);
-        const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(this.toRad(lat1)) *
-            Math.cos(this.toRad(lat2)) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
-    private toRad(deg: number): number {
-        return deg * (Math.PI / 180);
-    }
+    // calculateDistance imported from utils/locationUtils
 
     /**
      * Mark event as notified
@@ -445,6 +459,12 @@ class BackgroundEEWService {
      * Setup app state listener
      */
     private setupAppStateListener(): void {
+        // FIX: Remove any existing listener before registering a new one
+        // to prevent accumulation on re-initialization.
+        if (this.appStateSubscription) {
+            this.appStateSubscription.remove();
+            this.appStateSubscription = null;
+        }
         this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
             if (this.appState.match(/inactive|background/) && nextState === 'active') {
                 // App came to foreground - perform immediate check
@@ -505,11 +525,17 @@ class BackgroundEEWService {
                 this.appStateSubscription = null;
             }
 
-            if (BackgroundFetch) {
-                await BackgroundFetch.unregisterTaskAsync(TASK_EEW_FETCH);
+            const backgroundFetchModule = BackgroundFetch || await import('expo-background-fetch').catch(() => null);
+            if (backgroundFetchModule) {
+                await backgroundFetchModule.unregisterTaskAsync(TASK_EEW_FETCH);
             }
-            if (Location) {
-                await Location.stopLocationUpdatesAsync(TASK_EEW_LOCATION);
+
+            const locationModule = Location || await import('expo-location').catch(() => null);
+            if (locationModule) {
+                const started = await locationModule.hasStartedLocationUpdatesAsync(TASK_EEW_LOCATION).catch(() => false);
+                if (started) {
+                    await locationModule.stopLocationUpdatesAsync(TASK_EEW_LOCATION);
+                }
             }
 
             this.isInitialized = false;

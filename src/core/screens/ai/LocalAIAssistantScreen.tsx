@@ -305,7 +305,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/violet_ai_bg.png')}
+      source={require('../../../../assets/images/premium/violet_ai_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

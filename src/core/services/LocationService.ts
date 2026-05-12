@@ -20,12 +20,37 @@ class LocationService {
   private hasPermission = false;
   private currentLocation: LocationCoords | null = null;
 
+  private shouldBroadcastLocationToMesh(): boolean {
+    try {
+      const settings = useSettingsStore.getState();
+      if (settings.familyLocationSharingEnabled === true) {
+        return true;
+      }
+    } catch {
+      // fall through to emergency status check
+    }
+
+    try {
+      const { useUserStatusStore } = require('../stores/userStatusStore');
+      const status = useUserStatusStore.getState().status;
+      return status === 'sos' || status === 'trapped' || status === 'needs_help' || status === 'need-help' || status === 'critical';
+    } catch {
+      return false;
+    }
+  }
+
   private isLocationEnabledBySettings(): boolean {
     try {
       return useSettingsStore.getState().locationEnabled;
     } catch {
       return true;
     }
+  }
+
+  reset() {
+    this.isInitialized = false;
+    this.hasPermission = false;
+    this.currentLocation = null;
   }
 
   async initialize() {
@@ -97,9 +122,18 @@ class LocationService {
         accuracy: Location.Accuracy.High,
       });
 
+      // Validate coordinates before storing/broadcasting
+      const lat = location.coords.latitude;
+      const lng = location.coords.longitude;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
+          lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        logger.warn('Invalid coordinates from GPS, skipping update', { lat, lng });
+        return null;
+      }
+
       this.currentLocation = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+        latitude: lat,
+        longitude: lng,
         accuracy: location.coords.accuracy,
         timestamp: location.timestamp,
       };
@@ -126,31 +160,28 @@ class LocationService {
               }
             });
 
-            // CRITICAL: Send location update to backend for rescue coordination
-            // ELITE: This ensures rescue teams can track user location during disasters
+            // Only send emergency location to backend during SOS mode
             try {
-              const { backendEmergencyService } = await import('./BackendEmergencyService');
-              if (backendEmergencyService.initialized) {
-                await backendEmergencyService.sendEmergencyMessage({
-                  messageId: `loc_${this.currentLocation.timestamp}`,
-                  content: 'Location update',
-                  timestamp: this.currentLocation.timestamp,
-                  type: 'location',
-                  priority: 'normal',
-                  location: {
-                    latitude: this.currentLocation.latitude,
-                    longitude: this.currentLocation.longitude,
-                    accuracy: this.currentLocation.accuracy || undefined,
-                  },
-                }).catch((error) => {
-                  // ELITE: Backend save failures are non-critical - app continues
-                  if (__DEV__) {
-                    logger.debug('Location update save to backend failed (non-critical):', error);
-                  }
-                });
+              const { useUserStatusStore } = await import('../stores/userStatusStore');
+              const userStatus = useUserStatusStore.getState().status;
+              if (userStatus === 'sos' || userStatus === 'trapped') {
+                const { backendEmergencyService } = await import('./BackendEmergencyService');
+                if (backendEmergencyService.initialized) {
+                  await backendEmergencyService.sendEmergencyMessage({
+                    messageId: `loc_${this.currentLocation.timestamp}`,
+                    content: 'Location update',
+                    timestamp: this.currentLocation.timestamp,
+                    type: 'location',
+                    priority: 'normal',
+                    location: {
+                      latitude: this.currentLocation.latitude,
+                      longitude: this.currentLocation.longitude,
+                      accuracy: this.currentLocation.accuracy || undefined,
+                    },
+                  }).catch(() => {});
+                }
               }
             } catch (backendError) {
-              // ELITE: Backend save is optional - app continues without it
               if (__DEV__) {
                 logger.debug('Backend location save skipped:', backendError);
               }
@@ -168,22 +199,22 @@ class LocationService {
       // ELITE HYBRID: Broadcast Location to Mesh Network (Offline Support)
       // -----------------------------------------------------------------------
       try {
-        const { connectionManager } = await import('./ConnectionManager');
         const { meshNetworkService } = await import('./mesh/MeshNetworkService');
 
-        // Strategy: Always broadcast to Mesh for nearby peers (even if online)
-        // This ensures local situational awareness without round-trip to server
-        const locationPayload = JSON.stringify({
-          type: 'LOC',
-          lat: this.currentLocation.latitude,
-          lng: this.currentLocation.longitude,
-          acc: Math.floor(this.currentLocation.accuracy || 0),
-          t: this.currentLocation.timestamp,
-        });
+        if (this.shouldBroadcastLocationToMesh()) {
+          const locationPayload = JSON.stringify({
+            type: 'LOC',
+            lat: this.currentLocation.latitude,
+            lng: this.currentLocation.longitude,
+            acc: Math.floor(this.currentLocation.accuracy || 0),
+            t: this.currentLocation.timestamp,
+          });
 
-        // Use broadcastMessage with the new LOCATION type
-        const { MeshMessageType } = await import('./mesh/MeshProtocol');
-        meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION);
+          // Use broadcastMessage with the new LOCATION type
+          const { MeshMessageType } = await import('./mesh/MeshProtocol');
+          meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION)
+            .catch(meshErr => { if (__DEV__) logger.debug('Mesh location broadcast promise rejected:', meshErr); });
+        }
       } catch (meshError) {
         if (__DEV__) logger.warn('Mesh location broadcast failed:', meshError);
       }
@@ -199,6 +230,15 @@ class LocationService {
 
   getCurrentLocation(): LocationCoords | null {
     return this.currentLocation;
+  }
+
+  /**
+   * Destroy — full cleanup for shutdownApp().
+   * Resets all state so a new user session starts clean.
+   */
+  destroy(): void {
+    this.reset();
+    logger.info('LocationService destroyed');
   }
 
   async getCurrentPosition(): Promise<LocationCoords | null> {
@@ -259,18 +299,23 @@ class LocationService {
               return;
             }
 
+            const rawLat = location.coords.latitude;
+            const rawLng = location.coords.longitude;
+
+            // ELITE: Validate coordinates are valid finite numbers and within valid range
+            if (typeof rawLat !== 'number' || typeof rawLng !== 'number' ||
+                !Number.isFinite(rawLat) || !Number.isFinite(rawLng) ||
+                rawLat < -90 || rawLat > 90 || rawLng < -180 || rawLng > 180) {
+              logger.warn('Invalid coordinates received', { rawLat, rawLng });
+              return;
+            }
+
             const coords: LocationCoords = {
-              latitude: location.coords.latitude ?? 0,
-              longitude: location.coords.longitude ?? 0,
+              latitude: rawLat,
+              longitude: rawLng,
               accuracy: location.coords.accuracy ?? null,
               timestamp: location.timestamp ?? Date.now(),
             };
-
-            // ELITE: Validate coordinates are valid numbers
-            if (isNaN(coords.latitude) || isNaN(coords.longitude)) {
-              logger.warn('Invalid coordinates received');
-              return;
-            }
 
             this.currentLocation = coords;
             callback(coords);
@@ -297,34 +342,29 @@ class LocationService {
                     }
                   });
 
-                  // CRITICAL: Send location update to backend for rescue coordination
-                  // ELITE: This ensures rescue teams can track user location during disasters
+                  // Only send emergency location to backend during SOS mode
                   try {
-                    const { backendEmergencyService } = await import('./BackendEmergencyService');
-                    if (backendEmergencyService.initialized) {
-                      await backendEmergencyService.sendEmergencyMessage({
-                        messageId: `loc_${coords.timestamp}`,
-                        content: 'Location update',
-                        timestamp: coords.timestamp,
-                        type: 'location',
-                        priority: 'normal',
-                        location: {
-                          latitude: coords.latitude,
-                          longitude: coords.longitude,
-                          accuracy: coords.accuracy || undefined,
-                        },
-                      }).catch((error) => {
-                        // ELITE: Backend save failures are non-critical - app continues
-                        if (__DEV__) {
-                          logger.debug('Location update save to backend failed (non-critical):', error);
-                        }
-                      });
+                    const { useUserStatusStore } = await import('../stores/userStatusStore');
+                    const userStatus = useUserStatusStore.getState().status;
+                    if (userStatus === 'sos' || userStatus === 'trapped') {
+                      const { backendEmergencyService } = await import('./BackendEmergencyService');
+                      if (backendEmergencyService.initialized) {
+                        await backendEmergencyService.sendEmergencyMessage({
+                          messageId: `loc_${coords.timestamp}`,
+                          content: 'Location update',
+                          timestamp: coords.timestamp,
+                          type: 'location',
+                          priority: 'normal',
+                          location: {
+                            latitude: coords.latitude,
+                            longitude: coords.longitude,
+                            accuracy: coords.accuracy || undefined,
+                          },
+                        }).catch(() => {});
+                      }
                     }
-                  } catch (backendError) {
-                    // ELITE: Backend save is optional - app continues without it
-                    if (__DEV__) {
-                      logger.debug('Backend location save skipped:', backendError);
-                    }
+                  } catch {
+                    // Backend location save is optional
                   }
                 }
               }
@@ -339,22 +379,24 @@ class LocationService {
             // ELITE HYBRID: Broadcast Location to Mesh Network (Offline Support)
             // -----------------------------------------------------------------------
             try {
-              const { connectionManager } = await import('./ConnectionManager');
               const { meshNetworkService } = await import('./mesh/MeshNetworkService');
 
-              // Strategy: Always broadcast to Mesh for nearby peers (even if online)
-              // This ensures local situational awareness without round-trip to server
-              const locationPayload = JSON.stringify({
-                type: 'LOC',
-                lat: this.currentLocation.latitude,
-                lng: this.currentLocation.longitude,
-                acc: Math.floor(this.currentLocation.accuracy || 0),
-                t: this.currentLocation.timestamp,
-              });
+              if (!this.currentLocation) return;
 
-              // Use broadcastMessage with the new LOCATION type
-              const { MeshMessageType } = await import('./mesh/MeshProtocol');
-              meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION);
+              if (this.shouldBroadcastLocationToMesh()) {
+                const locationPayload = JSON.stringify({
+                  type: 'LOC',
+                  lat: this.currentLocation.latitude,
+                  lng: this.currentLocation.longitude,
+                  acc: Math.floor(this.currentLocation.accuracy || 0),
+                  t: this.currentLocation.timestamp,
+                });
+
+                // Use broadcastMessage with the new LOCATION type
+                const { MeshMessageType } = await import('./mesh/MeshProtocol');
+                meshNetworkService.broadcastMessage(locationPayload, MeshMessageType.LOCATION)
+                  .catch(meshErr => { if (__DEV__) logger.debug('Mesh location broadcast promise rejected:', meshErr); });
+              }
             } catch (meshError) {
               if (__DEV__) logger.warn('Mesh location broadcast failed:', meshError);
             }

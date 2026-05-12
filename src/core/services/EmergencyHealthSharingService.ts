@@ -12,8 +12,12 @@ import { DirectStorage } from '../utils/storage';
 import { logger } from '../utils/logger';
 import { MeshProtocol, MeshMessageType } from './mesh/MeshProtocol';
 import { getDeviceId } from '../utils/device';
+import { getFirebaseAuth } from '../../lib/firebase';
 
-const SETTINGS_KEY = '@afetnet:health_sharing_enabled';
+const getSettingsKey = () => {
+    const uid = getFirebaseAuth()?.currentUser?.uid || 'anonymous';
+    return `@afetnet:health_sharing_enabled:${uid}`;
+};
 
 export interface HealthSOSData {
     initials: string;
@@ -42,7 +46,7 @@ class EmergencyHealthSharingService {
     async initialize(): Promise<void> {
         try {
             // Load user preference
-            const enabled = DirectStorage.getString(SETTINGS_KEY);
+            const enabled = DirectStorage.getString(getSettingsKey());
             this.isEnabled = enabled === 'true';
 
             // Get device ID
@@ -74,7 +78,7 @@ class EmergencyHealthSharingService {
      */
     async setEnabled(enabled: boolean): Promise<void> {
         this.isEnabled = enabled;
-        DirectStorage.setString(SETTINGS_KEY, enabled ? 'true' : 'false');
+        DirectStorage.setString(getSettingsKey(), enabled ? 'true' : 'false');
         logger.info('Health sharing preference updated:', { enabled });
     }
 
@@ -121,7 +125,7 @@ class EmergencyHealthSharingService {
 
             // Then broadcast every 30 seconds to ensure nearby devices receive it
             this.broadcastInterval = setInterval(async () => {
-                await this.broadcastHealthPacket(healthData);
+                try { await this.broadcastHealthPacket(healthData); } catch (e) { if (__DEV__) logger.debug('Health broadcast error:', e); }
             }, 30000);
 
             logger.info('Started health data broadcast', {

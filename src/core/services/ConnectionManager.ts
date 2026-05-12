@@ -24,6 +24,11 @@ class ConnectionManager {
   private netInfoSubscription: NetInfoSubscription | null = null;
 
   constructor() {
+    // startMonitoring called lazily on first getConnectionMode() or explicitly via initialize()
+  }
+
+  initialize() {
+    if (this.netInfoSubscription) return; // Already started
     this.startMonitoring();
   }
 
@@ -32,8 +37,15 @@ class ConnectionManager {
       this._isConnected = state.isConnected ?? true;
       this._isInternetReachable = state.isInternetReachable;
       this._connectionType = state.type;
-    }).catch(() => {
+
+      // ELITE FIX: Ensure Mesh starts immediately if app boots up offline
+      const currentMode = this.getConnectionMode();
+      if (currentMode === 'MESH' || currentMode === 'DISCONNECTED') {
+        this.autoStartMeshNetwork().catch(e => { if (__DEV__) logger.debug('Mesh auto-start rejected:', e); });
+      }
+    }).catch(e => {
       // Assume online until proven otherwise
+      if (__DEV__) logger.debug('NetInfo initial fetch failed:', e);
     });
 
     this.netInfoSubscription = NetInfo.addEventListener((state: NetInfoState) => {
@@ -47,9 +59,32 @@ class ConnectionManager {
 
       if (prevMode !== newMode) {
         logger.info(`Connection Mode Changed: ${prevMode} -> ${newMode} (${state.type})`);
+
+        // ELITE FIX: Auto-start Mesh when moving to offline states
+        // Without this, receiving devices never start listening for BLE packets!
+        if (newMode === 'MESH' || newMode === 'DISCONNECTED') {
+          this.autoStartMeshNetwork().catch(e => { if (__DEV__) logger.debug('Mesh auto-start rejected:', e); });
+        }
+
         this.notifyListeners(newMode);
       }
     });
+  }
+
+  /**
+   * ELITE FIX: Auto-start mesh networking to guarantee message reception
+   * when the device drops off the standard internet/wifi network.
+   */
+  private async autoStartMeshNetwork() {
+    if (!meshNetworkService.getIsRunning()) {
+      logger.info('🛜 Auto-starting MeshNetworkService due to offline state drop');
+      try {
+        await meshNetworkService.start();
+        logger.info('✅ Mesh auto-started successfully');
+      } catch (err) {
+        logger.error('❌ Mesh auto-start failed:', err);
+      }
+    }
   }
 
   /**
@@ -69,7 +104,8 @@ class ConnectionManager {
       // Connected but explicitly not reachable — try mesh
       return 'MESH';
     }
-    return 'MESH';
+    // Truly disconnected — no WiFi/Cellular
+    return 'DISCONNECTED';
   }
 
   get isOnline(): boolean {
@@ -98,7 +134,13 @@ class ConnectionManager {
   }
 
   private notifyListeners(mode: ConnectionMode) {
-    this.listeners.forEach(l => l(mode));
+    for (const l of [...this.listeners]) {
+      try {
+        l(mode);
+      } catch (e) {
+        logger.error('Connection listener threw:', e);
+      }
+    }
   }
 
   /**
@@ -111,6 +153,17 @@ class ConnectionManager {
     }
     this.listeners = [];
     logger.info('ConnectionManager destroyed');
+  }
+
+  /**
+   * Re-initialize NetInfo monitoring after destroy().
+   * Must be called on re-login to restore online/offline detection.
+   */
+  reinitialize(): void {
+    if (!this.netInfoSubscription) {
+      this.startMonitoring();
+      logger.info('ConnectionManager re-initialized');
+    }
   }
 }
 

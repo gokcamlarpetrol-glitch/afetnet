@@ -14,13 +14,17 @@ jest.mock('../../utils/messageSanitizer', () => ({
 
 jest.mock('firebase/auth', () => ({
   getAuth: (...args: unknown[]) => mockGetAuth(...args),
+  onAuthStateChanged: jest.fn(() => jest.fn()),
+}));
+
+jest.mock('../../../lib/firebase', () => ({
+  getFirebaseAuth: () => mockGetAuth(),
+  initializeFirebase: jest.fn(),
 }));
 
 jest.mock('../IdentityService', () => ({
   identityService: {
     getUid: jest.fn(() => 'uid_test_sender'),
-    getMyId: jest.fn(() => 'afn-test-001'),
-    getMeshDeviceId: jest.fn(() => 'mesh-test-001'),
   },
 }));
 
@@ -79,7 +83,7 @@ describe('GroupChatService senderUid compatibility', () => {
     const [, payload] = mockSendGroupMessage.mock.calls[0];
     expect((payload as { from: string }).from).toBe('uid_test_sender');
     expect((payload as { senderUid: string }).senderUid).toBe('uid_test_sender');
-    expect((payload as { fromDeviceId: string }).fromDeviceId).toBe('mesh-test-001');
+    expect((payload as { fromDeviceId: string }).fromDeviceId).toBe('uid_test_sender');
   });
 
   it('preserves media metadata in persisted group message payload', async () => {
@@ -145,6 +149,11 @@ describe('GroupChatService senderUid compatibility', () => {
 
   it('returns null instead of throwing when auth is unavailable during send', async () => {
     mockGetAuth.mockReturnValue({ currentUser: null });
+    // CRITICAL: identityService fallback must also return null for this scenario
+    const { identityService } = jest.requireMock('../IdentityService') as {
+      identityService: { getUid: jest.Mock; getMeshDeviceId: jest.Mock };
+    };
+    identityService.getUid.mockReturnValueOnce(null);
 
     const result = await groupChatService.sendMessage('grp_test', 'Merhaba');
 

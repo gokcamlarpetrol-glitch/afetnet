@@ -101,7 +101,7 @@ export const ENV = {
 
   // App
   APP_NAME: getEnvVar('APP_NAME', 'AfetNet'),
-  APP_VERSION: getEnvVar('APP_VERSION', '1.0.2'),
+  APP_VERSION: getEnvVar('APP_VERSION', '1.4.0'),
   BUNDLE_ID: getEnvVar('BUNDLE_ID', 'com.gokhancamci.afetnetapp'),
 
   // Feature Flags

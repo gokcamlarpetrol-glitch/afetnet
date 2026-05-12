@@ -4,12 +4,16 @@ import { useMessageStore } from '../stores/messageStore';
 import { useFamilyStore } from '../stores/familyStore';
 import { useHealthProfileStore } from '../stores/healthProfileStore';
 import { useContactStore } from '../stores/contactStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { contactService } from './ContactService';
 
 const logger = createLogger('AuthSessionCleanupService');
 
 class AuthSessionCleanupService {
   async clearLocalSessionData(): Promise<void> {
+    // Reset settings to defaults (preserves EULA) — prevents cross-account preference leak
+    try { useSettingsStore.getState().resetToDefaults(); } catch { /* best effort */ }
+
     const tasks: Array<Promise<unknown>> = [
       useMessageStore.getState().clear(),
       useFamilyStore.getState().clear(),

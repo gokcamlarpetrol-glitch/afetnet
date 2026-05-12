@@ -12,6 +12,25 @@ export interface FamilyMember {
   familyId?: string;
   name: string;
   status: 'safe' | 'need-help' | 'unknown' | 'critical' | 'danger' | 'offline';
+  /**
+   * Last time the member explicitly updated their safety status.
+   * Critical for life-safety: a "safe" status from 3 days ago is unreliable
+   * and should be visually degraded by the UI to prevent false reassurance.
+   */
+  statusUpdatedAt?: number;
+  /**
+   * HATA 5 FIX: Mutual approval state.
+   * - 'mutual' = karşılıklı onaylanmış (her iki taraf da görüyor)
+   * - 'pending' = davet gönderildi, karşı taraf henüz kabul etmedi
+   * - 'declined' = karşı taraf reddetti (yeni davet gönderilebilir)
+   *
+   * pending durumunda:
+   *  - Uye listede gri renkli + "Onay bekliyor" badge ile gosterilir
+   *  - Lokasyonu GORUNMEZ (KVKK + stalking koruma)
+   *  - Durumu sadece "Bilinmiyor" olarak gosterilir
+   *  - SOS gonderildiginde dahil edilmez (rıza yok)
+   */
+  approvalState?: 'mutual' | 'pending' | 'declined';
   lastSeen: number;
   latitude: number;
   longitude: number;

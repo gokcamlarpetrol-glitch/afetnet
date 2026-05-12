@@ -39,7 +39,8 @@ import { AttachmentsModal } from '../../components/messages/AttachmentsModal';
 import { VoiceRecorderUI } from '../../components/messages/VoiceRecorderUI';
 import { groupChatService, type GroupConversation } from '../../services/GroupChatService';
 import { contactService } from '../../services/ContactService';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('FamilyGroupChatScreen');
 
@@ -47,7 +48,6 @@ const MAX_VOICE_DURATION = 60;
 
 // ELITE: Family group conversation ID — stable per-family group
 const FAMILY_GROUP_PREFIX = 'family_group_';
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 const trimIdentity = (value?: string | null): string => (typeof value === 'string' ? value.trim() : '');
 
 const resolveFamilyMemberUid = (member: { uid?: string; deviceId?: string }): string => {
@@ -55,24 +55,25 @@ const resolveFamilyMemberUid = (member: { uid?: string; deviceId?: string }): st
     .map(trimIdentity)
     .filter((value) => value.length > 0);
 
-  const directUid = candidates.find((value) => UID_REGEX.test(value));
+  const directUid = candidates.find((value) => isLikelyFirebaseUid(value));
   if (directUid) {
     return directUid;
   }
 
   for (const candidate of candidates) {
     const resolved = trimIdentity(contactService.resolveCloudUid(candidate));
-    if (UID_REGEX.test(resolved)) {
+    // CRITICAL FIX: If identity resolves to any value, return it. Previously this enforced UID_REGEX too strictly.
+    if (resolved) {
       return resolved;
     }
   }
 
-  return '';
+  return candidates.length > 0 ? candidates[0] : '';
 };
 
 const getCurrentAuthUserSafe = () => {
   try {
-    const user = getAuth().currentUser;
+    const user = getFirebaseAuth()?.currentUser;
     if (user) return user;
     // CRITICAL FIX: getAuth().currentUser can be null during cold start / token refresh.
     // Return a minimal user-like object from identityService MMKV cache so group chat
@@ -85,7 +86,7 @@ const getCurrentAuthUserSafe = () => {
         displayName: identity?.displayName || null,
         email: null,
         photoURL: null,
-      } as unknown as ReturnType<typeof getAuth>['currentUser'];
+      } as unknown as import('firebase/auth').User;
     }
     return null;
   } catch {
@@ -143,7 +144,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
   const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const voiceRecordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const handleVoiceRecordSendRef = useRef<() => void>(() => {});
+  const handleVoiceRecordSendRef = useRef<() => void>(() => { });
 
   // ELITE: InViewPort auto-read — mark group messages read when scrolled into view
   const selfIdsRef = useRef<Set<string>>(new Set());
@@ -157,7 +158,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       .filter(({ item, isViewable }) => isViewable && !currentSelfIds.has(item.senderId) && !item.readBy.some(id => currentSelfIds.has(id)))
       .map(({ item }) => item.id);
     if (unread.length > 0) {
-      groupChatService.markAllRead(gId, unread).catch(() => {});
+      groupChatService.markAllRead(gId, unread).catch(e => { if (__DEV__) logger.debug('markAllRead failed:', e); });
     }
   }).current;
 
@@ -194,9 +195,9 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       if (!normalized) return;
       ids.add(normalized);
 
-      if (UID_REGEX.test(normalized)) return;
+      if (isLikelyFirebaseUid(normalized)) return;
       const resolvedUid = contactService.resolveCloudUid?.(normalized);
-      if (resolvedUid && UID_REGEX.test(resolvedUid)) {
+      if (resolvedUid && isLikelyFirebaseUid(resolvedUid)) {
         ids.add(resolvedUid);
       }
     };
@@ -643,7 +644,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
               if (db) {
                 await updateDoc(doc(db, 'families', familyId), {
                   familyGroupChatId: newGroupId,
-                }).catch(() => { /* best effort */ });
+                }).catch(e => { if (__DEV__) logger.debug('Backfill familyGroupChatId failed:', e); });
                 logger.info(`✅ Backfilled familyGroupChatId=${newGroupId} for family ${familyId}`);
               }
             }
@@ -666,13 +667,20 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
     }
   }, [buildParticipantModel, selectBestFamilyGroup]);
 
+  // FIX: Ref for ensureActiveGroupId so onGroupsChanged callback always uses latest
+  const ensureActiveGroupIdRef = useRef(ensureActiveGroupId);
+  ensureActiveGroupIdRef.current = ensureActiveGroupId;
+
   // ELITE: Find or create Firestore group for this family
   useEffect(() => {
     groupChatService.initialize();
 
     const unsubscribeGroups = groupChatService.onGroupsChanged(() => {
       hasGroupSnapshotRef.current = true;
-      ensureActiveGroupId().catch((error) => {
+      // FIX: Use ensureActiveGroupIdRef to avoid stale closure.
+      // The mount effect captures ensureActiveGroupId at mount time, but it
+      // changes when members change. The stale reference uses initial empty members.
+      ensureActiveGroupIdRef.current().catch((error: unknown) => {
         logger.warn('Family group sync from group snapshot failed:', error);
       });
     });
@@ -689,8 +697,18 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
 
     return () => {
       unsubscribeGroups();
+      // NOTE: Do NOT call groupChatService.destroy() here.
+      // groupChatService is a singleton — destroying it on screen unmount
+      // kills subscriptions for the entire app. If the user navigates
+      // back to this screen, the service would need full re-initialization.
+      // The unsubscribeGroups() callback above is sufficient for screen-level cleanup.
     };
-  }, [ensureActiveGroupId]);
+    // CRITICAL FIX: ensureActiveGroupId removed from deps.
+    // It's a useCallback that changes when its own deps change,
+    // causing this effect to re-run and re-subscribe infinitely.
+    // The refs inside ensureActiveGroupId always hold current values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!preferredGroupId) return;
@@ -704,6 +722,16 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
   useEffect(() => {
     activeGroupIdRef.current = firestoreGroupId;
     firestoreGroupIdRef.current = firestoreGroupId;
+  }, [firestoreGroupId]);
+
+  // Suppress OS notification banner while viewing this group conversation (WhatsApp pattern)
+  useEffect(() => {
+    if (!firestoreGroupId) return;
+    try {
+      const { notificationCenter } = require('../../services/notifications/NotificationCenter');
+      notificationCenter.currentlyViewingConversationId = firestoreGroupId;
+      return () => { notificationCenter.currentlyViewingConversationId = null; };
+    } catch { return undefined; }
   }, [firestoreGroupId]);
 
   // ELITE: Subscribe to Firestore group messages when group is ready
@@ -771,30 +799,28 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         clearInterval(voiceRecordingIntervalRef.current);
         voiceRecordingIntervalRef.current = null;
       }
-      voiceMessageService.cancelRecording().catch(() => { /* no-op */ });
+      voiceMessageService.cancelRecording().catch(e => { if (__DEV__) logger.debug('cancelRecording cleanup failed:', e); });
     };
   }, []);
 
+  // ELITE: Combined keyboard listener — avoids duplicate keyboardWillShow subscriptions
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      // Scroll to bottom when keyboard appears
+      scrollTimer = setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
     return () => {
       showSub.remove();
       hideSub.remove();
+      if (scrollTimer) clearTimeout(scrollTimer);
     };
-  }, []);
-
-  // Scroll to bottom when keyboard appears
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const sub = Keyboard.addListener(showEvent, () => {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    });
-    return () => sub.remove();
   }, []);
 
   // ELITE: Merge mesh messages + Firestore messages (dedup by ID)
@@ -1202,7 +1228,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         allowsEditing: true,
         quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]) {
+      if (!result.canceled && result.assets?.[0]?.uri) {
         await sendMediaToGroup('image', { mediaLocalUri: result.assets[0].uri });
       }
     } catch (error) {
@@ -1223,7 +1249,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         allowsEditing: true,
         quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]) {
+      if (!result.canceled && result.assets?.[0]?.uri) {
         await sendMediaToGroup('image', { mediaLocalUri: result.assets[0].uri });
       }
     } catch (error) {
@@ -1254,6 +1280,11 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
         }
         voiceRecordingIntervalRef.current = setInterval(() => {
           setVoiceRecordingDuration(prev => {
+            // CRITICAL FIX (MSG-C2): Warn user 5sn before auto-stop so they can decide.
+            // Without warning, kullanici 5dk konustugunu sansa da sadece 60sn gonderilir.
+            if (prev === MAX_VOICE_DURATION - 5) {
+              try { haptics.notificationWarning(); } catch { /* */ }
+            }
             if (prev >= MAX_VOICE_DURATION - 1) {
               // Auto-stop at max duration
               handleVoiceRecordSendRef.current();
@@ -1444,6 +1475,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
               {new Date(item.timestamp).toLocaleTimeString('tr-TR', {
                 hour: '2-digit',
                 minute: '2-digit',
+                timeZone: 'Europe/Istanbul',
               })}
             </Text>
             {isMyMessage && item.readBy.length > 1 && (() => {

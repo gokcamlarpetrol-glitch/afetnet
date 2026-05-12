@@ -199,6 +199,7 @@ const DEFAULT_ALERT_SETTINGS: AlertSettingsSnapshot = {
 class MultiChannelAlertService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private soundInstance: any = null; // Audio.Sound | null
+  private autoStopTimers: NodeJS.Timeout[] = [];
   private ledInterval: NodeJS.Timeout | null = null;
   private vibrationInterval: NodeJS.Timeout | null = null;
   private dismissTimeout: NodeJS.Timeout | null = null;
@@ -320,15 +321,29 @@ class MultiChannelAlertService {
     }
 
     if (settings.notificationMode === 'silent') {
-      return {
-        pushNotification: false,
-        fullScreenAlert: false,
-        alarmSound: false,
-        vibration: false,
-        led: false,
-        tts: false,
-        bluetooth: false,
-      };
+      // LIFE-SAFETY EXCEPTION: Critical EEW, earthquake, and SOS alerts bypass silent mode.
+      // Japan J-Alert pattern: life-threatening warnings override device/app sound settings.
+      // FCM push already bypasses Focus/DND via APNS time-sensitive interrupt level, but
+      // the in-app alarm sound and TTS must also fire regardless of the app's silent setting.
+      const dataType = (options.data?.type as string) ?? '';
+      const isLifeSafetyCritical =
+        options.priority === 'critical' &&
+        (dataType === 'eew' ||
+          dataType === 'earthquake' ||
+          dataType === 'sos' ||
+          dataType === 'sos_received');
+      if (!isLifeSafetyCritical) {
+        return {
+          pushNotification: false,
+          fullScreenAlert: false,
+          alarmSound: false,
+          vibration: false,
+          led: false,
+          tts: false,
+          bluetooth: false,
+        };
+      }
+      // Critical life-safety alert: fall through to individual channel checks below
     }
 
     if (settings.notificationMode === 'critical-only' && options.priority !== 'critical') {
@@ -361,6 +376,7 @@ class MultiChannelAlertService {
 
     const quietHoursActive = this.isQuietHoursActive(settings);
     if (quietHoursActive && settings.quietHoursCriticalOnly && options.priority !== 'critical') {
+      effective.pushNotification = false;
       effective.fullScreenAlert = false;
       effective.alarmSound = false;
       effective.vibration = false;
@@ -529,6 +545,10 @@ class MultiChannelAlertService {
         this.dismissTimeout = null;
       }
 
+      // Clear auto-stop timers (sound/vibration)
+      this.autoStopTimers.forEach(t => clearTimeout(t));
+      this.autoStopTimers = [];
+
       // Cancel sound
       if (this.soundInstance) {
         try {
@@ -592,35 +612,50 @@ class MultiChannelAlertService {
       return;
     }
 
-    // Critical alert channel (bypasses Do Not Disturb)
+    // LIFE-SAFETY: Critical alert channel (EEW + SOS) — DND bypass + lock screen public.
+    // Türkçe isim sistem ayarlarında kullanıcıya görünür.
     await Notifications.setNotificationChannelAsync('critical-alerts', {
-      name: 'Critical Alerts',
+      name: 'Hayat Güvenliği (Deprem + SOS)',
+      description: 'Deprem erken uyarısı ve aile SOS sinyalleri. Sessiz modda bile çalar.',
       importance: Notifications.AndroidImportance?.MAX || 5,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF0000',
-      sound: 'alert_sound.mp3',
+      vibrationPattern: [0, 250, 250, 250, 250, 250],
+      lightColor: '#DC2626',
+      // CRITICAL FIX: alert_sound.mp3 dosyasi yok → 'default' OS alarmi kullanilir.
+      // Profesyonel alarm sesi (earthquake_alarm.wav) assets'e eklenince burayi guncellenmeli.
+      sound: 'default',
       enableVibrate: true,
+      enableLights: true,
       showBadge: true,
       bypassDnd: true, // Bypass Do Not Disturb
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC ?? 1,
+      audioAttributes: {
+        usage: Notifications.AndroidAudioUsage?.ALARM ?? 4,
+        contentType: Notifications.AndroidAudioContentType?.SONIFICATION ?? 4,
+      },
     });
 
     // High priority channel
     await Notifications.setNotificationChannelAsync('high-priority', {
-      name: 'High Priority Alerts',
+      name: 'Acil Bildirimler',
+      description: 'Aile mesajları, deprem haberleri, önemli güncellemeler.',
       importance: Notifications.AndroidImportance?.HIGH || 4,
       vibrationPattern: [0, 200, 200, 200],
-      lightColor: '#FF6600',
+      lightColor: '#F97316',
       sound: 'default',
       enableVibrate: true,
+      enableLights: true,
       showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC ?? 1,
     });
 
     // Normal priority channel
     await Notifications.setNotificationChannelAsync('normal-priority', {
-      name: 'Normal Alerts',
+      name: 'Genel Bildirimler',
+      description: 'Genel uygulama bildirimleri.',
       importance: Notifications.AndroidImportance?.DEFAULT || 3,
       sound: 'default',
       enableVibrate: true,
+      showBadge: false,
     });
   }
 
@@ -700,7 +735,7 @@ class MultiChannelAlertService {
           sound.play();
           this.soundInstance = sound;
           if (repeatCount > 1) {
-            setTimeout(() => {
+            this.autoStopTimers.push(setTimeout(() => {
               if (this.soundInstance === sound) {
                 try {
                   sound.pause();
@@ -710,7 +745,7 @@ class MultiChannelAlertService {
                   // already cleaned up
                 }
               }
-            }, repeatWindowMs);
+            }, repeatWindowMs));
           }
         }
       } else {
@@ -727,7 +762,7 @@ class MultiChannelAlertService {
             this.soundInstance = sound;
 
             // Auto-stop after configured repeat window (bounded for safety)
-            setTimeout(() => {
+            this.autoStopTimers.push(setTimeout(() => {
               if (this.soundInstance === sound) {
                 try {
                   sound.pause();
@@ -737,7 +772,7 @@ class MultiChannelAlertService {
                   // Already cleaned up
                 }
               }
-            }, Math.max(5000, Math.min(90000, repeatWindowMs)));
+            }, Math.max(5000, Math.min(90000, repeatWindowMs))));
 
             logger.info('🔊 Emergency alert sound playing via MultiChannelAlertService');
           }
@@ -798,12 +833,12 @@ class MultiChannelAlertService {
           logger.error('Initial vibration error:', error);
         });
         if (repeatCount > 0) {
-          setTimeout(() => {
+          this.autoStopTimers.push(setTimeout(() => {
             if (this.vibrationInterval) {
               clearInterval(this.vibrationInterval);
               this.vibrationInterval = null;
             }
-          }, repeatWindowMs);
+          }, repeatWindowMs));
         }
       } else {
         // Android vibration is handled by notification channel
@@ -825,12 +860,12 @@ class MultiChannelAlertService {
             }
           }, 1000);
           if (repeatCount > 0) {
-            setTimeout(() => {
+            this.autoStopTimers.push(setTimeout(() => {
               if (this.vibrationInterval) {
                 clearInterval(this.vibrationInterval);
                 this.vibrationInterval = null;
               }
-            }, repeatWindowMs);
+            }, repeatWindowMs));
           }
         }
       }

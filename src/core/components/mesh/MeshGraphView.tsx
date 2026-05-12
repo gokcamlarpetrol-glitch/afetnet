@@ -20,12 +20,17 @@ export const MeshGraphView = () => {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const loopAnimation = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.2, duration: 1000, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ]),
-    ).start();
+    );
+    loopAnimation.start();
+
+    return () => {
+      loopAnimation.stop();
+    };
   }, []);
 
   // Layout Calculation

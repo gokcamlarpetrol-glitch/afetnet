@@ -96,7 +96,12 @@ class OpenAIService {
       this.apiKey = apiKey.trim();
     }
 
-    const allowDirectKeyFallback = __DEV__;
+    // CRITICAL FIX (AI-A1): Direct key fallback is dangerous — bypasses proxy rate limits + cost guardrails.
+    // __DEV__ is true in TestFlight internal testing builds, so direct key was active there.
+    // Only enable with EXPLICIT env flag (EXPO_PUBLIC_ALLOW_DIRECT_OPENAI=1) — never auto-enable.
+    const allowDirectKeyFallback = __DEV__ &&
+      (typeof process !== 'undefined' &&
+       process.env?.EXPO_PUBLIC_ALLOW_DIRECT_OPENAI === '1');
 
     // Optional secure fallback for internal/dev usage. Not bundle-public.
     if (!this.apiKey && allowDirectKeyFallback) {

@@ -6,7 +6,7 @@
  * iOS: Gradient Circle overlay (Apple Maps compatible)
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Platform } from 'react-native';
 import { Circle } from 'react-native-maps';
 
@@ -73,9 +73,14 @@ const getStrokeColor = (weight: number): string => {
  * iOS Fallback: Gradient circles for each earthquake point
  * Creates a visual "heatmap" effect using overlapping circles
  */
+const MAX_IOS_CIRCLES = 100;
+
 const IOSHeatmapFallback = ({ points }: { points: HeatmapPoint[] }) => {
-  // Sort by weight ascending so larger earthquakes are on top
-  const sortedPoints = [...points].sort((a, b) => a.weight - b.weight);
+  // Limit to top 100 most significant earthquakes to prevent iOS map overlay performance issues (500+ Circle overlays cause severe lag)
+  const sortedPoints = useMemo(() =>
+    [...points].sort((a, b) => b.weight - a.weight).slice(0, MAX_IOS_CIRCLES).sort((a, b) => a.weight - b.weight),
+    [points]
+  );
 
   return (
     <>

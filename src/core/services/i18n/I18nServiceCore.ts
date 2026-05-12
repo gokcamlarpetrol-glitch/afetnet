@@ -4,6 +4,7 @@
  */
 
 import * as Localization from 'expo-localization';
+import { I18nManager } from 'react-native';
 import { createLogger } from '../../utils/logger';
 import { translations } from './I18nTranslations';
 import type { Translations, TranslationObject, TranslationParams, TranslationValue } from '../../types/i18n';
@@ -40,10 +41,20 @@ class I18nServiceCore {
 
   /**
    * Set current locale
+   * EDGE CASE FIX: Also toggle RTL layout for Arabic locale.
+   * Without this, Arabic text renders left-to-right which is unreadable.
    */
   setLocale(locale: 'tr' | 'en' | 'ar' | 'ru') {
     this.currentLocale = locale;
-    
+
+    // CRITICAL: Arabic requires RTL layout; all other supported locales are LTR
+    const needsRTL = locale === 'ar';
+    if (I18nManager.isRTL !== needsRTL) {
+      I18nManager.allowRTL(needsRTL);
+      I18nManager.forceRTL(needsRTL);
+      logger.info(`RTL layout ${needsRTL ? 'enabled' : 'disabled'} for locale: ${locale}`);
+    }
+
     if (__DEV__) {
       logger.info('Locale changed to:', locale);
     }

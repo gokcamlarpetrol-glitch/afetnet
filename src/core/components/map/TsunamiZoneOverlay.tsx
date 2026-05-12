@@ -13,7 +13,7 @@
 import React, { memo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Modal } from 'react-native';
 import { Polygon, Polyline, Marker, Circle } from 'react-native-maps';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { tsunamiRiskService, TsunamiZone } from '../../services/TsunamiRiskService';
 import * as haptics from '../../utils/haptics';

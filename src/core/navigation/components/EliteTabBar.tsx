@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Dimensions, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Keyboard, useWindowDimensions } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BlurView } from '../../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,8 +19,6 @@ import Animated, {
 import * as haptics from '../../utils/haptics';
 import { colors, shadows } from '../../theme';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-
 // Tab Icon Mapping
 const getIconName = (routeName: string, isFocused: boolean) => {
   switch (routeName) {
@@ -30,6 +28,18 @@ const getIconName = (routeName: string, isFocused: boolean) => {
   case 'Messages': return isFocused ? 'chatbubbles' : 'chatbubbles-outline';
   case 'Settings': return isFocused ? 'settings' : 'settings-outline';
   default: return 'help-circle';
+  }
+};
+
+// ELITE: Türkçe accessibility labels for Apple Review compliance
+const getTabLabel = (routeName: string): string => {
+  switch (routeName) {
+  case 'Home': return 'Ana Sayfa';
+  case 'Map': return 'Harita';
+  case 'Family': return 'Aile';
+  case 'Messages': return 'Mesajlar';
+  case 'Settings': return 'Ayarlar';
+  default: return routeName;
   }
 };
 
@@ -76,21 +86,38 @@ const TabItem = ({
     transform: [{ scale: dotScale.value }],
   }));
 
+  // REVIEW FIX: testID for Detox E2E tests. Maps route name to standard test ID
+  // (Home → tab-home, Family → tab-family, etc.). Without this, E2E tab tap tests fail.
+  const testIdFromRoute = (() => {
+    const name = (routeName || '').toLowerCase();
+    if (name.includes('home')) return 'tab-home';
+    if (name.includes('family')) return 'tab-family';
+    if (name.includes('messag')) return 'tab-messages';
+    if (name.includes('setting')) return 'tab-settings';
+    if (name.includes('map')) return 'tab-map';
+    return `tab-${name}`;
+  })();
+
   return (
     <TouchableOpacity
       onPress={() => {
-        haptics.impactLight(); // Haptic feedback on press
+        haptics.impactLight();
         onPress();
       }}
       onLongPress={onLongPress}
       style={styles.tabItem}
       activeOpacity={0.8}
+      testID={testIdFromRoute}
+      accessibilityRole="tab"
+      accessibilityLabel={getTabLabel(routeName)}
+      accessibilityState={{ selected: isFocused }}
+      accessibilityHint={`${getTabLabel(routeName)} sekmesine git`}
     >
       <Animated.View style={[styles.iconContainer, animatedStyle]}>
         <Ionicons
           name={iconName as any}
           size={24}
-          color={isFocused ? '#0ea5e9' : '#94a3b8'} // Soft Sky Blue vs Slate
+          color={isFocused ? '#0ea5e9' : '#94a3b8'}
         />
       </Animated.View>
 
@@ -100,16 +127,19 @@ const TabItem = ({
   );
 };
 
+// ELITE: Memoized to prevent re-renders when other tabs change
+const MemoizedTabItem = React.memo(TabItem);
+
 export default function EliteTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom + 10 }]}>
       <Animated.View entering={ZoomIn.duration(500).delay(200)}>
-        <BlurView intensity={30} tint="light" style={styles.blurContainer}>
+        <BlurView intensity={30} tint="light" style={[styles.blurContainer, { width: screenWidth - 40 }]}>
           <View style={styles.tabRow}>
             {state.routes.map((route, index) => {
-              const { options } = descriptors[route.key];
               const isFocused = state.index === index;
 
               const onPress = () => {
@@ -120,6 +150,8 @@ export default function EliteTabBar({ state, descriptors, navigation }: BottomTa
                 });
 
                 if (!isFocused && !event.defaultPrevented) {
+                  // ELITE: Dismiss keyboard on tab switch to prevent input overlap
+                  Keyboard.dismiss();
                   navigation.navigate(route.name);
                 }
               };
@@ -132,7 +164,7 @@ export default function EliteTabBar({ state, descriptors, navigation }: BottomTa
               };
 
               return (
-                <TabItem
+                <MemoizedTabItem
                   key={route.key}
                   routeName={route.name}
                   isFocused={isFocused}
@@ -159,7 +191,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
   },
   blurContainer: {
-    width: SCREEN_WIDTH - 40, // Floating width
+    // width set dynamically via useWindowDimensions for iPad/rotation support
     borderRadius: 30,
     overflow: 'hidden',
     backgroundColor: 'rgba(255, 255, 255, 0.85)', // Light Glass

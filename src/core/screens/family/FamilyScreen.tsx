@@ -782,9 +782,10 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
+      testID="family-screen"
     >
       <LinearGradient
         colors={['rgba(255, 255, 255, 0.1)', 'rgba(255, 255, 255, 0.4)']}
@@ -826,7 +827,16 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          // Sprint 8: iPad — center content with max width to avoid stretched layout
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/responsive').getResponsiveInfo().isTablet && {
+            alignSelf: 'center',
+            width: '85%',
+            maxWidth: 900,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         scrollEnabled={true}
         refreshControl={

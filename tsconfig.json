@@ -47,6 +47,7 @@
   "include": [
     "src/**/*",
     "shared/**/*",
+    "modules/**/*",
     "App.tsx",
     "index.ts",
     "global.d.ts"

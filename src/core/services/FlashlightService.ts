@@ -49,20 +49,18 @@ class FlashlightService {
         // Check if functions are available as named exports
         const cameraExports = CameraModule as CameraModuleExports;
         const getPerms = cameraExports.getCameraPermissionsAsync;
-        const requestPerms = cameraExports.requestCameraPermissionsAsync;
 
+        // CRITICAL FIX (Apple 5.1.1): Only CHECK permission status, never REQUEST.
+        // FlashlightService.initialize() is called automatically from EmergencyButton
+        // useEffect on home screen mount. Requesting camera permission here triggers
+        // an automatic permission dialog without user action = Apple rejection.
+        // Camera permission is already requested during onboarding (camera_contacts slide).
         if (getPerms) {
           const result = await getPerms();
           status = result.status;
         }
-
-        // Request permissions if not granted
-        if (status !== 'granted' && requestPerms) {
-          const result = await requestPerms();
-          status = result.status;
-        }
       } catch (permError) {
-        logger.debug('Permission check/request failed:', permError);
+        logger.debug('Permission check failed:', permError);
         // Fallback: assume permission is needed but not critical for flashlight
         this.hasPermission = false;
       }
@@ -204,12 +202,18 @@ class FlashlightService {
   }
 
   /**
-   * Flash SOS Morse Pattern: --- ••• ---
+   * Flash SOS Morse Pattern: ••• --- •••
+   * S = 3 short (dots), O = 3 long (dashes)
    * Long: 500ms, Short: 150ms, Gap: 150ms
    */
   async flashSOSMorse() {
     if (this.isFlashing) {
       await this.stop();
+    }
+    // Wait for previous pattern loop to fully exit after stop() cleared the flag
+    if (this.patternLoop) {
+      try { await this.patternLoop; } catch { /* ignore */ }
+      this.patternLoop = null;
     }
 
     this.isFlashing = true;
@@ -224,15 +228,7 @@ class FlashlightService {
       if (!this.isFlashing) return;
 
       try {
-        // --- (S)
-        await this.flash(LONG);
-        await this.wait(GAP);
-        await this.flash(LONG);
-        await this.wait(GAP);
-        await this.flash(LONG);
-        await this.wait(GAP * 3);
-
-        // ••• (O)
+        // ••• (S = 3 short dots)
         await this.flash(SHORT);
         await this.wait(GAP);
         await this.flash(SHORT);
@@ -240,12 +236,20 @@ class FlashlightService {
         await this.flash(SHORT);
         await this.wait(GAP * 3);
 
-        // --- (S)
+        // --- (O = 3 long dashes)
         await this.flash(LONG);
         await this.wait(GAP);
         await this.flash(LONG);
         await this.wait(GAP);
         await this.flash(LONG);
+        await this.wait(GAP * 3);
+
+        // ••• (S = 3 short dots)
+        await this.flash(SHORT);
+        await this.wait(GAP);
+        await this.flash(SHORT);
+        await this.wait(GAP);
+        await this.flash(SHORT);
         await this.wait(WORD_GAP);
       } catch (error) {
         logger.error('FlashlightService pattern failed:', error);
@@ -357,10 +361,13 @@ class FlashlightService {
     this.patternLoop = null;
 
     try {
-      // Ensure flashlight is off
-      await this.turnOff();
+      // Force torch off directly (turnOff() may early-return since flags are cleared)
+      const switchFn = this.torchModule?.default?.switchState || this.torchModule?.switchState;
+      if (switchFn) {
+        await switchFn(false);
+      }
 
-      // CRITICAL: Wait a bit to ensure pattern loop has checked isFlashing flag
+      // Wait a bit to ensure pattern loop has checked isFlashing flag
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       logger.error('FlashlightService stop failed:', error);

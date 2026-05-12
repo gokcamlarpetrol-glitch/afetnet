@@ -162,13 +162,23 @@ class EarthquakeAnalysisService {
     try {
       // ELITE: Dynamic date range — prevents hardcoded expiry (was 2030-12-31)
       const today = new Date().toISOString().split('T')[0];
-      const response = await fetch(
-        `https://deprem.afad.gov.tr/apiv2/event/filter?start=2020-01-01&end=${today}&minmag=3.0`,
-        {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        },
-      );
+      const thirtyDaysAgoDate = new Date(); thirtyDaysAgoDate.setDate(thirtyDaysAgoDate.getDate() - 30);
+      const thirtyDaysAgo = thirtyDaysAgoDate.toISOString().split('T')[0];
+      const afadController = new AbortController();
+      const afadTimeout = setTimeout(() => afadController.abort(), 15000);
+      let response: Response;
+      try {
+        response = await fetch(
+          `https://deprem.afad.gov.tr/apiv2/event/filter?start=${thirtyDaysAgo}&end=${today}&minmag=3.0&limit=100`,
+          {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: afadController.signal,
+          },
+        );
+      } finally {
+        clearTimeout(afadTimeout);
+      }
 
       if (!response.ok) {
         throw new Error(`AFAD API error: ${response.status}`);
@@ -213,13 +223,21 @@ class EarthquakeAnalysisService {
       const startTime = new Date(earthquake.time - 60 * 60 * 1000).toISOString(); // 1 saat önce
       const endTime = new Date(earthquake.time + 60 * 60 * 1000).toISOString(); // 1 saat sonra
 
-      const response = await fetch(
-        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&endtime=${endTime}&minmagnitude=3.0`,
-        {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        },
-      );
+      const usgsController = new AbortController();
+      const usgsTimeout = setTimeout(() => usgsController.abort(), 15000);
+      let response: Response;
+      try {
+        response = await fetch(
+          `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&endtime=${endTime}&minmagnitude=3.0`,
+          {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: usgsController.signal,
+          },
+        );
+      } finally {
+        clearTimeout(usgsTimeout);
+      }
 
       if (!response.ok) {
         throw new Error(`USGS API error: ${response.status}`);
@@ -357,7 +375,7 @@ Deprem Bilgileri:
 - Büyüklük: ${earthquake.magnitude}
 - Konum: ${earthquake.location}
 - Derinlik: ${earthquake.depth} km
-- Zaman: ${new Date(earthquake.time).toLocaleString('tr-TR')}
+- Zaman: ${new Date(earthquake.time).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}
 ${distanceText}
 
 Risk Seviyesi: ${riskLevel}

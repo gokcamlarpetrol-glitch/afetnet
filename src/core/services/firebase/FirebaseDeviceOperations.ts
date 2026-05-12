@@ -4,7 +4,7 @@
  */
 
 import { doc, setDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; // ELITE: For Owner Binding
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 
@@ -53,8 +53,8 @@ export async function saveDeviceId(deviceId: string, isInitialized: boolean): Pr
     }
 
     // ELITE SECURITY: Owner Binding (The Vault)
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
+    const auth = getFirebaseAuth();
+    const currentUser = auth?.currentUser ?? null;
     const ownerUid = currentUser ? currentUser.uid : null;
 
     const deviceData: any = {

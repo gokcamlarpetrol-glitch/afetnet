@@ -11,7 +11,7 @@
  * - Multi-source desteği
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { StyleSheet, View, Text, useWindowDimensions } from 'react-native';
 import { Circle, Marker } from 'react-native-maps';
 import Animated, {
@@ -25,7 +25,7 @@ import Animated, {
     runOnJS,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 
 // ========================
 // TYPES
@@ -282,11 +282,25 @@ export const WavePropagationOverlay: React.FC<WavePropagationOverlayProps> = ({
     maxRadius = 500,
 }) => {
     const [elapsedTimes, setElapsedTimes] = useState<Map<string, number>>(new Map());
-    const [pWaveArrived, setPWaveArrived] = useState<Set<string>>(new Set());
-    const [sWaveArrived, setSWaveArrived] = useState<Set<string>>(new Set());
+    // Use refs for arrival tracking to avoid interval teardown on every wave arrival
+    const pWaveArrivedRef = useRef<Set<string>>(new Set());
+    const sWaveArrivedRef = useRef<Set<string>>(new Set());
+    // Keep stable refs for callbacks to avoid interval recreation
+    const onPWaveArrivalRef = useRef(onPWaveArrival);
+    const onSWaveArrivalRef = useRef(onSWaveArrival);
+    onPWaveArrivalRef.current = onPWaveArrival;
+    onSWaveArrivalRef.current = onSWaveArrival;
+
+    // Reset arrival tracking when sources change
+    useEffect(() => {
+        pWaveArrivedRef.current = new Set();
+        sWaveArrivedRef.current = new Set();
+    }, [sources]);
 
     // Update elapsed time for each source
     useEffect(() => {
+        if (sources.length === 0) return;
+
         const interval = setInterval(() => {
             const newTimes = new Map<string, number>();
             const now = Date.now();
@@ -310,16 +324,16 @@ export const WavePropagationOverlay: React.FC<WavePropagationOverlayProps> = ({
                     const pArrivalTime = distance / pVelocity;
                     const sArrivalTime = distance / sVelocity;
 
-                    // P-wave arrival check
-                    if (elapsed >= pArrivalTime && !pWaveArrived.has(source.id)) {
-                        setPWaveArrived((prev) => new Set([...prev, source.id]));
-                        onPWaveArrival?.(source.id);
+                    // P-wave arrival check (using refs to avoid interval teardown)
+                    if (elapsed >= pArrivalTime && !pWaveArrivedRef.current.has(source.id)) {
+                        pWaveArrivedRef.current.add(source.id);
+                        onPWaveArrivalRef.current?.(source.id);
                     }
 
                     // S-wave arrival check
-                    if (elapsed >= sArrivalTime && !sWaveArrived.has(source.id)) {
-                        setSWaveArrived((prev) => new Set([...prev, source.id]));
-                        onSWaveArrival?.(source.id);
+                    if (elapsed >= sArrivalTime && !sWaveArrivedRef.current.has(source.id)) {
+                        sWaveArrivedRef.current.add(source.id);
+                        onSWaveArrivalRef.current?.(source.id);
                     }
                 }
             });
@@ -328,7 +342,7 @@ export const WavePropagationOverlay: React.FC<WavePropagationOverlayProps> = ({
         }, 100); // Update every 100ms for smooth animation
 
         return () => clearInterval(interval);
-    }, [sources, userLocation, pWaveArrived, sWaveArrived]);
+    }, [sources, userLocation]);
 
     return (
         <>

@@ -51,7 +51,7 @@ export class APIClient {
   async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
     // ELITE: Return empty object if API is disabled (using Firebase instead)
     if (this.isDisabled) {
-      console.debug('[APIClient] Request skipped - using Firebase backend');
+      if (__DEV__) console.debug('[APIClient] Request skipped - using Firebase backend');
       return {} as T;
     }
 
@@ -208,7 +208,7 @@ export class APIClient {
       }
     } catch (error) {
       // If crypto fails, use fallback hash
-      console.warn('Crypto API failed, using fallback hash:', error);
+      if (__DEV__) console.warn('Crypto API failed, using fallback hash:', error);
       return this.fallbackHash(message + (API_SECRET || ''));
     }
   }

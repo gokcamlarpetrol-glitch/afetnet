@@ -93,7 +93,7 @@ class BackendPushService {
       let latitude: number | null = null;
       let longitude: number | null = null;
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (status === 'granted') {
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
@@ -230,7 +230,7 @@ class BackendPushService {
           return;
         }
 
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== 'granted') {
           if (__DEV__) {
             logger.debug('Location permission not granted, skipping location update');

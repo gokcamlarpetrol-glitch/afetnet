@@ -126,8 +126,9 @@ class AppCheckService {
      * Activate App Check with the appropriate provider
      * SECURITY WARNING: App Check is currently DISABLED.
      * Without App Check, backend endpoints cannot verify request origin.
-     * TODO: Integrate @react-native-firebase/app-check native module
-     *       and enable DeviceCheck/AppAttest (iOS) or PlayIntegrity (Android).
+     * ACTION REQUIRED: Integrate @react-native-firebase/app-check native module
+     * and enable DeviceCheck/AppAttest (iOS) or PlayIntegrity (Android) before
+     * enabling App Check enforcement in backend rules.
      */
     private async activateAppCheck(): Promise<void> {
         try {
@@ -283,6 +284,9 @@ class AppCheckService {
             this.refreshTimeout = null;
         }
         this.currentToken = null;
+        // CRITICAL FIX: Reset isInitialized so the service can be re-initialized
+        this.isInitialized = false;
+        this.errorCount = 0;
         logger.info('AppCheckService stopped');
     }
 }

@@ -39,9 +39,10 @@ import { formatLastSeen } from '../../utils/dateUtils';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { MainStackParamList } from '../../types/navigation';
 import { styles } from './NewMessageScreen.styles';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('NewMessageScreen');
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const isLikelyUid = (value: string) => isLikelyFirebaseUid(value);
 
 const SELF_ACCOUNT_WARNING_TITLE = 'Aynı Hesap Tespit Edildi';
 const SELF_ACCOUNT_WARNING_MESSAGE =
@@ -540,7 +541,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     // AFN-XXXXXXXX format
     if (isValidDeviceId(trimmed)) return true;
     // Firebase UID format (alphanumeric, 20-40 chars)
-    if (/^[a-zA-Z0-9]{20,40}$/.test(trimmed)) return true;
+    if (isLikelyFirebaseUid(trimmed)) return true;
     // publicUserCode format (alphanumeric with dashes, min 4 chars)
     if (/^[a-zA-Z0-9-]{4,}$/.test(trimmed)) return true;
     return false;
@@ -573,7 +574,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     }
 
     if (!isValidContactId(trimmedDeviceId)) {
-      Alert.alert('Geçersiz ID', 'Lütfen geçerli bir kullanıcı ID girin (AFN-XXXXXXXX veya Firebase UID).');
+      Alert.alert('Geçersiz ID', 'Lütfen geçerli bir kullanıcı ID girin (AFN-XXXXXXXX, Firebase UID veya mesh cihaz kodu).');
       return;
     }
 
@@ -586,35 +587,25 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     setIsResolving(true);
 
     try {
-      // CRITICAL FIX: Resolve AFN code / non-UID to Firebase UID BEFORE opening conversation.
-      // Previously, startConversation was called with raw AFN code, which meant:
-      // 1. Contact was never added to Firestore
-      // 2. Messages were sent to AFN code instead of UID → delivery failure
+      // Resolve AFN/non-UID to Firebase UID when possible.
+      // OFFLINE-FIRST: if lookup fails, fall back to raw ID so mesh conversation can still open.
       let resolvedUid = trimmedDeviceId;
       let resolvedName = '';
 
-      if (!UID_REGEX.test(trimmedDeviceId)) {
-        // Not a UID — resolve via Firestore (publicUserCode, qrId, device lookup)
+      if (!isLikelyUid(trimmedDeviceId)) {
+        // Not a strictly formatted Firebase UID — resolve via Firestore (publicUserCode, qrId, device lookup)
         try {
           await firebaseDataService.initialize();
           const uid = await firebaseDataService.resolveRecipientUid(trimmedDeviceId);
-          if (uid && UID_REGEX.test(uid)) {
+          if (uid) {
             resolvedUid = uid;
             logger.info(`✅ Resolved "${trimmedDeviceId}" → UID ${uid}`);
           } else {
-            Alert.alert(
-              'Kullanıcı Bulunamadı',
-              `"${trimmedDeviceId}" ile eşleşen bir AfetNet kullanıcısı bulunamadı. Kodu kontrol edip tekrar deneyin.`,
-            );
-            return;
+            // Offline/mesh use-case: keep raw target and continue.
+            logger.warn(`⚠️ No Firebase UID mapping for "${trimmedDeviceId}". Falling back to raw ID for mesh routing.`);
           }
         } catch (error) {
-          logger.error('UID resolution failed:', error);
-          Alert.alert(
-            'Bağlantı Hatası',
-            'Kullanıcı aranırken bir hata oluştu. İnternet bağlantınızı kontrol edin.',
-          );
-          return;
+          logger.warn('UID resolution failed, continuing with raw ID for offline/mesh:', error);
         }
       }
 
@@ -766,17 +757,17 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   const resolveConversationTargetId = useCallback((rawId: string): string => {
     const trimmed = rawId.trim();
     if (!trimmed) return '';
-    if (UID_REGEX.test(trimmed)) return trimmed;
+    if (isLikelyUid(trimmed)) return trimmed;
 
     const fromContact = contactService.resolveCloudUid(trimmed);
-    if (fromContact && UID_REGEX.test(fromContact)) {
+    if (fromContact && isLikelyUid(fromContact)) {
       return fromContact;
     }
 
     const fromFamily = familyMembers.find((m) =>
       m.uid === trimmed || m.deviceId === trimmed
     );
-    if (fromFamily?.uid && UID_REGEX.test(fromFamily.uid)) {
+    if (fromFamily?.uid && isLikelyUid(fromFamily.uid)) {
       return fromFamily.uid;
     }
     if (fromFamily?.deviceId) {
@@ -786,7 +777,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     return trimmed;
   }, [familyMembers]);
 
-  const resolveExistingConversationId = useCallback((rawId: string, canonicalId: string): string | null => {
+  const resolveExistingConversation = useCallback((rawId: string, canonicalId: string): { userId: string; conversationId?: string } | null => {
     const candidateIds = new Set<string>();
     const add = (value?: string | null) => {
       const normalized = toNormalizedId(value);
@@ -822,33 +813,38 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
     if (candidateIds.size === 0) return null;
 
     const existing = useMessageStore.getState().conversations.find((conversation) => candidateIds.has(conversation.userId));
-    return existing?.userId || null;
+    if (!existing) return null;
+    return {
+      userId: existing.userId,
+      ...(existing.conversationId ? { conversationId: existing.conversationId } : {}),
+    };
   }, [familyMembers, getPreferredMemberTargetId]);
 
   const resolveCanonicalConversationTargetId = useCallback(async (rawId: string): Promise<string> => {
     const baseTarget = resolveConversationTargetId(rawId);
     if (!baseTarget) return '';
-    if (baseTarget === 'broadcast' || UID_REGEX.test(baseTarget)) {
+    if (baseTarget === 'broadcast' || isLikelyUid(baseTarget)) {
       return baseTarget;
     }
 
-    // baseTarget is not a UID (e.g. AFN code, device ID) — try to resolve to UID
+    // baseTarget is not a strictly formatted UID (e.g. AFN code, device ID) — try to resolve to UID
     try {
       await firebaseDataService.initialize();
       const resolvedUid = await firebaseDataService.resolveRecipientUid(baseTarget);
-      if (resolvedUid && UID_REGEX.test(resolvedUid)) {
+      // CRITICAL FIX: Removed UID_REGEX here to allow authentic routing to hyphenated UUIDs / device IDs.
+      if (resolvedUid) {
         return resolvedUid;
       }
     } catch (error) {
       logger.debug('Failed to canonicalize recipient to UID in NewMessageScreen', error);
     }
 
-    // CRITICAL FIX: Do NOT return non-UID targets — they break message delivery.
-    // The old behavior was to return the raw AFN code, which caused messages to
-    // be sent to a non-existent Firestore path. Return empty string to trigger
-    // a user-facing error in startConversation.
-    logger.warn(`⚠️ Cannot resolve "${baseTarget}" to Firebase UID — conversation cannot be created`);
-    return '';
+    // CRITICAL FIX: If Firebase lookup fails (e.g. offline mode) or it's a local MESH pseudo-device,
+    // do NOT return empty string, which blocks conversation creation.
+    // Instead, return the raw baseTarget. This allows the ConversationScreen to open
+    // and sends the message to the legacy fallback/mesh route!
+    logger.warn(`⚠️ Cannot resolve "${baseTarget}" to Firebase UID in NewMessageScreen — falling back to raw target for offline/mesh routing`);
+    return baseTarget;
   }, [resolveConversationTargetId]);
 
   const startConversation = async (targetDeviceId: string) => {
@@ -860,11 +856,14 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         return;
       }
 
-      const existingConversationId = resolveExistingConversationId(normalizedTarget, targetId);
-      const conversationId = existingConversationId || targetId;
+      const existingConversation = resolveExistingConversation(normalizedTarget, targetId);
+      const conversationId = existingConversation?.userId || targetId;
 
-      if (existingConversationId) {
-        navigation.navigate('Conversation', { userId: conversationId });
+      if (existingConversation) {
+        navigation.navigate('Conversation', {
+          userId: existingConversation.userId,
+          ...(existingConversation.conversationId ? { conversationId: existingConversation.conversationId } : {}),
+        });
         return;
       }
 
@@ -1077,8 +1076,8 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
               {contactSearch.length >= 3
                 ? isSearchingOnline ? 'Çevrimiçi aranıyor...' : 'Çevrimiçi kullanıcı da bulunamadı'
                 : contactSearch.length > 0
-                ? '3+ karakter girerek çevrimiçi arama yapabilirsiniz'
-                : 'QR kod veya ID ile kişi ekleyebilirsiniz'}
+                  ? '3+ karakter girerek çevrimiçi arama yapabilirsiniz'
+                  : 'QR kod veya ID ile kişi ekleyebilirsiniz'}
             </Text>
           </View>
         )}
@@ -1207,6 +1206,7 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
         onChangeText={setDeviceId}
         autoCapitalize="none"
         autoCorrect={false}
+        maxLength={128}
       />
       <Pressable
         style={[styles.primaryButton, (!deviceId.trim() || isResolving) && styles.primaryButtonDisabled]}
@@ -1320,16 +1320,16 @@ export default function NewMessageScreen({ navigation }: NewMessageScreenProps) 
   );
 
   if (activeTab === 'qr' && !permission) {
-    return renderPermissionFallback('QR kod okumak için kamera izni gereklidir.', 'İzin Ver');
+    return renderPermissionFallback('QR kod okumak için kamera izni gereklidir.', 'Devam Et');
   }
 
   if (activeTab === 'qr' && !permission?.granted) {
-    return renderPermissionFallback('Kamera izni reddedildi.', 'Tekrar Dene');
+    return renderPermissionFallback('Kamera izni reddedildi. Ayarlardan izin verebilirsiniz.', 'Ayarları Aç');
   }
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.screen}
       resizeMode="cover"
     >

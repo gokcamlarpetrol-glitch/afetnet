@@ -70,10 +70,14 @@ export async function saveStatusUpdate(
         );
 
         // Append to history
+        // CRITICAL FIX: Firestore rule requires senderUid matching auth.uid for status_updates.
+        // Without this field, the addDoc was silently rejected with permission-denied,
+        // causing all self-history writes to fail.
         await addDoc(
           collection(db, 'users', uid, 'status_updates'),
           {
             ...statusPayload,
+            senderUid: uid,
             timestamp: Date.now(),
           }
         );

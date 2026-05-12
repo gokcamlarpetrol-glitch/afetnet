@@ -1,13 +1,15 @@
 /**
- * MESH STORE & FORWARD SERVICE - ELITE V1
+ * MESH STORE & FORWARD SERVICE - ELITE V2
  * Manages offline message storage and delivery for mesh network.
- * 
+ *
  * Features:
  * - Per-peer mailbox for offline delivery
  * - ACK tracking and retry logic
  * - Priority-based queue management
- * - Persistent storage with AsyncStorage
+ * - Persistent storage with MMKV (DirectStorage)
  * - Message expiration handling
+ * - User-scoped storage keys (prevents cross-account data leak)
+ * - SOS/CRITICAL message eviction protection
  */
 
 import { DirectStorage } from '../../utils/storage';
@@ -19,7 +21,7 @@ import { cryptoService } from '../CryptoService';
 
 const logger = createLogger('MeshStoreForward');
 
-// Storage keys
+// Storage base keys (will be scoped per user at runtime)
 const STORAGE_KEY_MAILBOX = '@mesh_mailbox';
 const STORAGE_KEY_PENDING_ACKS = '@mesh_pending_acks';
 const STORAGE_KEY_DELIVERED = '@mesh_delivered_ids';
@@ -28,8 +30,13 @@ const STORAGE_KEY_DELIVERED = '@mesh_delivered_ids';
 const MAX_MAILBOX_SIZE = 100; // Max messages per peer
 const MAX_PENDING_ACKS = 500; // Max ACK tracking entries
 const MESSAGE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const ACK_TIMEOUT_MS = 60 * 1000; // 1 minute for ACK response
-const MAX_RETRIES = 5;
+// BLE mesh multi-hop networks: a message may take 2-3 minutes to propagate
+// through multiple hops and for the ACK to return. 60s was too aggressive.
+const ACK_TIMEOUT_MS = 180 * 1000; // 3 minutes for ACK response
+// In disaster scenarios, network is extremely unreliable. 5 retries was
+// not enough — messages got dropped before they could be delivered.
+const MAX_RETRIES = 15;
+const DELIVERED_IDS_CAP = 5000; // Max delivered IDs to persist
 
 // Types
 export interface StoredMessage {
@@ -49,6 +56,7 @@ export interface StoredMessage {
 
 export interface PendingACK {
     messageId: number;
+    originalStringId?: string; // Original UUID string ID for MeshStore status updates
     targetPeerId: string;
     sentAt: number;
     retryCount: number;
@@ -60,12 +68,20 @@ export interface Mailbox {
     [peerId: string]: StoredMessage[];
 }
 
+// Delivered ID entry with timestamp for time-based cleanup
+interface DeliveredEntry {
+    id: string;
+    at: number; // timestamp when marked delivered
+}
+
 class MeshStoreForwardService {
     private mailbox: Mailbox = {};
     private pendingACKs: Map<number, PendingACK> = new Map();
     private deliveredIds: Set<string> = new Set();
+    private deliveredTimestamps: Map<string, number> = new Map(); // id → deliveredAt timestamp
     private isInitialized = false;
     private myDeviceId: string = '';
+    private currentUid = ''; // User-scoped storage keys to prevent cross-account data leak
 
     // Listeners
     private messageDeliveredCallbacks: ((msgId: string, peerId: string) => void)[] = [];
@@ -80,6 +96,17 @@ class MeshStoreForwardService {
 
         this.myDeviceId = deviceId;
 
+        // Resolve UID for user-scoped storage keys.
+        // Without this, account switch causes cross-account data leak.
+        try {
+            const { identityService } = require('../IdentityService');
+            this.currentUid = identityService.getUid() || '';
+            if (!this.currentUid) {
+                const { getFirebaseAuth } = require('../../../lib/firebase');
+                this.currentUid = getFirebaseAuth()?.currentUser?.uid || '';
+            }
+        } catch { /* fallback to empty = unscoped */ }
+
         try {
             await Promise.all([
                 this.loadMailbox(),
@@ -87,14 +114,28 @@ class MeshStoreForwardService {
                 this.loadDeliveredIds(),
             ]);
 
-            // Cleanup expired messages
-            this.cleanupExpiredMessages();
+            // Cleanup expired messages and old delivered IDs
+            await this.cleanupExpiredMessages();
 
             this.isInitialized = true;
-            logger.info('Store & Forward Service initialized');
+            logger.info('Store & Forward Service initialized', {
+                uid: this.currentUid ? this.currentUid.substring(0, 8) + '...' : 'unscoped',
+            });
         } catch (error) {
             logger.error('Failed to initialize Store & Forward', error);
         }
+    }
+
+    // ===========================================================================
+    // USER-SCOPED STORAGE KEY
+    // ===========================================================================
+
+    /**
+     * Returns a user-scoped storage key to prevent cross-account data leak.
+     * Falls back to base key if no UID is available.
+     */
+    private getScopedKey(baseKey: string): string {
+        return this.currentUid ? `${baseKey}_${this.currentUid}` : baseKey;
     }
 
     // ===========================================================================
@@ -171,15 +212,50 @@ class MeshStoreForwardService {
     // ===========================================================================
 
     /**
-     * Get pending messages for a specific peer
+     * Get pending messages for a specific peer.
+     *
+     * CRITICAL FIX: Peer IDs from BLE discovery are hex hashes of the original
+     * device/UID string (from MeshProtocol.deserialize: sourceIdHash.toString(16)).
+     * But storeForPeer() stores under raw Firebase UIDs. We must match by hashing
+     * each mailbox key and comparing with the incoming peerId.
      */
     getMessagesForPeer(peerId: string): StoredMessage[] {
-        const peerMessages = this.mailbox[peerId] || [];
-        const broadcastMessages = this.mailbox['broadcast'] || [];
+        const now = Date.now();
+        const collected: StoredMessage[] = [];
 
-        // Combine and sort by priority
-        return [...peerMessages, ...broadcastMessages]
-            .filter(msg => msg.expiresAt > Date.now())
+        // 1. Direct key match (exact peerId in mailbox)
+        if (this.mailbox[peerId]) {
+            collected.push(...this.mailbox[peerId]);
+        }
+
+        // 2. Hash-based match: peerId might be hashString(originalKey).toString(16)
+        //    e.g., mailbox key = "firebase-uid-abc", peerId = "a1b2c3d4" (hex hash)
+        const peerIdLower = peerId.toLowerCase();
+        for (const key of Object.keys(this.mailbox)) {
+            if (key === peerId || key === 'broadcast') continue;
+            try {
+                const keyHash = MeshProtocol.hashString(key).toString(16);
+                if (keyHash === peerIdLower) {
+                    collected.push(...this.mailbox[key]);
+                }
+            } catch { /* hashString failure — skip */ }
+        }
+
+        // 3. Always include broadcast messages
+        if (this.mailbox['broadcast']) {
+            collected.push(...this.mailbox['broadcast']);
+        }
+
+        // Deduplicate (same message could appear if direct + hash match overlap)
+        const seen = new Set<string>();
+        const unique = collected.filter(msg => {
+            if (seen.has(msg.id)) return false;
+            seen.add(msg.id);
+            return true;
+        });
+
+        return unique
+            .filter(msg => msg.expiresAt > now)
             .sort((a, b) => a.priority - b.priority);
     }
 
@@ -211,9 +287,10 @@ class MeshStoreForwardService {
     /**
      * Track a sent message waiting for ACK
      */
-    async trackForACK(messageId: number, targetPeerId: string, payload: Buffer, priority: MeshPriority): Promise<void> {
+    async trackForACK(messageId: number, targetPeerId: string, payload: Buffer, priority: MeshPriority, originalStringId?: string): Promise<void> {
         const pendingAck: PendingACK = {
             messageId,
+            originalStringId,
             targetPeerId,
             sentAt: Date.now(),
             retryCount: 0,
@@ -250,15 +327,22 @@ class MeshStoreForwardService {
             await this.savePendingACKs();
 
             // Track as delivered
-            this.deliveredIds.add(originalMessageId.toString());
+            const idStr = originalMessageId.toString();
+            this.deliveredIds.add(idStr);
+            this.deliveredTimestamps.set(idStr, Date.now());
             await this.saveDeliveredIds();
 
             // Notify listeners
             this.ackReceivedCallbacks.forEach(cb => cb(originalMessageId));
 
-            // Update store message status
+            // CRITICAL FIX: Use originalStringId (UUID) for MeshStore update, not UInt32 hash.
+            // MeshStore messages have UUID-format IDs (e.g., "a1b2c3d4-..."), but
+            // originalMessageId is a UInt32 hash from toMessageIdUInt32(). Using the hash
+            // as a string ID would never match any MeshStore message, so delivery status
+            // would never be updated in the UI.
+            const storeId = pending.originalStringId || originalMessageId.toString();
             useMeshStore.getState().updateMessageStatus(
-                originalMessageId.toString(),
+                storeId,
                 ackType === 'read' ? 'read' : 'delivered'
             );
         }
@@ -293,7 +377,7 @@ class MeshStoreForwardService {
             pending.sentAt = Date.now();
 
             if (pending.retryCount >= MAX_RETRIES) {
-                logger.warn(`Message ${messageId} exceeded max retries, removing`);
+                logger.warn(`Message ${messageId} exceeded max retries (${MAX_RETRIES}), removing`);
                 this.pendingACKs.delete(messageId);
                 await this.savePendingACKs();
                 return false;
@@ -318,24 +402,41 @@ class MeshStoreForwardService {
     // ===========================================================================
 
     /**
-     * Mark message as delivered and remove from mailbox
+     * Mark message as delivered and remove from mailbox.
+     *
+     * CRITICAL FIX: Search ALL mailbox keys for the messageId, not just targetPeerId.
+     * The targetPeerId from BLE discovery is a hex hash (e.g., "a1b2c3d4") but the
+     * mailbox key may be a Firebase UID (e.g., "abc123..."). Also checks 'broadcast'.
      */
     async markDelivered(messageId: string, targetPeerId: string): Promise<void> {
-        // Remove from mailbox
-        if (this.mailbox[targetPeerId]) {
-            this.mailbox[targetPeerId] = this.mailbox[targetPeerId]
-                .filter(msg => msg.id !== messageId);
+        let removed = false;
+
+        // Search ALL mailbox keys for this messageId
+        for (const key of Object.keys(this.mailbox)) {
+            const before = this.mailbox[key].length;
+            this.mailbox[key] = this.mailbox[key].filter(msg => msg.id !== messageId);
+            if (this.mailbox[key].length < before) {
+                removed = true;
+                // Clean up empty mailbox entries
+                if (this.mailbox[key].length === 0) {
+                    delete this.mailbox[key];
+                }
+            }
+        }
+
+        if (removed) {
             await this.saveMailbox();
         }
 
-        // Track delivery
+        // Track delivery with timestamp
         this.deliveredIds.add(messageId);
+        this.deliveredTimestamps.set(messageId, Date.now());
         await this.saveDeliveredIds();
 
         // Notify listeners
         this.messageDeliveredCallbacks.forEach(cb => cb(messageId, targetPeerId));
 
-        logger.debug(`Message ${messageId} delivered to ${targetPeerId}`);
+        logger.debug(`Message ${messageId} delivered to ${targetPeerId}${removed ? '' : ' (not found in mailbox)'}`);
     }
 
     /**
@@ -381,7 +482,8 @@ class MeshStoreForwardService {
 
     private async saveMailbox(): Promise<void> {
         try {
-            DirectStorage.setString(STORAGE_KEY_MAILBOX, JSON.stringify(this.mailbox));
+            const key = this.getScopedKey(STORAGE_KEY_MAILBOX);
+            DirectStorage.setString(key, JSON.stringify(this.mailbox));
         } catch (error) {
             logger.error('Failed to save mailbox', error);
         }
@@ -389,7 +491,8 @@ class MeshStoreForwardService {
 
     private async loadMailbox(): Promise<void> {
         try {
-            const data = DirectStorage.getString(STORAGE_KEY_MAILBOX) ?? null;
+            const key = this.getScopedKey(STORAGE_KEY_MAILBOX);
+            const data = DirectStorage.getString(key) ?? null;
             if (data) {
                 this.mailbox = JSON.parse(data);
             }
@@ -401,8 +504,9 @@ class MeshStoreForwardService {
 
     private async savePendingACKs(): Promise<void> {
         try {
+            const key = this.getScopedKey(STORAGE_KEY_PENDING_ACKS);
             const arr = Array.from(this.pendingACKs.entries());
-            DirectStorage.setString(STORAGE_KEY_PENDING_ACKS, JSON.stringify(arr));
+            DirectStorage.setString(key, JSON.stringify(arr));
         } catch (error) {
             logger.error('Failed to save pending ACKs', error);
         }
@@ -410,7 +514,8 @@ class MeshStoreForwardService {
 
     private async loadPendingACKs(): Promise<void> {
         try {
-            const data = DirectStorage.getString(STORAGE_KEY_PENDING_ACKS) ?? null;
+            const key = this.getScopedKey(STORAGE_KEY_PENDING_ACKS);
+            const data = DirectStorage.getString(key) ?? null;
             if (data) {
                 const arr: [number, PendingACK][] = JSON.parse(data);
                 this.pendingACKs = new Map(arr);
@@ -423,9 +528,15 @@ class MeshStoreForwardService {
 
     private async saveDeliveredIds(): Promise<void> {
         try {
-            // Only keep recent IDs (max 1000)
-            const arr = Array.from(this.deliveredIds).slice(-1000);
-            DirectStorage.setString(STORAGE_KEY_DELIVERED, JSON.stringify(arr));
+            const key = this.getScopedKey(STORAGE_KEY_DELIVERED);
+            // Save as entries with timestamps for time-based cleanup
+            const entries: DeliveredEntry[] = Array.from(this.deliveredIds).map(id => ({
+                id,
+                at: this.deliveredTimestamps.get(id) || Date.now(),
+            }));
+            // Cap at DELIVERED_IDS_CAP to prevent unbounded growth
+            const capped = entries.slice(-DELIVERED_IDS_CAP);
+            DirectStorage.setString(key, JSON.stringify(capped));
         } catch (error) {
             logger.error('Failed to save delivered IDs', error);
         }
@@ -433,13 +544,29 @@ class MeshStoreForwardService {
 
     private async loadDeliveredIds(): Promise<void> {
         try {
-            const data = DirectStorage.getString(STORAGE_KEY_DELIVERED) ?? null;
+            const key = this.getScopedKey(STORAGE_KEY_DELIVERED);
+            const data = DirectStorage.getString(key) ?? null;
             if (data) {
-                this.deliveredIds = new Set(JSON.parse(data));
+                const parsed = JSON.parse(data);
+                // Handle both old format (string[]) and new format (DeliveredEntry[])
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    if (typeof parsed[0] === 'string') {
+                        // Legacy format: string array — migrate to new format
+                        this.deliveredIds = new Set(parsed);
+                        const now = Date.now();
+                        this.deliveredTimestamps = new Map(parsed.map((id: string) => [id, now]));
+                    } else {
+                        // New format: DeliveredEntry[]
+                        const entries = parsed as DeliveredEntry[];
+                        this.deliveredIds = new Set(entries.map(e => e.id));
+                        this.deliveredTimestamps = new Map(entries.map(e => [e.id, e.at]));
+                    }
+                }
             }
         } catch (error) {
             logger.error('Failed to load delivered IDs', error);
             this.deliveredIds = new Set();
+            this.deliveredTimestamps = new Map();
         }
     }
 
@@ -447,7 +574,7 @@ class MeshStoreForwardService {
     // CLEANUP
     // ===========================================================================
 
-    private cleanupExpiredMessages(): void {
+    private async cleanupExpiredMessages(): Promise<void> {
         const now = Date.now();
         let cleaned = 0;
 
@@ -459,24 +586,113 @@ class MeshStoreForwardService {
 
         if (cleaned > 0) {
             logger.info(`Cleaned ${cleaned} expired messages`);
-            this.saveMailbox();
+            await this.saveMailbox();
+        }
+
+        // Also cleanup old delivered IDs
+        await this.cleanupDeliveredIds();
+    }
+
+    /**
+     * Remove delivered IDs older than MESSAGE_EXPIRY_MS (7 days).
+     * Prevents unbounded growth while keeping enough history to prevent duplicate delivery.
+     */
+    private async cleanupDeliveredIds(): Promise<void> {
+        const cutoff = Date.now() - MESSAGE_EXPIRY_MS;
+        let removed = 0;
+
+        // FIX: Collect IDs to delete first, then delete after iteration.
+        // Deleting from Map during for...of is spec-compliant in V8 but fragile
+        // in Hermes engine (React Native). Separate collection prevents issues.
+        const toDelete: string[] = [];
+        for (const [id, timestamp] of this.deliveredTimestamps) {
+            if (timestamp < cutoff) {
+                toDelete.push(id);
+            }
+        }
+        for (const id of toDelete) {
+            this.deliveredIds.delete(id);
+            this.deliveredTimestamps.delete(id);
+            removed++;
+        }
+
+        if (removed > 0) {
+            logger.info(`Cleaned ${removed} old delivered IDs`);
+            await this.saveDeliveredIds();
         }
     }
 
+    /**
+     * Evict low-priority messages from a peer's mailbox when it exceeds MAX_MAILBOX_SIZE.
+     * CRITICAL (SOS) messages are NEVER evicted — they are protected.
+     *
+     * Sort order: LOW priority first (higher number = lower priority), then oldest first.
+     * slice(0, -removeCount) removes from the tail = lowest priority + oldest messages.
+     */
     private evictFromMailbox(peerId: string): void {
         const messages = this.mailbox[peerId];
         if (!messages || messages.length === 0) return;
 
-        // Sort: low priority and oldest first
-        messages.sort((a, b) =>
-            (b.priority - a.priority) || (a.createdAt - b.createdAt)
+        // Separate CRITICAL (SOS) messages — they must NEVER be evicted
+        const criticalMessages = messages.filter(m => m.priority === MeshPriority.CRITICAL);
+        const evictableMessages = messages.filter(m => m.priority !== MeshPriority.CRITICAL);
+
+        if (evictableMessages.length === 0) {
+            // All messages are critical — cannot evict anything
+            logger.warn(`Cannot evict from mailbox for ${peerId}: all ${messages.length} messages are CRITICAL`);
+            return;
+        }
+
+        // Sort ascending by priority: CRITICAL (0) first, NORMAL (2) last.
+        // Within same priority, sort NEWEST first so slice(0, -N) removes OLDEST from tail.
+        evictableMessages.sort((a, b) =>
+            (a.priority - b.priority) || (b.createdAt - a.createdAt)
         );
 
-        // Remove last 10%
-        const removeCount = Math.max(1, Math.floor(messages.length * 0.1));
-        this.mailbox[peerId] = messages.slice(0, -removeCount);
+        // Remove last 10% of evictable messages
+        const removeCount = Math.max(1, Math.floor(evictableMessages.length * 0.1));
+        const keptEvictable = evictableMessages.slice(0, -removeCount);
 
-        logger.debug(`Evicted ${removeCount} messages from mailbox for ${peerId}`);
+        // Recombine: critical (always kept) + surviving evictable
+        this.mailbox[peerId] = [...criticalMessages, ...keptEvictable];
+
+        logger.debug(`Evicted ${removeCount} messages from mailbox for ${peerId} (${criticalMessages.length} critical protected)`);
+    }
+
+    // ===========================================================================
+    // DESTROY / CLEANUP
+    // ===========================================================================
+
+    /**
+     * Save all state, clear in-memory data, and mark as uninitialized.
+     * Must be called on logout / shutdown to prevent stale data.
+     */
+    async destroy(): Promise<void> {
+        if (!this.isInitialized) return;
+
+        try {
+            // Persist current state before clearing
+            await Promise.all([
+                this.saveMailbox(),
+                this.savePendingACKs(),
+                this.saveDeliveredIds(),
+            ]);
+        } catch (error) {
+            logger.error('Failed to save state during destroy', error);
+        }
+
+        // Clear in-memory data
+        this.mailbox = {};
+        this.pendingACKs.clear();
+        this.deliveredIds.clear();
+        this.deliveredTimestamps.clear();
+        this.messageDeliveredCallbacks = [];
+        this.ackReceivedCallbacks = [];
+        this.myDeviceId = '';
+        this.currentUid = '';
+        this.isInitialized = false;
+
+        logger.info('Store & Forward Service destroyed');
     }
 
     // ===========================================================================
@@ -507,11 +723,12 @@ class MeshStoreForwardService {
         this.mailbox = {};
         this.pendingACKs.clear();
         this.deliveredIds.clear();
+        this.deliveredTimestamps.clear();
 
         await Promise.all([
-            DirectStorage.delete(STORAGE_KEY_MAILBOX),
-            DirectStorage.delete(STORAGE_KEY_PENDING_ACKS),
-            DirectStorage.delete(STORAGE_KEY_DELIVERED),
+            DirectStorage.delete(this.getScopedKey(STORAGE_KEY_MAILBOX)),
+            DirectStorage.delete(this.getScopedKey(STORAGE_KEY_PENDING_ACKS)),
+            DirectStorage.delete(this.getScopedKey(STORAGE_KEY_DELIVERED)),
         ]);
 
         logger.info('Store & Forward data cleared');

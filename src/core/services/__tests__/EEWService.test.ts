@@ -32,6 +32,11 @@ describe('EEWService', () => {
     });
   });
 
+  afterEach(() => {
+    // EEWService is a singleton; ensure polling timers/listeners never leak across tests.
+    eewService.stop();
+  });
+
   describe('Initialization', () => {
     it('should be a singleton instance', () => {
       expect(eewService).toBeDefined();
@@ -102,6 +107,11 @@ describe('EEWService', () => {
   });
 });
 
+afterAll(() => {
+  // Defensive cleanup for top-level describes that also call start().
+  eewService.stop();
+});
+
 describe('EEW Event Processing', () => {
   describe('Event Normalization', () => {
     it('should process AFAD event format', async () => {
@@ -130,6 +140,25 @@ describe('EEW Event Processing', () => {
       // Allow polling to execute
       await new Promise(resolve => setTimeout(resolve, 100));
       eewService.stop();
+    });
+
+    it('should drop events with missing or non-positive magnitude', () => {
+      const base = {
+        eventID: 'bad-mag',
+        geojson: { coordinates: [28.9784, 41.0082] },
+        location: 'Test',
+        eventDate: new Date().toISOString(),
+      };
+
+      const missingMagnitude = (eewService as any).normalizeEvent(base);
+      const zeroMagnitude = (eewService as any).normalizeEvent({ ...base, mag: 0 });
+      const negativeMagnitude = (eewService as any).normalizeEvent({ ...base, mag: -1.5 });
+      const validMagnitude = (eewService as any).normalizeEvent({ ...base, mag: 4.2 });
+
+      expect(missingMagnitude).toBeNull();
+      expect(zeroMagnitude).toBeNull();
+      expect(negativeMagnitude).toBeNull();
+      expect(validMagnitude?.magnitude).toBe(4.2);
     });
   });
 

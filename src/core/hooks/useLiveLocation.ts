@@ -88,7 +88,7 @@ export function useLiveLocation(options: UseLiveLocationOptions = {}): UseLiveLo
 
         const startWatching = async () => {
             try {
-                const { status } = await Location.requestForegroundPermissionsAsync();
+                const { status } = await Location.getForegroundPermissionsAsync();
                 if (!isMounted) return;
 
                 if (status !== 'granted') {

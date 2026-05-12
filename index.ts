@@ -30,30 +30,20 @@ import * as TaskManager from 'expo-task-manager';
 const TASK_EEW_FETCH = 'AFETNET_EEW_BACKGROUND_FETCH';
 const TASK_EEW_LOCATION = 'AFETNET_EEW_LOCATION_TASK';
 
-// Define EEW background fetch task
-TaskManager.defineTask(TASK_EEW_FETCH, async () => {
-  try {
-    // Minimal background check - full logic is in BackgroundEEWService
-    console.log('[BackgroundTask] EEW fetch triggered');
-    return 2; // BackgroundFetchResult.NewData
-  } catch {
-    return 3; // BackgroundFetchResult.Failed
+// Define EEW background tasks with full implementations
+// These MUST be defined at top-level before app registration for iOS background execution
+try {
+  const { backgroundEEWService } = require('./src/core/services/BackgroundEEWService');
+  backgroundEEWService.defineBackgroundTasksEarly();
+} catch {
+  // Fallback stubs if BackgroundEEWService fails to load
+  if (!TaskManager.isTaskDefined(TASK_EEW_FETCH)) {
+    TaskManager.defineTask(TASK_EEW_FETCH, async () => 2);
   }
-});
-
-// Define location task (keeps app alive for EEW monitoring)
-TaskManager.defineTask(TASK_EEW_LOCATION, async ({ data, error }) => {
-  if (error) {
-    console.log('[BackgroundTask] Location task error:', error);
-    return;
+  if (!TaskManager.isTaskDefined(TASK_EEW_LOCATION)) {
+    TaskManager.defineTask(TASK_EEW_LOCATION, async () => {});
   }
-  if (data) {
-    const { locations } = data as { locations: unknown[] };
-    if (locations?.length > 0) {
-      console.log('[BackgroundTask] Background location update received');
-    }
-  }
-});
+}
 
 
 // ============================================================================

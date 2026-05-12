@@ -35,7 +35,7 @@ interface Props {
 }
 
 export default function PermissionGuard({ children, onPermissionsGranted }: Props) {
-  const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [permissionsChecked, setPermissionsChecked] = useState(true);
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>({
     location: false,
     notifications: false,
@@ -46,9 +46,11 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
   const [isRequesting, setIsRequesting] = useState(false);
 
   useEffect(() => {
-    // Startup must not force system permission prompts.
-    // Permissions are requested on feature entry points (onboarding / relevant screens).
-    setPermissionsChecked(true);
+    // Startup must not force or gate permission prompts with a custom screen.
+    // Permissions are requested only at feature entry points (onboarding / relevant screens).
+    if (onPermissionsGranted) {
+      onPermissionsGranted();
+    }
   }, []);
 
   const requestAllPermissions = async () => {
@@ -147,19 +149,10 @@ export default function PermissionGuard({ children, onPermissionsGranted }: Prop
             style={styles.button}
             onPress={requestAllPermissions}
           >
-            <Text style={styles.buttonText}>İzinleri Ver</Text>
+            <Text style={styles.buttonText}>Devam Et</Text>
           </Pressable>
         )}
 
-        <Pressable
-          style={styles.skipButton}
-          onPress={() => {
-            setPermissionsChecked(true);
-            setIsRequesting(false);
-          }}
-        >
-          <Text style={styles.skipButtonText}>Şimdi Değil</Text>
-        </Pressable>
       </View>
     </View>
   );
@@ -214,12 +207,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  skipButton: {
-    paddingVertical: 12,
-  },
-  skipButtonText: {
-    color: colors.text.secondary,
-    fontSize: 14,
   },
 });

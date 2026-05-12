@@ -277,13 +277,13 @@ class MeshCompressionService {
     /**
      * Compress data with optimal algorithm
      */
-    async compress(
+    compress(
         data: string,
         options: {
             level?: CompressionLevel;
             algorithm?: 'lz-string' | 'rle' | 'auto';
         } = {}
-    ): Promise<string> {
+    ): string {
         const { level = 'default', algorithm = 'auto' } = options;
 
         // Skip if too small
@@ -302,7 +302,7 @@ class MeshCompressionService {
 
         try {
             if (algorithm === 'auto') {
-                result = await this.compressAuto(data, level);
+                result = this.compressAuto(data, level);
             } else if (algorithm === 'lz-string') {
                 result = this.compressLZString(data);
             } else {
@@ -329,7 +329,7 @@ class MeshCompressionService {
     /**
      * Decompress data
      */
-    async decompress(compressedData: string): Promise<string> {
+    decompress(compressedData: string): string {
         const startTime = Date.now();
 
         try {
@@ -373,7 +373,7 @@ class MeshCompressionService {
     /**
      * Auto-select best algorithm
      */
-    private async compressAuto(data: string, level: CompressionLevel): Promise<CompressionResult> {
+    private compressAuto(data: string, level: CompressionLevel): CompressionResult {
         const startTime = Date.now();
 
         // Try LZ-String (usually best for text/JSON)

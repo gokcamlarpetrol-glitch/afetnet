@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "firebase": {
+      "type": "stdio",
+      "command": "firebase",
+      "args": [
+        "experimental:mcp",
+        "--dir",
+        "/Users/gokhancamci/AfetNet1"
+      ],
+      "env": {}
+    }
+  }
+}

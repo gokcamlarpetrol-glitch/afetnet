@@ -15,6 +15,7 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  cancelAnimation,
   FadeInDown,
   interpolate,
 } from 'react-native-reanimated';
@@ -23,6 +24,7 @@ import { identityService } from '../../../services/IdentityService';
 export default function HomeHeader() {
   const insets = useSafeAreaInsets();
   const [userName, setUserName] = useState(identityService.getDisplayName());
+  const [locationName, setLocationName] = useState<string | null>(null);
 
   // Greeting Logic
   const hour = new Date().getHours();
@@ -34,23 +36,67 @@ export default function HomeHeader() {
   } else if (hour < 12) {
     greetingText = 'Günaydın';
     greetingIcon = 'sunny';
-  } else if (hour > 18) {
+  } else if (hour >= 18) {
     greetingText = 'İyi Akşamlar';
     greetingIcon = 'moon-outline';
   }
 
-  // Update name when identity loads/changes
+  // Update name when identity loads/changes using pub/sub
   useEffect(() => {
-    const name = identityService.getDisplayName();
-    if (name && name !== 'İsimsiz Kahraman') {
-      setUserName(name);
-    }
-    // Re-check after a short delay in case identity loads async
-    const timer = setTimeout(() => {
-      const latestName = identityService.getDisplayName();
-      if (latestName) setUserName(latestName);
-    }, 2000);
-    return () => clearTimeout(timer);
+    const updateName = () => {
+      const name = identityService.getDisplayName();
+      if (name && name !== 'Kullanıcı' && name !== 'İsimsiz Kahraman') {
+        setUserName(name);
+      }
+    };
+
+    // Initial check
+    updateName();
+
+    // Subscribe to future changes
+    const unsubscribe = identityService.subscribe(updateName);
+    return unsubscribe;
+  }, []);
+
+  // Fetch user location and reverse geocode to city/district
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchLocation = async () => {
+      try {
+        const Location = await import('expo-location');
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+
+        const locationPromise = Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+        const location = await Promise.race([locationPromise, timeoutPromise]);
+        if (cancelled || !location) return;
+
+        const addresses = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        if (cancelled || !addresses?.length) return;
+
+        const addr = addresses[0];
+        const city = addr.city || (addr as any).subAdministrativeArea || addr.region;
+        const district = addr.district || (addr as any).subLocality;
+
+        if (district && city && district !== city) {
+          setLocationName(`${district}, ${city}`);
+        } else {
+          setLocationName(city || 'Türkiye');
+        }
+      } catch {
+        // Non-critical: location badge stays hidden
+      }
+    };
+
+    fetchLocation();
+    return () => { cancelled = true; };
   }, []);
 
   // Shimmer animation
@@ -72,6 +118,11 @@ export default function HomeHeader() {
       -1,
       true,
     );
+
+    return () => {
+      cancelAnimation(shimmer);
+      cancelAnimation(pulseOpacity);
+    };
   }, []);
 
   const shimmerStyle = useAnimatedStyle(() => ({
@@ -141,11 +192,15 @@ export default function HomeHeader() {
 
         {/* Right: Location + Status */}
         <View style={styles.statusContainer}>
-          <View style={styles.locationBadge}>
-            <Ionicons name="location" size={9} color="#64748B" />
-            <Text style={styles.locationText}>İstanbul</Text>
-          </View>
-          <View style={styles.dividerDot} />
+          {locationName ? (
+            <>
+              <View style={styles.locationBadge}>
+                <Ionicons name="location" size={9} color="#64748B" />
+                <Text style={styles.locationText} numberOfLines={1}>{locationName}</Text>
+              </View>
+              <View style={styles.dividerDot} />
+            </>
+          ) : null}
           <View style={styles.statusBadge}>
             <Animated.View style={[styles.statusDot, pulseStyle]} />
             <Text style={styles.statusText}>Güvenli</Text>
@@ -255,6 +310,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#64748B',
+    maxWidth: 120,
   },
   dividerDot: {
     width: 3,

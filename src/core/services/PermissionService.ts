@@ -8,7 +8,6 @@ import { createLogger } from '../utils/logger';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { Camera } from 'expo-camera';
-import * as Contacts from 'expo-contacts';
 import { requestRecordingPermissionsAsync, getRecordingPermissionsAsync } from 'expo-audio';
 
 const logger = createLogger('PermissionService');
@@ -137,34 +136,6 @@ class PermissionService {
     }
   }
 
-  // ==================== CONTACTS ====================
-  async requestContactsPermission(): Promise<boolean> {
-    try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      this.cachedStatus.contacts = status === 'granted';
-      if (this.cachedStatus.contacts) {
-        logger.info('Contacts permission granted');
-      } else {
-        logger.warn('Contacts permission denied');
-      }
-      return this.cachedStatus.contacts;
-    } catch (error) {
-      logger.error('Contacts permission request failed:', error);
-      return false;
-    }
-  }
-
-  async checkContactsPermission(): Promise<boolean> {
-    try {
-      const { status } = await Contacts.getPermissionsAsync();
-      this.cachedStatus.contacts = status === 'granted';
-      return this.cachedStatus.contacts;
-    } catch (error) {
-      logger.error('Contacts permission check failed:', error);
-      return false;
-    }
-  }
-
   // ==================== MICROPHONE ====================
   async requestMicrophonePermission(): Promise<boolean> {
     try {
@@ -222,11 +193,10 @@ class PermissionService {
   async checkAllPermissions(): Promise<PermissionStatus> {
     try {
       // ELITE: Check all permissions in parallel for performance
-      const [location, notification, camera, contacts, microphone] = await Promise.all([
+      const [location, notification, camera, microphone] = await Promise.all([
         this.checkLocationPermission(),
         this.checkNotificationPermission(),
         this.checkCameraPermission(),
-        this.checkContactsPermission(),
         this.checkMicrophonePermission(),
       ]);
 
@@ -242,7 +212,7 @@ class PermissionService {
         locationBackground,
         notification,
         camera,
-        contacts,
+        contacts: false, // contacts permission removed — not used in app
         microphone,
       };
 

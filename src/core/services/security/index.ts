@@ -55,3 +55,9 @@ export {
     type APIRequest,
     type APIResponse,
 } from './SecureAPIClient';
+
+// Authoritative security key cleanup
+export {
+    purgeUserSecurityKeys,
+    getSecurityKeyList,
+} from './SecurityKeyCleanup';

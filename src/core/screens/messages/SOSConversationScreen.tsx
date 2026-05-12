@@ -324,7 +324,7 @@ export default function SOSConversationScreen({ route, navigation }: SOSConversa
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

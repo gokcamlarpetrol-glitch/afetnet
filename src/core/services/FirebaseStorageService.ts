@@ -112,6 +112,69 @@ class FirebaseStorageService {
   }
 
   /**
+   * Upload local file URI to Firebase Storage.
+   * Uses Blob path first (lower memory than base64+Buffer), falls back to base64 if needed.
+   */
+  async uploadFileFromUri(
+    path: string,
+    fileUri: string,
+    metadata?: { contentType?: string; customMetadata?: Record<string, string> },
+  ): Promise<string | null> {
+    if (!this._isInitialized) {
+      logger.warn('FirebaseStorageService not initialized');
+      return null;
+    }
+    if (!fileUri) {
+      logger.warn('uploadFileFromUri called with empty URI');
+      return null;
+    }
+
+    try {
+      const storageInstance = await getStorageInstance();
+      if (!storageInstance) {
+        logger.warn('Storage not available');
+        return null;
+      }
+
+      const { ref, uploadBytes, uploadString, getDownloadURL } = await import('firebase/storage');
+      const storageRef = ref(storageInstance, path);
+
+      try {
+        const response = await fetch(fileUri);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch local URI: ${response.status}`);
+        }
+        const blob = await response.blob();
+        try {
+          await uploadBytes(storageRef, blob, metadata || {});
+        } finally {
+          const maybeBlob = blob as Blob & { close?: () => void };
+          if (typeof maybeBlob.close === 'function') {
+            try { maybeBlob.close(); } catch { /* no-op */ }
+          }
+        }
+      } catch (blobUploadError) {
+        // Fallback for environments where `fetch(file://...)` is unreliable.
+        const FileSystem = await import('expo-file-system');
+        const base64Data = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await uploadString(storageRef, base64Data, 'base64', metadata || {});
+        logger.debug('uploadFileFromUri used base64 fallback path');
+      }
+
+      const downloadURL = await getDownloadURL(storageRef);
+      if (__DEV__) {
+        logger.info(`File uploaded from URI: ${path}`);
+      }
+      return downloadURL;
+    } catch (error) {
+      logger.error('Failed to upload file from URI:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get download URL for a file
    */
   async getDownloadURL(path: string): Promise<string | null> {
@@ -203,4 +266,3 @@ class FirebaseStorageService {
 }
 
 export const firebaseStorageService = new FirebaseStorageService();
-

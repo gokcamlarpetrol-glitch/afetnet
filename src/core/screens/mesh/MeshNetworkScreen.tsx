@@ -10,7 +10,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, Pressable, Animated, Easin
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../components/SafeBlurView';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useMeshStore, MeshNode, MeshMessage } from '../../services/mesh/MeshStore';
 import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
@@ -44,29 +44,36 @@ export default function CommunicationScreen({ navigation }: CommunicationScreenP
       setConnectionMode(mode);
     });
 
-    // Radar Animation Loop
-    Animated.loop(
+    // Radar Animation Loop - store reference for cleanup
+    const loopAnimation = Animated.loop(
       Animated.timing(scannerRotation, {
         toValue: 1,
         duration: 3000,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
-    ).start();
+    );
+    loopAnimation.start();
 
     return () => {
       unsubscribe();
+      loopAnimation.stop();
     };
   }, []);
 
+  const isSendingRef = useRef(false);
   const handleSend = async () => {
     if (!inputText.trim()) return;
+    if (isSendingRef.current) return;
+    isSendingRef.current = true;
 
     try {
-      await hybridMessageService.sendMessage(inputText);
+      await hybridMessageService.sendMessage(inputText, 'broadcast');
       setInputText('');
     } catch {
       Alert.alert('Hata', 'Mesaj gönderilemedi.');
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
@@ -109,7 +116,7 @@ export default function CommunicationScreen({ navigation }: CommunicationScreenP
       <Text style={[styles.messageSender, item.senderId === 'ME' && { color: 'rgba(255,255,255,0.8)' }]}>{item.senderId}</Text>
       <Text style={[styles.messageText, item.senderId === 'ME' && { color: '#fff' }]}>{item.content}</Text>
       <Text style={[styles.messageTime, item.senderId === 'ME' && { color: 'rgba(255,255,255,0.6)' }]}>
-        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {new Date(item.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
       </Text>
     </View>
   );
@@ -215,6 +222,7 @@ export default function CommunicationScreen({ navigation }: CommunicationScreenP
             placeholderTextColor={colors.text.tertiary}
             value={inputText}
             onChangeText={setInputText}
+            maxLength={10000}
           />
           <Pressable style={[styles.sendButton, { backgroundColor: connectionMode === 'ONLINE' ? colors.brand.primary : colors.status.info }]} onPress={handleSend}>
             <Ionicons name="send" size={20} color="#fff" />

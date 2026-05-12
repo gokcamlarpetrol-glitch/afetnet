@@ -157,7 +157,7 @@ export function initializeFirebase(): FirebaseApp | null {
       }
       firebaseApp = initializeApp(config);
     }
-    // CRITICAL: Ensure Auth is initialized with MMKV persistence
+    // CRITICAL: Ensure Auth is initialized with React Native persistence
     // before any module falls back to firebase/auth getAuth() directly.
     try {
       getOrInitializeAuth(firebaseApp);
@@ -174,8 +174,7 @@ export function initializeFirebase(): FirebaseApp | null {
 
 /**
  * ELITE: Get or initialize Auth instance with persistence
- * Uses initializeAuth with MMKV for crash-safe session persistence
- * MMKV survives iOS background kill — AsyncStorage does NOT reliably.
+ * Uses initializeAuth with AsyncStorage-backed React Native persistence.
  */
 function getOrInitializeAuth(app: FirebaseApp): Auth {
   if (authInstance) return authInstance;
@@ -219,7 +218,7 @@ export function getFirebaseApp(): FirebaseApp | null {
 }
 
 /**
- * ELITE: Get Firebase Auth with MMKV persistence
+ * ELITE: Get Firebase Auth with React Native persistence
  * This is the ONLY way to get Auth — ensures persistence is always configured
  */
 export function getFirebaseAuth(): Auth | null {

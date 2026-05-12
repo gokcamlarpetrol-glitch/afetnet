@@ -11,6 +11,49 @@ const logger = createLogger('TimeUtils');
 // Turkey timezone (Europe/Istanbul, GMT+3)
 const TURKEY_TIMEZONE = 'Europe/Istanbul';
 
+function getTurkeyDateParts(input: number | Date) {
+  const date = input instanceof Date ? input : new Date(input);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TURKEY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  return parts.reduce<Record<string, string>>((acc, part) => {
+    if (part.type !== 'literal') {
+      acc[part.type] = part.value;
+    }
+    return acc;
+  }, {});
+}
+
+/**
+ * Format a timestamp for Turkish-local earthquake provider APIs.
+ * AFAD and Kandilli no-timezone date strings represent Europe/Istanbul time.
+ */
+export function formatTurkeyApiDateTime(input: number | Date = Date.now()): string {
+  try {
+    const parts = getTurkeyDateParts(input);
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  } catch (error) {
+    logger.warn('Turkey API datetime formatting error:', error);
+    const fallbackDate = input instanceof Date ? input : new Date(input);
+    return fallbackDate.toISOString().replace('Z', '').split('.')[0];
+  }
+}
+
+/**
+ * Format a timestamp as YYYY-MM-DD in Turkey local time.
+ */
+export function formatTurkeyApiDate(input: number | Date = Date.now()): string {
+  return formatTurkeyApiDateTime(input).split('T')[0];
+}
+
 /**
  * Format timestamp to Turkish local time
  * Automatically converts to Turkey timezone regardless of device timezone
@@ -146,10 +189,16 @@ export function parseAFADDate(dateString: string): number {
     }
 
     // AFAD API format: "2025-11-10T22:27:06" or "2025-11-10 22:27:06"
+    // Kandilli text format: "2025.11.10 22:27:06"
     // CRITICAL: AFAD API v2 returns dates WITHOUT timezone info
     // Based on AFAD web site, dates are displayed in Turkey local time
     // However, API might return UTC or local time - we need to parse correctly
-    let normalizedDate = dateString.trim().replace(' ', 'T');
+    let normalizedDate = dateString.trim();
+    const dottedDateMatch = /^(\d{4})\.(\d{2})\.(\d{2})(.*)$/.exec(normalizedDate);
+    if (dottedDateMatch) {
+      normalizedDate = `${dottedDateMatch[1]}-${dottedDateMatch[2]}-${dottedDateMatch[3]}${dottedDateMatch[4]}`;
+    }
+    normalizedDate = normalizedDate.replace(/\s+/, 'T');
     
     // Check if date already has timezone info
     const hasTimezone = /[+-]\d{2}:\d{2}$/.test(normalizedDate) || normalizedDate.endsWith('Z');
@@ -302,20 +351,9 @@ export function parseAFADDate(dateString: string): number {
 }
 
 /**
- * Get current Turkey time timestamp
+ * Get current UTC timestamp (Unix timestamps are timezone-independent).
+ * Use formatToTurkishTime() for Turkey-local display.
  */
 export function getTurkeyTimeNow(): number {
-  try {
-    const now = new Date();
-    // Get Turkey timezone offset
-    const turkeyTime = new Date(now.toLocaleString('en-US', { timeZone: TURKEY_TIMEZONE }));
-    const utcTime = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const offset = turkeyTime.getTime() - utcTime.getTime();
-    
-    return now.getTime() + offset;
-  } catch (error) {
-    logger.warn('Turkey time calculation error:', error);
-    return Date.now();
-  }
+  return Date.now();
 }
-

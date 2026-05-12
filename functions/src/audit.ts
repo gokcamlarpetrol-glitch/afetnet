@@ -1,0 +1,35 @@
+import * as functions from 'firebase-functions/v1';
+import * as admin from 'firebase-admin';
+
+export const auditFirestore = functions
+    .region('europe-west1')
+    .https.onCall(async (data, context) => {
+        // SECURITY: Admin-only function — contains sensitive user data
+        if (!context.auth?.token?.admin) {
+            throw new functions.https.HttpsError('permission-denied', 'Admin only');
+        }
+
+        const db = admin.firestore();
+        const result: any = {};
+
+        try {
+            const convSnap = await db.collection('conversations').limit(5).get();
+            result.conversations = convSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const msgSnap = await db.collectionGroup('messages').limit(5).get();
+            result.messages = msgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const inboxSnap = await db.collectionGroup('threads').limit(5).get();
+            result.user_inbox = inboxSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const locSnap = await db.collection('locations_current').limit(5).get();
+            result.locations_current = locSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const tokenSnap = await db.collectionGroup('devices').limit(5).get();
+            result.push_tokens = tokenSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            return { success: true, data: result };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    });

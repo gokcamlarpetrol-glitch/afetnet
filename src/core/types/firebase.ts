@@ -14,6 +14,8 @@ export interface MessageData {
   id: string;
   /** Firebase UID of the sender — THE source of truth */
   senderUid: string;
+  /** Existing conversation thread when caller already resolved it */
+  conversationId?: string;
   /** Display name of sender (denormalized for UI speed) */
   senderName?: string;
   /** Message text content */

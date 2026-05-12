@@ -1,4 +1,4 @@
-package com.afetnetacililetiim
+package com.gokhancamci.afetnetapp
 
 import android.app.Application
 import android.content.res.Configuration

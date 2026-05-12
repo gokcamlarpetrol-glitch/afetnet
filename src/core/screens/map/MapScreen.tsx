@@ -8,7 +8,7 @@ import { View, Text, StyleSheet, Alert, Pressable, Dimensions, StatusBar, ImageB
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../components/SafeBlurView';
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { colors, typography, spacing, borderRadius } from '../../theme';
@@ -42,6 +42,7 @@ import { MapFiltersControl } from './components/MapFiltersControl';
 import { FaultLineOverlay } from './components/FaultLineOverlay';
 import { EvacuationOverlay } from './components/EvacuationOverlay';
 import { IncidentReportModal } from './components/IncidentReportModal';
+import { ReportModal } from '../../components/ReportModal';
 import { RiskOverlay, RiskLegend } from './components/RiskOverlay';
 import { SeismicAlertBanner } from '../../components/design-system/SeismicAlertBanner';
 import { trustMapStyle, trustDarkMapStyle } from '../../theme/mapStyles';
@@ -52,7 +53,7 @@ const LazyTsunamiOverlay = React.lazy(() => import('../../components/map/Tsunami
 const LazyAssemblyPoints = React.lazy(() => import('../../components/map/AssemblyPointMarkers').then(m => ({ default: m.AssemblyPointMarkers })));
 const LazyOfflineMapManager = React.lazy(() => import('../../components/map/OfflineMapManager').then(m => ({ default: m.OfflineMapManager })));
 
-import { clusterMarkers, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
+import { createClusterIndex, getClustersAtZoom, isCluster, getZoomLevel, ClusterableMarker, Cluster } from '../../utils/markerClustering';
 import { useViewportData } from '../../hooks/useViewportData';
 import { useCompass } from '../../hooks/useCompass';
 import { useLiveLocation } from '../../hooks/useLiveLocation';
@@ -114,6 +115,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const [hazardZones, setHazardZones] = useState<any[]>([]);
   const [isSampleMapData, setIsSampleMapData] = useState(false);
   const [showOfflineManager, setShowOfflineManager] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // FAZ 3: Live location tracking
   const { location: liveLocation, locationData } = useLiveLocation({
@@ -131,7 +133,6 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   // Region Refs to prevent infinite loops
   const currentRegionRef = useRef<any>(null);
   const isAnimatingRef = useRef(false);
-  const regionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastRegionUpdateTimeRef = useRef<number>(0);
   const isInitialMountRef = useRef(true);
 
@@ -156,10 +157,18 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
     });
 
     // Subscribe to stores
-    const unsubscribeEq = useEarthquakeStore.subscribe((state) => setEarthquakes(state.items));
-    const unsubscribeFam = useFamilyStore.subscribe((state) => setFamilyMembers(state.members));
-    const unsubscribeRescue = useRescueStore.subscribe((state) => setTrappedUsers(state.trappedUsers));
-    const unsubscribeMesh = useMeshStore.subscribe((state) => setMeshPeers(state.peers));
+    const unsubscribeEq = useEarthquakeStore.subscribe((state, prev) => {
+      if (state.items !== prev.items) setEarthquakes(state.items);
+    });
+    const unsubscribeFam = useFamilyStore.subscribe((state, prev) => {
+      if (state.members !== prev.members) setFamilyMembers(state.members);
+    });
+    const unsubscribeRescue = useRescueStore.subscribe((state, prev) => {
+      if (state.trappedUsers !== prev.trappedUsers) setTrappedUsers(state.trappedUsers);
+    });
+    const unsubscribeMesh = useMeshStore.subscribe((state, prev) => {
+      if (state.peers !== prev.peers) setMeshPeers(state.peers);
+    });
 
     // Initial load
     setEarthquakes(useEarthquakeStore.getState().items);
@@ -289,41 +298,47 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   }, [earthquakes, filters.minMagnitude, filters.timeRange]);
 
 
-  // Cluster Logic
-  const clusteredMarkers = useMemo(() => {
-    if (!currentRegionRef.current) return { earthquakes: [], family: [] };
-    const zoomLevel = getZoomLevel(currentRegionRef.current.latitudeDelta);
-
-    const eqMarkers = filteredEarthquakes.map(eq => ({
+  // Cluster Logic — two-phase: build index O(N log N) once, query O(log N) on zoom
+  const eqMarkers = useMemo(() =>
+    filteredEarthquakes.map(eq => ({
       ...eq,
       id: `eq-${eq.id}`,
       latitude: eq.latitude,
       longitude: eq.longitude,
-    }));
+    })),
+    [filteredEarthquakes],
+  );
 
-    const familyMarkers = familyMembers.filter(m => {
+  const familyMarkersList = useMemo(() =>
+    familyMembers.filter(m => {
       const lat = m.location?.latitude ?? m.latitude;
       const lng = m.location?.longitude ?? m.longitude;
-      // ELITE: Filter out invalid coordinates
-      // - Must be numbers
-      // - Must not be 0,0 (null island - indicates missing data)
-      // - Must be within valid GPS ranges
       const isValidLat = typeof lat === 'number' && !isNaN(lat) && lat >= -90 && lat <= 90;
       const isValidLng = typeof lng === 'number' && !isNaN(lng) && lng >= -180 && lng <= 180;
-      const isNotNullIsland = !(lat === 0 && lng === 0); // Exclude 0,0 which means no location
+      const isNotNullIsland = !(lat === 0 && lng === 0);
       return isValidLat && isValidLng && isNotNullIsland;
     }).map(member => ({
       ...member,
       id: `fm-${member.uid}`,
       latitude: member.location?.latitude ?? member.latitude,
       longitude: member.location?.longitude ?? member.longitude,
-    }));
+    })),
+    [familyMembers],
+  );
 
+  // Phase 1: Build Supercluster index only when data changes
+  const eqClusterIndex = useMemo(() => createClusterIndex(eqMarkers), [eqMarkers]);
+  const familyClusterIndex = useMemo(() => createClusterIndex(familyMarkersList), [familyMarkersList]);
+
+  // Phase 2: Query clusters on zoom change — O(log N)
+  const clusteredMarkers = useMemo(() => {
+    if (!currentRegionRef.current) return { earthquakes: [], family: [] };
+    const zoomLevel = getZoomLevel(currentRegionRef.current.latitudeDelta);
     return {
-      earthquakes: clusterMarkers(eqMarkers, zoomLevel),
-      family: clusterMarkers(familyMarkers, zoomLevel),
+      earthquakes: getClustersAtZoom(eqClusterIndex, zoomLevel, eqMarkers),
+      family: getClustersAtZoom(familyClusterIndex, zoomLevel, familyMarkersList),
     };
-  }, [filteredEarthquakes, familyMembers, currentZoom]); // Using currentZoom as proxy for region re-calc
+  }, [eqClusterIndex, familyClusterIndex, eqMarkers, familyMarkersList, currentZoom]);
 
   // UI Handlers
   const handleMarkerPress = useCallback((item: ClusterableMarker) => {
@@ -605,6 +620,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           mode === 'evacuation' && styles.emergencyButtonActive,
         ]}
         onPress={toggleEmergencyMode}
+        accessibilityRole="button"
+        accessibilityLabel={mode === 'evacuation' ? 'Tahliye modunu kapat' : 'Tahliye modunu aç'}
+        accessibilityState={{ selected: mode === 'evacuation' }}
       >
         <Ionicons name="exit" size={24} color="#fff" />
         <Text style={styles.emergencyButtonText}>
@@ -667,6 +685,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             currentMapStyle === 'standard' && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactLight(); setMapStyle('standard'); }}
+          accessibilityRole="button"
+          accessibilityLabel="Standart harita"
+          accessibilityState={{ selected: currentMapStyle === 'standard' }}
         >
           <Ionicons name="map-outline" size={18} color={currentMapStyle === 'standard' ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -676,6 +697,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             currentMapStyle === 'satellite' && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactLight(); setMapStyle('satellite'); }}
+          accessibilityRole="button"
+          accessibilityLabel="Uydu haritası"
+          accessibilityState={{ selected: currentMapStyle === 'satellite' }}
         >
           <Ionicons name="globe-outline" size={18} color={currentMapStyle === 'satellite' ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -685,6 +709,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             currentMapStyle === 'hybrid' && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactLight(); setMapStyle('hybrid'); }}
+          accessibilityRole="button"
+          accessibilityLabel="Hibrit harita"
+          accessibilityState={{ selected: currentMapStyle === 'hybrid' }}
         >
           <Ionicons name="layers-outline" size={18} color={currentMapStyle === 'hybrid' ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -694,6 +721,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             currentMapStyle === 'terrain' && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactLight(); setMapStyle('terrain'); }}
+          accessibilityRole="button"
+          accessibilityLabel="Arazi haritası"
+          accessibilityState={{ selected: currentMapStyle === 'terrain' }}
         >
           <Ionicons name="trail-sign-outline" size={18} color={currentMapStyle === 'terrain' ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -708,6 +738,9 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             is3DMode && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactMedium(); toggle3DMode(); }}
+          accessibilityRole="button"
+          accessibilityLabel="3D mod"
+          accessibilityState={{ selected: is3DMode }}
         >
           <Ionicons name="cube-outline" size={18} color={is3DMode ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -722,6 +755,8 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
             showOfflineManager && styles.mapTypeButtonActive,
           ]}
           onPress={() => { haptics.impactLight(); setShowOfflineManager(true); }}
+          accessibilityRole="button"
+          accessibilityLabel="Offline harita indir"
         >
           <Ionicons name="cloud-download-outline" size={18} color={showOfflineManager ? '#fff' : '#1F4E79'} />
         </Pressable>
@@ -761,7 +796,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
               <SeismicAlertBanner
                 magnitude={(selectedItem as Earthquake).magnitude}
                 location={(selectedItem as Earthquake).location}
-                time={new Date((selectedItem as Earthquake).time).toLocaleTimeString()}
+                time={new Date((selectedItem as Earthquake).time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
                 depth={(selectedItem as Earthquake).depth}
                 onPress={() => {
                   bottomSheetRef.current?.close();
@@ -793,22 +828,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
           {(!selectedItem || !('magnitude' in selectedItem)) && (
             <Pressable
               style={{ marginTop: 24, flexDirection: 'row', alignItems: 'center', opacity: 0.8, justifyContent: 'center' }}
-              onPress={() => {
-                Alert.alert(
-                  'İçeriği Raporla',
-                  'Bu içeriğin hatalı, yanıltıcı veya uygunsuz olduğunu mu düşünüyorsunuz?',
-                  [
-                    { text: 'İptal', style: 'cancel' },
-                    {
-                      text: 'Raporla',
-                      style: 'destructive',
-                      onPress: () => {
-                        Alert.alert('Raporlandı', 'Bildiriminiz alındı. İçerik ekibimiz tarafından incelenecektir.');
-                      },
-                    },
-                  ],
-                );
-              }}
+              onPress={() => setShowReportModal(true)}
             >
               <Ionicons name="flag-outline" size={20} color={colors.emergency.critical} />
               <Text style={{ marginLeft: 8, color: colors.emergency.critical, fontWeight: '600' }}>Şikayet Et / Hata Bildir</Text>
@@ -820,6 +840,15 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       <IncidentReportModal
         bottomSheetRef={incidentModalRef}
         onReportSubmit={handleIncidentReport}
+      />
+
+      {/* UGC Report Modal - Apple Guideline 1.2 compliance */}
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        reportType="community_report"
+        reportedContentId={selectedItem?.id}
+        location={userLocation || undefined}
       />
 
     </View>
@@ -837,6 +866,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.status.danger,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    minHeight: 44,
     borderRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',
@@ -881,6 +911,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
   },
   mapTypeButtonActive: {
     backgroundColor: '#1F4E79',
@@ -927,5 +961,9 @@ const styles = StyleSheet.create({
   evacuationCloseBtn: {
     padding: 8,
     marginLeft: 8,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
   },
 });

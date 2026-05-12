@@ -52,8 +52,8 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
           const cachedIdentityJson = DirectStorage.getString('@afetnet:identity_cache_v4') ?? null;
           if (cachedIdentityJson) {
             const cachedIdentity = JSON.parse(cachedIdentityJson);
-            if (cachedIdentity?.id && cachedIdentity.id !== 'unknown') {
-              singleId = cachedIdentity.id; // AFN-{uid} — the single unified ID
+            if (cachedIdentity?.uid) {
+              singleId = cachedIdentity.uid; // Use the V4 UID as the single valid identifier
             }
           }
         } catch {

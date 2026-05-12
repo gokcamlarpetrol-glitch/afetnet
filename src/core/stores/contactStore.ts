@@ -15,11 +15,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { DirectStorage } from '../utils/storage';
-import { getAuth } from 'firebase/auth';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirebaseAuth } from '../../lib/firebase';
 import { contactService, Contact, BlockedContact } from '../services/ContactService';
 import { identityService } from '../services/IdentityService';
 import { createLogger } from '../utils/logger';
+import { readCachedAuthUid } from '../utils/authSessionCache';
 
 const logger = createLogger('ContactStore');
 const CONTACT_STORE_KEY_BASE = 'afetnet-contacts-v2';
@@ -27,13 +27,17 @@ const CONTACT_STORE_GUEST_SCOPE = 'guest';
 
 const getContactStoreScope = (): string => {
     try {
-        const app = initializeFirebase();
-        if (!app) return CONTACT_STORE_GUEST_SCOPE;
-        const uid = getAuth(app).currentUser?.uid;
-        return uid ? `user:${uid}` : CONTACT_STORE_GUEST_SCOPE;
+        const identityUid = identityService.getUid();
+        if (identityUid) return `user:${identityUid}`;
+
+        const uid = getFirebaseAuth()?.currentUser?.uid ?? null;
+        if (uid) return `user:${uid}`;
     } catch {
-        return CONTACT_STORE_GUEST_SCOPE;
+        // best effort fallback below
     }
+
+    const cachedUid = readCachedAuthUid();
+    return cachedUid ? `user:${cachedUid}` : CONTACT_STORE_GUEST_SCOPE;
 };
 
 const getScopedContactStoreKey = (base: string): string => `${base}:${getContactStoreScope()}`;
@@ -46,16 +50,11 @@ const scopedContactStoreStorage = {
             return scopedData;
         }
 
-        // One-time migration from legacy global store key.
-        const legacyData = DirectStorage.getString(name) ?? null;
-        if (!legacyData) {
-            return null;
-        }
-
-        try { DirectStorage.setString(scopedKey, legacyData); } catch { /* best effort */ }
-        try { DirectStorage.delete(name); } catch { /* best effort */ }
-        logger.info(`♻️ ContactStore cache migrated to ${scopedKey}`);
-        return legacyData;
+        // CRITICAL FIX: Do NOT migrate legacy global keys — they may belong to a
+        // different user account, causing cross-account data bleed (privacy breach).
+        // This matches the pattern used by messageStore (readScopedStorage).
+        // Legacy data is orphaned; each account starts fresh with scoped storage.
+        return null;
     },
     setItem: (name: string, value: string): void => {
         DirectStorage.setString(getScopedContactStoreKey(name), value);

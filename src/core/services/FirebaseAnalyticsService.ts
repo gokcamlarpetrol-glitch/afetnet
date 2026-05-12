@@ -233,21 +233,23 @@ class FirebaseAnalyticsService {
   }
 
   /**
-   * ELITE: Flush stored events (upload to backend or Firebase)
+   * Flush stored events - events are kept locally for diagnostic purposes.
+   * No remote upload endpoint is configured; events accumulate in local storage
+   * and are trimmed to MAX_STORED_EVENTS to avoid unbounded growth.
    */
   private async flushStoredEvents() {
     if (this.eventQueue.length === 0) return;
 
     try {
-      // In production, upload to backend analytics endpoint
-      // For now, log them (can be extended to upload to custom backend)
-      if (__DEV__) {
-        logger.info(`Flushing ${this.eventQueue.length} stored analytics events`);
+      // Events are stored locally only. Trim to limit and persist.
+      if (this.eventQueue.length > MAX_STORED_EVENTS) {
+        this.eventQueue = this.eventQueue.slice(-MAX_STORED_EVENTS);
       }
+      await this.saveStoredEvents();
 
-      // Clear queue after flush
-      this.eventQueue = [];
-      DirectStorage.delete(ANALYTICS_STORAGE_KEY);
+      if (__DEV__) {
+        logger.info(`Analytics: ${this.eventQueue.length} events stored locally`);
+      }
     } catch (error) {
       logger.error('Failed to flush stored events:', error);
     }
@@ -432,6 +434,20 @@ class FirebaseAnalyticsService {
    */
   async flush() {
     await this.flushStoredEvents();
+  }
+
+  /**
+   * Cleanup: flush pending events and clear storage key.
+   * Call on logout/shutdown to prevent cross-account analytics leak.
+   */
+  async cleanup() {
+    await this.flushStoredEvents();
+    this.eventQueue = [];
+    this.performanceMetrics.clear();
+    this.customMetrics.clear();
+    DirectStorage.delete(ANALYTICS_STORAGE_KEY);
+    this.isInitialized = false;
+    this.isEnabled = false;
   }
 }
 

@@ -25,10 +25,13 @@ import {
     arrayUnion,
     arrayRemove,
     deleteField,
+    increment,
+    writeBatch,
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('FirebaseGroupOps');
 const TIMEOUT_MS = 10000;
@@ -47,12 +50,16 @@ export interface GroupConversation {
     createdBy: string;
     createdAt: number;
     updatedAt: number;
-    lastMessage?: {
+    // lastMessage: string (new format from sendGroupMessage) or object (legacy format).
+    // Readers must handle both: typeof lastMessage === 'string' ? lastMessage : lastMessage?.content
+    lastMessage?: string | {
         content: string;
         from: string;
         fromName: string;
         timestamp: number;
     };
+    lastMessageAt?: number;
+    lastMessageSenderName?: string;
     avatarUrl?: string;
     unreadCount?: number;
 }
@@ -102,9 +109,51 @@ async function withTimeout<T>(
     }
 }
 
+async function upsertGroupInboxThreads(
+    conversationId: string,
+    participantUids: string[],
+    senderUid: string,
+    preview: string,
+    senderName: string,
+    timestamp: number,
+    incrementUnread: boolean = true,
+): Promise<void> {
+    try {
+        const db = await getFirestoreInstanceAsync();
+        if (!db) return;
+
+        const uniqueUids = Array.from(new Set(participantUids.filter((uid) => typeof uid === 'string' && uid.trim().length > 0)));
+        if (uniqueUids.length === 0) return;
+
+        const writes = uniqueUids.map(async (uid) => {
+            const threadRef = doc(db, 'user_inbox', uid, 'threads', conversationId);
+            const isSender = uid === senderUid;
+            await setDoc(threadRef, {
+                conversationId,
+                conversationType: 'group',
+                isGroup: true,
+                lastMessagePreview: preview.substring(0, 100),
+                lastMessageSenderName: senderName,
+                lastMessageAt: timestamp,
+                updatedAt: Date.now(),
+                ...(!isSender && incrementUnread ? { unreadCount: increment(1) } : {}),
+            }, { merge: true });
+        });
+
+        const results = await Promise.allSettled(writes);
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                logger.warn(`Group inbox write failed for ${uniqueUids[index]} in ${conversationId}:`, result.reason);
+            }
+        });
+    } catch (error) {
+        logger.warn(`Group inbox thread sync failed for ${conversationId}:`, error);
+    }
+}
+
 function getMyUid(): string | null {
     try {
-        const authUid = getAuth().currentUser?.uid;
+        const authUid = getFirebaseAuth()?.currentUser?.uid;
         if (authUid) return authUid;
         // CRITICAL FIX: Fallback to identityService when getAuth().currentUser is temporarily null
         // (cold start, token refresh). identityService reads UID from MMKV cache.
@@ -130,14 +179,38 @@ export async function createGroupConversation(
         const db = await getFirestoreInstanceAsync();
         if (!db) return false;
 
+        const normalizedParticipants = Array.from(
+            new Set(
+                (Array.isArray(data.participants) ? data.participants : [])
+                    .map((uid) => (typeof uid === 'string' ? uid.trim() : ''))
+                    .filter((uid) => uid.length > 0 && isLikelyFirebaseUid(uid)),
+            ),
+        );
+        if (normalizedParticipants.length < 2) {
+            logger.warn(`createGroupConversation skipped: invalid participant count (${normalizedParticipants.length}) for ${data.id}`);
+            return false;
+        }
+
         const ref = doc(db, 'conversations', data.id);
         await withTimeout(
             () => setDoc(ref, {
                 ...data,
+                participants: normalizedParticipants,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
             }),
             'createGroupConversation',
+        );
+
+        // Keep group discoverable in inbox-based flows from first render.
+        await upsertGroupInboxThreads(
+            data.id,
+            normalizedParticipants,
+            data.createdBy,
+            `${data.name} grubu oluşturuldu`,
+            data.participantNames?.[data.createdBy] || 'Sistem',
+            Date.now(),
+            false,
         );
 
         logger.info(`✅ Group created: ${data.name} (${data.participants.length} members)`);
@@ -217,6 +290,35 @@ export async function addGroupMember(
             'addGroupMember',
         );
 
+        // Ensure newly added member immediately sees the group thread in inbox flows.
+        try {
+            const updatedSnap = await getDoc(ref);
+            const rawLastMessage = updatedSnap.data()?.lastMessage;
+            // CRITICAL FIX: lastMessage may be a string (new format) or object (old format).
+            const preview = typeof rawLastMessage === 'string'
+                ? rawLastMessage
+                : (typeof rawLastMessage === 'object' && rawLastMessage !== null && typeof (rawLastMessage as any).content === 'string'
+                    ? (rawLastMessage as any).content
+                    : `${memberName} gruba eklendi`);
+            const senderName = typeof rawLastMessage === 'object' && rawLastMessage !== null && typeof (rawLastMessage as any).fromName === 'string'
+                ? (rawLastMessage as any).fromName
+                : (updatedSnap.data()?.lastMessageSenderName || 'Sistem');
+            const timestamp = typeof rawLastMessage === 'object' && rawLastMessage !== null && typeof (rawLastMessage as any).timestamp === 'number'
+                ? (rawLastMessage as any).timestamp
+                : (updatedSnap.data()?.lastMessageAt || Date.now());
+            await upsertGroupInboxThreads(
+                conversationId,
+                [memberUid],
+                getMyUid() || '',
+                preview,
+                senderName,
+                timestamp,
+                false,
+            );
+        } catch (inboxError) {
+            logger.warn(`addGroupMember: inbox bootstrap failed for ${memberUid}`, inboxError);
+        }
+
         logger.info(`Member ${memberName} added to group ${conversationId}`);
         return true;
     } catch (error) {
@@ -271,6 +373,23 @@ export async function sendGroupMessage(
 
         const msgRef = doc(db, 'conversations', conversationId, 'messages', message.id);
         const convRef = doc(db, 'conversations', conversationId);
+
+        // CRITICAL FIX: Fetch participants for inbox updates, but don't block message
+        // write if the conversation doc is temporarily unavailable (replication lag,
+        // index propagation delay). The message write itself only needs the conversation
+        // ID, not the participants list. Inbox updates are best-effort (CF backup exists).
+        let participants: string[] = [];
+        try {
+            const convSnap = await getDoc(convRef);
+            if (convSnap.exists()) {
+                const participantsRaw = convSnap.data()?.participants;
+                participants = Array.isArray(participantsRaw) ? participantsRaw : [];
+            } else {
+                logger.warn(`sendGroupMessage: conversation ${conversationId} not found — writing message anyway, inbox sync deferred to CF`);
+            }
+        } catch (convFetchError) {
+            logger.warn(`sendGroupMessage: failed to fetch conversation ${conversationId} — writing message anyway:`, convFetchError);
+        }
         const messageForWrite = {
             ...message,
             senderUid: message.senderUid || message.from,
@@ -282,16 +401,32 @@ export async function sendGroupMessage(
             () => Promise.all([
                 setDoc(msgRef, messageForWrite),
                 updateDoc(convRef, {
-                    lastMessage: {
-                        content: messageForWrite.content.substring(0, 100),
-                        from: messageForWrite.from,
-                        fromName: messageForWrite.fromName,
-                        timestamp: messageForWrite.timestamp,
-                    },
+                    type: 'group',
+                    // CRITICAL FIX: lastMessage must be a STRING, not an object.
+                    // DM conversations (FirebaseMessageOperations.saveMessage) write
+                    // lastMessage as a string. HybridMessageService, MessagesScreen,
+                    // and GroupChatService all read data.lastMessage as a string.
+                    // Writing an object here caused "[object Object]" to display
+                    // in conversation previews for group messages.
+                    lastMessage: messageForWrite.content.substring(0, 100),
+                    lastMessageSenderName: messageForWrite.fromName || '',
+                    lastMessageAt: messageForWrite.timestamp,
                     updatedAt: Date.now(),
                 }),
             ]),
             'sendGroupMessage',
+        );
+
+        // CRITICAL: Do NOT increment unread here — Cloud Function onNewConversationMessageV3
+        // already handles unread count via syncConversationInboxV3. Client + CF = double count.
+        await upsertGroupInboxThreads(
+            conversationId,
+            participants,
+            messageForWrite.senderUid || messageForWrite.from,
+            messageForWrite.content || '',
+            messageForWrite.fromName || 'Grup',
+            messageForWrite.timestamp || Date.now(),
+            false,
         );
 
         logger.debug(`Group message sent: ${message.id} → ${conversationId}`);
@@ -353,62 +488,119 @@ export function subscribeToGroupMessages(
 ): () => void {
     let unsubscribe: (() => void) | null = null;
     let isDisposed = false;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 5;
 
-    (async () => {
+    const clearActiveSubscription = () => {
+        if (!unsubscribe) return;
         try {
-            if (isDisposed) return;
-            const db = await getFirestoreInstanceAsync();
-            if (!db) return;
-            if (isDisposed) return;
-
-            const msgsRef = collection(db, 'conversations', conversationId, 'messages');
-            const q = query(msgsRef, orderBy('timestamp', 'asc'));
-
-            const snapshotUnsubscribe = onSnapshot(
-                q,
-                (snap) => {
-                    const messages: GroupMessage[] = [];
-                    snap.forEach((d) => {
-                        const data = d.data() as Partial<GroupMessage> & { senderUid?: string };
-                        const from = (typeof data.from === 'string' && data.from) || data.senderUid || '';
-                        messages.push({
-                            ...(data as GroupMessage),
-                            id: d.id,
-                            from,
-                            senderUid: data.senderUid || from,
-                        });
-                    });
-                    callback(messages);
-                },
-                (error) => {
-                    logger.error(`Group message subscription error for ${conversationId}:`, error);
-                    onError?.(error as Error);
-                },
-            );
-
-            if (isDisposed) {
-                try {
-                    snapshotUnsubscribe();
-                } catch {
-                    // no-op
-                }
-                return;
-            }
-
-            unsubscribe = snapshotUnsubscribe;
-        } catch (error) {
-            logger.error('subscribeToGroupMessages setup failed:', error);
-            onError?.(error as Error);
+            unsubscribe();
+        } catch {
+            // no-op
         }
-    })();
+        unsubscribe = null;
+    };
+
+    const scheduleRetry = (origin: string, rawError: unknown) => {
+        const error = rawError as Error;
+        const code = (rawError as any)?.code || '';
+        const message = typeof error?.message === 'string' ? error.message : String(rawError || '');
+        const permissionDenied = code === 'permission-denied' || message.includes('permission');
+
+        if (permissionDenied) {
+            logger.warn(`Group message subscription permission denied for ${conversationId} (${origin})`);
+            onError?.(error);
+            return;
+        }
+
+        if (isDisposed) return;
+        if (retryCount >= MAX_RETRIES) {
+            logger.error(`Group message subscription exhausted retries for ${conversationId} (${origin})`);
+            onError?.(error);
+            return;
+        }
+
+        retryCount++;
+        const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 15000);
+        logger.warn(
+            `Group message subscription retry ${retryCount}/${MAX_RETRIES} in ${delay}ms for ${conversationId} (${origin})`,
+        );
+
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (isDisposed) return;
+            setupSubscription().catch((setupError) => {
+                logger.error(`Group message subscription setup retry failed for ${conversationId}:`, setupError);
+                scheduleRetry('setup-retry', setupError);
+            });
+        }, delay);
+    };
+
+    const setupSubscription = async (): Promise<void> => {
+        if (isDisposed) return;
+        const db = await getFirestoreInstanceAsync();
+        if (!db) {
+            throw new Error('Firestore unavailable for group message subscription');
+        }
+        if (isDisposed) return;
+
+        const msgsRef = collection(db, 'conversations', conversationId, 'messages');
+        const q = query(msgsRef, orderBy('timestamp', 'asc'));
+
+        clearActiveSubscription();
+
+        const snapshotUnsubscribe = onSnapshot(
+            q,
+            (snap) => {
+                // Stream is healthy again.
+                retryCount = 0;
+
+                const messages: GroupMessage[] = [];
+                snap.forEach((d) => {
+                    const data = d.data() as Partial<GroupMessage> & { senderUid?: string };
+                    const from = (typeof data.from === 'string' && data.from) || data.senderUid || '';
+                    messages.push({
+                        ...(data as GroupMessage),
+                        id: d.id,
+                        from,
+                        senderUid: data.senderUid || from,
+                    });
+                });
+                callback(messages);
+            },
+            (error) => {
+                logger.error(`Group message subscription error for ${conversationId}:`, error);
+                scheduleRetry('snapshot', error);
+            },
+        );
+
+        if (isDisposed) {
+            try {
+                snapshotUnsubscribe();
+            } catch {
+                // no-op
+            }
+            return;
+        }
+
+        unsubscribe = snapshotUnsubscribe;
+    };
+
+    setupSubscription().catch((error) => {
+        logger.error(`subscribeToGroupMessages setup failed for ${conversationId}:`, error);
+        scheduleRetry('setup', error);
+    });
 
     // Return cleanup function
     return () => {
         isDisposed = true;
-        if (unsubscribe) {
-            unsubscribe();
-            unsubscribe = null;
+        if (retryTimer) {
+            clearTimeout(retryTimer);
+            retryTimer = null;
         }
+        clearActiveSubscription();
     };
 }
 
@@ -436,6 +628,38 @@ export async function markGroupMessageRead(
         // Read receipts are best-effort
         logger.debug('markGroupMessageRead failed:', error);
         return false;
+    }
+}
+
+/**
+ * Mark multiple messages as read in a single batch write.
+ * Uses writeBatch to avoid N+1 sequential Firestore writes.
+ */
+export async function markGroupMessagesReadBatch(
+    conversationId: string,
+    messageIds: string[],
+): Promise<void> {
+    if (messageIds.length === 0) return;
+    try {
+        const uid = getMyUid();
+        if (!uid) return;
+
+        const db = await getFirestoreInstanceAsync();
+        if (!db) return;
+
+        // Firestore batch limit is 500 operations
+        const BATCH_LIMIT = 450;
+        for (let i = 0; i < messageIds.length; i += BATCH_LIMIT) {
+            const chunk = messageIds.slice(i, i + BATCH_LIMIT);
+            const batch = writeBatch(db);
+            for (const msgId of chunk) {
+                const msgRef = doc(db, 'conversations', conversationId, 'messages', msgId);
+                batch.update(msgRef, { [`readBy.${uid}`]: Date.now() });
+            }
+            await batch.commit();
+        }
+    } catch (error) {
+        logger.debug('markGroupMessagesReadBatch failed:', error);
     }
 }
 
@@ -476,11 +700,26 @@ export function subscribeToMyGroupConversations(
                 q,
                 (snap) => {
                     const conversations: GroupConversation[] = [];
-                    snap.forEach((d) => conversations.push({ id: d.id, ...d.data() } as GroupConversation));
+                    snap.forEach((d) => {
+                        const data = d.data() as Partial<GroupConversation>;
+                        const isGroup = data.type === 'group' || d.id.startsWith('grp_');
+                        if (!isGroup) return;
+                        const participants = Array.isArray(data.participants) ? data.participants : [];
+                        if (participants.length < 2) return;
+                        conversations.push({ id: d.id, ...data } as GroupConversation);
+                    });
                     // Sort by last message time (most recent first)
-                    conversations.sort((a, b) =>
-                        (b.lastMessage?.timestamp || b.updatedAt) - (a.lastMessage?.timestamp || a.updatedAt),
-                    );
+                    // CRITICAL FIX: lastMessage may be a string (new format) — use lastMessageAt
+                    // which is always set alongside lastMessage by sendGroupMessage.
+                    conversations.sort((a, b) => {
+                        const aTime = a.lastMessageAt
+                            || (typeof a.lastMessage === 'object' && a.lastMessage !== null ? a.lastMessage.timestamp : 0)
+                            || a.updatedAt;
+                        const bTime = b.lastMessageAt
+                            || (typeof b.lastMessage === 'object' && b.lastMessage !== null ? b.lastMessage.timestamp : 0)
+                            || b.updatedAt;
+                        return bTime - aTime;
+                    });
                     callback(conversations);
                 },
                 (error) => {

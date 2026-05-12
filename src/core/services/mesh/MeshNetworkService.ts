@@ -35,6 +35,13 @@ import { meshStoreForwardService } from './MeshStoreForwardService';
 import { meshEmergencyService, EmergencyReasonCode } from './MeshEmergencyService';
 import { Buffer } from 'buffer';
 import { highPerformanceBle, BlePeer } from '../../ble/HighPerformanceBle';
+import {
+  AFETNET_CHAR_MSG_UUID,
+  AFETNET_CHAR_CHUNK_UUID,
+  AFETNET_CHAR_SOS_UUID,
+  AFETNET_CHAR_LOCATION_UUID,
+  MAX_CHUNK_SIZE,
+} from '../../ble/constants';
 import { AppState, AppStateStatus } from 'react-native';
 import { DirectStorage } from '../../utils/storage';
 import { LRUSet } from '../../utils/LRUCache';
@@ -42,7 +49,9 @@ import { sanitizeMessage } from '../../utils/messageSanitizer';
 import { cryptoService } from '../CryptoService';
 import { identityService } from '../IdentityService';
 import { meshCompressionService } from './MeshCompressionService';
+import { meshCryptoService } from './MeshCryptoService';
 import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
+import { getInstallationId as getInstallationIdFromLib } from '../../../lib/installationId';
 import {
   BLE_SCAN_DURATION_MS,
   BLE_ADVERTISE_DURATION_MS,
@@ -52,6 +61,7 @@ import {
   MESSAGE_DEFAULT_TTL,
   MAX_SEEN_MESSAGE_IDS,
   STORAGE_KEYS,
+  getAdaptiveTTL,
 } from '../messaging/constants';
 
 const logger = createLogger('MeshNetworkService');
@@ -81,6 +91,9 @@ interface PendingMeshPacket {
   ttl: number;
   priority: MeshPriority;
   messageId: number;
+  enqueuedAt: number; // Timestamp for TTL-based expiry
+  sourceIdOverride?: string; // For relay: use original sender's ID instead of this.myId
+  originalStringId?: string; // Original UUID message ID for MeshStore ACK status updates
 }
 
 // ===========================================================================
@@ -130,17 +143,44 @@ interface SentChunkCacheEntry {
   messageId: number;
 }
 
+// ===========================================================================
+// MESH ENCRYPTION ENVELOPE
+// ===========================================================================
+// Encrypted messages are wrapped in a JSON envelope that the receiver can
+// detect via the `_enc` marker field.
+//
+// Broadcast encryption (any mesh peer can decrypt):
+//   { "_enc": 1, "ct": "<nonce_b64>:<ciphertext_b64>", "k": "<key_b64>" }
+//
+// Peer-to-peer encryption (only peers with shared secret can decrypt):
+//   { "_enc": 2, "ep": { ciphertext, iv, authTag, senderId, keyVersion } }
+//
+// Plaintext fallback (no marker):
+//   { "id": "...", "from": "...", ... }   (original envelope format)
+
+const ENC_BROADCAST = 1;
+const ENC_PEER = 2;
+
 class MeshNetworkService {
   // Identity
   private myId: string = '';
   private physicalDeviceId: string | null = null;
+  private installationId: string | null = null;
   private recipientAliases: Set<string> = new Set(['me']);
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
 
   // State
   private isRunning = false;
-  private isRealMode = false;
+  // CRITICAL FIX: Default to true so broadcastPacket() always attempts real BLE.
+  // Previously defaulted to false (simulation mode), which meant if startRealBLE()
+  // failed/threw (BLE permissions denied, Bluetooth off), isRealMode was never set
+  // to true — but isRunning WAS true. All subsequent broadcastPacket() calls returned
+  // success in simulation mode, silently dropping EVERY packet. This made offline
+  // SOS and messaging appear to work (all channels report "sent") but NOTHING was
+  // actually transmitted over BLE. With true as default, broadcastPacket() will
+  // properly check isBluetoothPoweredOn() and defer packets when BLE isn't ready.
+  private isRealMode = true;
   private isActive = true; // P8: AppState tracking
 
   // M1: Store all timer IDs for cleanup
@@ -165,6 +205,10 @@ class MeshNetworkService {
   // P8: AppState subscription
   private appStateSubscription: { remove: () => void } | null = null;
 
+  // GATT incoming data listener cleanup
+  private incomingDataUnsubscribe: (() => void) | null = null;
+  private ackReceivedUnsubscribe: (() => void) | null = null;
+
   // BLE chunk reassembly state
   private chunkReassembly: Map<string, ChunkReassemblyState> = new Map();
   private chunkCleanupTimer: NodeJS.Timeout | null = null;
@@ -180,6 +224,11 @@ class MeshNetworkService {
     lastPeerActivity: 0,
   };
 
+  // Throttle store-forward delivery checks on scan re-discovery (Bug 8 fix)
+  // Scan fires many times per second per peer — limit delivery checks to once per 10s per peer
+  private lastDeliveryCheckAt: Map<string, number> = new Map();
+  private static readonly DELIVERY_CHECK_THROTTLE_MS = 10_000;
+
   // P7: Adaptive heartbeat state
   private currentHeartbeatInterval = ADAPTIVE_TIMING.DEFAULT_HEARTBEAT_MS;
 
@@ -187,7 +236,9 @@ class MeshNetworkService {
     this.myId = 'me-' + Math.floor(Math.random() * 10000).toString(16);
     this.seenMessageIds = new LRUSet<string>(MAX_SEEN_MESSAGE_IDS);
     this.rebuildRecipientAliases();
-    this.loadQueues();
+    // FIX: Removed loadQueues() — myId is a random placeholder here, not the real UID.
+    // Queue storage is user-scoped, so loading here reads from a nonexistent key.
+    // initialize() calls loadQueues() after setting the real UID (line ~308).
   }
 
   /**
@@ -234,6 +285,15 @@ class MeshNetworkService {
         // Keep existing IDs fallback
       }
 
+      try {
+        const stableInstallationId = await getInstallationIdFromLib();
+        if (stableInstallationId) {
+          this.installationId = stableInstallationId;
+        }
+      } catch {
+        // Keep existing IDs fallback
+      }
+
       if (!this.myId) {
         if (this.physicalDeviceId) {
           this.myId = this.physicalDeviceId;
@@ -259,8 +319,19 @@ class MeshNetworkService {
       await meshStoreForwardService.initialize(this.myId);
       await meshEmergencyService.initialize(this.myId);
 
-      // V4: Listen for ACK events
-      meshStoreForwardService.onACKReceived((msgId) => {
+      // V4: Initialize encryption service (best-effort — mesh works without it)
+      try {
+        await meshCryptoService.initialize();
+        logger.info('MeshCryptoService initialized for encrypted mesh');
+      } catch (cryptoErr) {
+        logger.warn('MeshCryptoService init failed (mesh will use plaintext):', cryptoErr);
+      }
+
+      // V4: Listen for ACK events — store unsubscribe to prevent leak on re-init
+      if (this.ackReceivedUnsubscribe) {
+        this.ackReceivedUnsubscribe();
+      }
+      this.ackReceivedUnsubscribe = meshStoreForwardService.onACKReceived((msgId) => {
         logger.debug(`ACK received for message ${msgId}`);
       });
 
@@ -364,12 +435,25 @@ class MeshNetworkService {
     this.sentChunkCache.clear();
     this.cleanupTimers.forEach(timer => clearTimeout(timer));
     this.cleanupTimers.clear();
+    // NOTE: Do NOT clear messageListeners here — they are NOT timers.
+    // HybridMessageService and MeshMessageBridge register listeners once via onMessage()
+    // and have guards (meshSubscribed, isSubscribed) that prevent re-registration.
+    // Clearing them on stop() means they're lost forever after a stop/start cycle,
+    // causing ALL incoming mesh messages to be silently dropped.
+    if (this.incomingDataUnsubscribe) {
+      this.incomingDataUnsubscribe();
+      this.incomingDataUnsubscribe = null;
+    }
   }
 
   /**
    * P8: Setup AppState listener for background handling
    */
   private setupAppStateListener(): void {
+    // CRITICAL FIX: Remove existing listener before adding new one to prevent duplicates
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+    }
     this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
   }
 
@@ -393,8 +477,8 @@ class MeshNetworkService {
       clearTimeout(this.loopTimer);
       this.loopTimer = null;
     }
-    // Save queues
-    this.saveQueues();
+    // Save queues synchronously (saveQueues uses synchronous DirectStorage)
+    this.saveQueues().catch(e => { if (__DEV__) logger.debug('Mesh: save queues on background failed:', e); });
   }
 
   private resumeFromBackground(): void {
@@ -436,13 +520,78 @@ class MeshNetworkService {
       meshType: type,
     });
     const { to, from: senderId } = envelope;
-    const payload = Buffer.from(JSON.stringify(envelope), 'utf-8');
+
+    // --- ENCRYPTION LAYER ---
+    // Encrypt the envelope before transmission. Best-effort: if encryption
+    // fails for any reason, fall back to plaintext to guarantee delivery.
+    // This is a life-saving app — message delivery MUST NOT break.
+    // CRITICAL: When plaintext fallback is used, embed `_unencrypted: true` in the
+    // envelope so the receiver knows the message was NOT encrypted. This prevents
+    // silently pretending a plaintext message is encrypted.
+    let isEncrypted = false;
+    const envelopeJson = JSON.stringify(envelope);
+    let wirePayload: string = envelopeJson; // default: plaintext fallback
+
+    try {
+      if (meshCryptoService.getIsInitialized()) {
+        const recipientId = to && to !== 'broadcast' && !to.startsWith('group:') ? to : null;
+
+        if (recipientId && meshCryptoService.isPeerEncryptionReady(recipientId)) {
+          // Peer-to-peer encryption (shared secret via ECDH key exchange)
+          const encrypted = await meshCryptoService.encryptMessage(recipientId, envelopeJson);
+          if (encrypted) {
+            wirePayload = JSON.stringify({ _enc: ENC_PEER, ep: encrypted });
+            isEncrypted = true;
+            logger.debug(`Message encrypted (peer-to-peer) for ${recipientId.slice(0, 8)}`);
+          } else {
+            logger.debug('Peer encryption returned null, falling back to broadcast encryption');
+            // Fall through to broadcast encryption
+            const broadcastResult = await meshCryptoService.encryptBroadcast(envelopeJson);
+            if (broadcastResult) {
+              wirePayload = JSON.stringify({ _enc: ENC_BROADCAST, ct: broadcastResult.ciphertext, k: broadcastResult.key });
+              isEncrypted = true;
+              logger.debug('Message encrypted (broadcast fallback)');
+            }
+          }
+        } else {
+          // Broadcast encryption (symmetric key travels with message)
+          const broadcastResult = await meshCryptoService.encryptBroadcast(envelopeJson);
+          if (broadcastResult) {
+            wirePayload = JSON.stringify({ _enc: ENC_BROADCAST, ct: broadcastResult.ciphertext, k: broadcastResult.key });
+            isEncrypted = true;
+            logger.debug('Message encrypted (broadcast)');
+          }
+        }
+      }
+    } catch (encryptionError) {
+      // CRITICAL: Never let encryption failure prevent message delivery
+      logger.warn('Encryption failed, sending plaintext (emergency fallback):', encryptionError);
+      isEncrypted = false;
+    }
+
+    // If encryption was not applied, mark the envelope so the receiver knows
+    // this message traveled as plaintext. In emergency situations, plaintext
+    // delivery is better than no delivery — but receivers should be informed.
+    if (!isEncrypted) {
+      logger.warn(`Mesh message ${messageId.substring(0, 8)} sent as PLAINTEXT (encryption ${meshCryptoService.getIsInitialized() ? 'failed' : 'not initialized'})`);
+      // Re-serialize envelope with _unencrypted flag for receiver awareness
+      const plaintextEnvelope = { ...envelope, _unencrypted: true };
+      wirePayload = JSON.stringify(plaintextEnvelope);
+    }
+
+    const payload = Buffer.from(wirePayload, 'utf-8');
+    // SPRINT 17: Adaptive TTL — SOS = 15 hops, Family = 8, General = 4.
+    // Without this, all messages used same MESSAGE_DEFAULT_TTL (5), which under-served
+    // SOS reach and over-served general chat (battery/bandwidth waste).
+    const adaptiveTtl = getAdaptiveTTL(type);
     const queuePacket: PendingMeshPacket = {
       type,
       payloadBase64: payload.toString('base64'),
-      ttl: MESSAGE_DEFAULT_TTL,
+      ttl: adaptiveTtl,
       priority: this.getMeshPriority(type),
       messageId: this.toMessageIdUInt32(messageId),
+      enqueuedAt: Date.now(),
+      originalStringId: messageId, // Preserve UUID for MeshStore ACK status updates
     };
 
     // Media transfer control packets are transport-level and must not appear in chat UI.
@@ -464,10 +613,11 @@ class MeshNetworkService {
           timestamp: envelope.timestamp,
           hops: 0,
           status: 'sending',
-          ttl: MESSAGE_DEFAULT_TTL,
+          ttl: adaptiveTtl,
           priority: this.getStorePriority(type),
           acks: [],
           retryCount: 0,
+          isEncrypted,
           ...(envelope.mediaType ? { mediaType: envelope.mediaType } : {}),
           ...(envelope.mediaUrl ? { mediaUrl: envelope.mediaUrl } : {}),
           ...(typeof envelope.mediaDuration === 'number' ? { mediaDuration: envelope.mediaDuration } : {}),
@@ -478,18 +628,18 @@ class MeshNetworkService {
       }
     }
 
-    // Add to appropriate queue
+    // Add to appropriate queue and trigger immediate processing.
+    // Previously only SOS triggered processQueues(); all other types waited
+    // up to 1s for the next runLoop tick, adding unnecessary latency.
     if (type === MeshMessageType.SOS) {
       this.criticalQueue.push(queuePacket);
-      // Force immediate processing for SOS
-      this.processQueues();
+    } else if (queuePacket.priority === MeshPriority.HIGH) {
+      this.highQueue.push(queuePacket);
     } else {
-      if (queuePacket.priority === MeshPriority.HIGH) {
-        this.highQueue.push(queuePacket);
-      } else {
-        this.normalQueue.push(queuePacket);
-      }
+      this.normalQueue.push(queuePacket);
     }
+    // Force immediate processing for all message types
+    this.processQueues();
 
     // Save queues
     this.saveQueues();
@@ -566,7 +716,10 @@ class MeshNetworkService {
         relay: this.serializeQueue(this.relayQueue),
         seenIds: this.seenMessageIds.toArray(),
       });
-      DirectStorage.setString(STORAGE_KEYS.MESH_QUEUE, data);
+      // CRITICAL FIX: User-scoped storage key to prevent cross-account data leak.
+      // Without this, account switch causes the new user to send old user's queued mesh packets.
+      const scopedKey = this.myId ? `${STORAGE_KEYS.MESH_QUEUE}_${this.myId}` : STORAGE_KEYS.MESH_QUEUE;
+      DirectStorage.setString(scopedKey, data);
     } catch (e) {
       logger.error('Failed to save queues', e);
     }
@@ -574,7 +727,8 @@ class MeshNetworkService {
 
   private async loadQueues(): Promise<void> {
     try {
-      const data = DirectStorage.getString(STORAGE_KEYS.MESH_QUEUE) ?? null;
+      const scopedKey = this.myId ? `${STORAGE_KEYS.MESH_QUEUE}_${this.myId}` : STORAGE_KEYS.MESH_QUEUE;
+      const data = DirectStorage.getString(scopedKey) ?? null;
       if (data) {
         const parsed = JSON.parse(data);
         this.criticalQueue = this.deserializeQueue(parsed.critical);
@@ -634,6 +788,7 @@ class MeshNetworkService {
         ttl: packet.ttl,
         priority: packet.priority as MeshPriority,
         messageId: packet.messageId,
+        enqueuedAt: (packet as any).enqueuedAt ?? Date.now(),
       };
     }
 
@@ -654,6 +809,7 @@ class MeshNetworkService {
           ? legacyMessageId
           : Date.now().toString(),
       ),
+      enqueuedAt: Date.now(),
     };
   }
 
@@ -765,10 +921,26 @@ class MeshNetworkService {
 
     const identity = identityService.getIdentity();
     const identityUid = this.normalizeRecipientId(identity?.uid);
+    const identityPublicCode = this.normalizeRecipientId(identity?.publicUserCode);
     const physicalId = this.normalizeRecipientId(this.physicalDeviceId);
+    const installationId = this.normalizeRecipientId(this.installationId);
 
     if (identityUid) aliases.add(identityUid);
+    if (identityPublicCode) aliases.add(identityPublicCode);
     if (physicalId) aliases.add(physicalId);
+    if (installationId) aliases.add(installationId);
+
+    try {
+      const identityAliases = (identityService as any)?.getAliases?.();
+      if (Array.isArray(identityAliases)) {
+        for (const alias of identityAliases) {
+          const normalizedAlias = this.normalizeRecipientId(alias);
+          if (normalizedAlias) aliases.add(normalizedAlias);
+        }
+      }
+    } catch {
+      // best effort
+    }
 
     this.recipientAliases = aliases;
   }
@@ -791,7 +963,11 @@ class MeshNetworkService {
 
   private mapEnvelopeTypeToStoreType(type: string): MeshMessage['type'] {
     const normalized = typeof type === 'string' ? type.toUpperCase() : 'CHAT';
-    if (normalized === 'SOS') return 'SOS';
+    // CRITICAL FIX: FAMILY_SOS, SOS_CANCEL, SOS_BEACON must all map to 'SOS'
+    // so processIncomingPacket's SOS handler triggers for ALL SOS-related types.
+    // Previously these fell through to 'CHAT', causing family SOS alerts to be
+    // silently treated as regular chat messages — no alert, no map marker, nothing.
+    if (normalized === 'SOS' || normalized === 'FAMILY_SOS' || normalized === 'SOS_CANCEL' || normalized === 'SOS_BEACON') return 'SOS';
     if (normalized === 'STATUS') return 'STATUS';
     if (normalized === 'FAMILY_STATUS_UPDATE' || normalized === 'STATUS_UPDATE') return 'STATUS';
     if (normalized === 'LOCATION') return 'LOCATION';
@@ -899,6 +1075,7 @@ class MeshNetworkService {
     senderName?: string;
     content: string;
     timestamp: number;
+    toAliases?: string[];
     mediaType?: 'image' | 'voice' | 'location';
     mediaUrl?: string;
     mediaDuration?: number;
@@ -909,6 +1086,7 @@ class MeshNetworkService {
     let parsedTimestamp: number | null = null;
     let parsedFrom: string | null = null;
     let parsedTo: string | null = null;
+    let parsedToAliases: string[] | undefined;
     let parsedType: string | null = null;
     let parsedSenderName: string | null = null;
     let parsedMediaType: 'image' | 'voice' | 'location' | undefined;
@@ -933,6 +1111,15 @@ class MeshNetworkService {
         }
         if (typeof parsed.to === 'string' && parsed.to.trim().length > 0) {
           parsedTo = parsed.to.trim();
+        }
+        if (Array.isArray(parsed.toAliases)) {
+          const aliases = parsed.toAliases
+            .filter((item: unknown): item is string => typeof item === 'string')
+            .map((item: string) => item.trim())
+            .filter((item: string) => item.length > 0);
+          if (aliases.length > 0) {
+            parsedToAliases = Array.from(new Set(aliases));
+          }
         }
         if (typeof parsed.senderName === 'string' && parsed.senderName.trim().length > 0) {
           parsedSenderName = parsed.senderName.trim();
@@ -964,6 +1151,7 @@ class MeshNetworkService {
       ...(parsedSenderName ? { senderName: parsedSenderName } : {}),
       content: parsedContent,
       timestamp: parsedTimestamp ?? Date.now(),
+      ...(parsedToAliases && parsedToAliases.length > 0 ? { toAliases: parsedToAliases } : {}),
       ...(parsedMediaType ? { mediaType: parsedMediaType } : {}),
       ...(parsedMediaUrl ? { mediaUrl: parsedMediaUrl } : {}),
       ...(typeof parsedMediaDuration === 'number' ? { mediaDuration: parsedMediaDuration } : {}),
@@ -1069,7 +1257,9 @@ class MeshNetworkService {
     };
 
     useMeshStore.getState().addMessage(storeMsg);
-    this.messageListeners.forEach(listener => listener(storeMsg));
+    // CRITICAL FIX: Spread to array before iterating — if a listener callback
+    // modifies this.messageListeners (adds/removes), direct forEach can skip callbacks or throw.
+    [...this.messageListeners].forEach(listener => listener(storeMsg));
     this.stats.lastPeerActivity = Date.now();
   }
 
@@ -1079,20 +1269,30 @@ class MeshNetworkService {
 
   private async startRealBLE(): Promise<void> {
     this.isRealMode = true;
-    logger.info('Starting Real BLE Mesh (Dual Mode)');
+    logger.info('Starting Real BLE Mesh (GATT + Scan Dual Mode)');
 
     // Start the main loop
     this.runLoop();
 
-    // Start heartbeat (will also advertise identity)
+    // Start heartbeat
     this.startHeartbeat();
 
-    // CRITICAL FIX: Use startDualMode() which calls requestPermissions() + startAdvertising() + startScanning().
-    // Previously only startScanning() was called — devices could scan but never broadcast themselves,
-    // making peer discovery impossible between two devices side by side.
-    const identityPayload = this.buildIdentityPacket();
-    await highPerformanceBle.startDualMode(identityPayload);
+    // Start GATT server (advertising + accepting writes) + BLE scanner
+    await highPerformanceBle.startDualMode();
+    // FIX: Remove existing listener before adding to prevent duplicate callbacks
+    // on repeated startRealBLE() calls without intervening stopRealBLE()
+    highPerformanceBle.removePeerFoundListener(this.handleDiscoveredPeer);
     highPerformanceBle.onPeerFound(this.handleDiscoveredPeer);
+
+    // Listen for incoming GATT data (from both server writes and client notifications)
+    if (this.incomingDataUnsubscribe) {
+      this.incomingDataUnsubscribe();
+    }
+    this.incomingDataUnsubscribe = highPerformanceBle.onIncomingData(
+      (deviceId, charUUID, data) => {
+        this.handleIncomingGATTData(deviceId, data);
+      }
+    );
 
     // Start chunk reassembly cleanup timer
     this.startChunkCleanup();
@@ -1100,11 +1300,35 @@ class MeshNetworkService {
 
   /**
    * Build an identity advertisement packet for BLE peer discovery.
-   * Contains device ID so other peers can identify and route messages to us.
+   * Contains device ID + UID hash for BLE↔Firebase peer routing.
+   *
+   * Sprint Audit FIX A2: Include Firebase UID hash (first 16 chars of sha-like)
+   * so that store-forward delivery, family routing, and mesh DM can match
+   * BLE peer IDs to Firebase UIDs. Without this, offline messages addressed
+   * by UID never reach the right peer (Session 33-39 memory pattern).
+   *
+   * Format: `${myId}|${uidHash16}` — pipe-separated for backward-compat parsing.
+   * Older receivers see the whole string as their identity (graceful degradation).
    */
   private buildIdentityPacket(): Uint8Array {
     try {
-      const idPayload = Buffer.from(this.myId.substring(0, 16), 'utf-8');
+      // Compose composite identity: device ID + UID hash
+      let composite = this.myId.substring(0, 48);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getFirebaseAuth } = require('../../../lib/firebase');
+        const uid = getFirebaseAuth()?.currentUser?.uid;
+        if (uid && uid.length >= 4) {
+          // Lightweight hash — first 16 chars of UID is sufficient for peer matching
+          // (Firebase UIDs are already random; no crypto hash needed for routing).
+          const uidHash = uid.substring(0, 16);
+          composite = `${composite}|${uidHash}`;
+        }
+      } catch {
+        // No auth → device-id only (offline pre-login mesh discovery)
+      }
+
+      const idPayload = Buffer.from(composite.substring(0, 64), 'utf-8');
       return MeshProtocol.serialize(
         MeshMessageType.PING,
         this.myId,
@@ -1124,9 +1348,15 @@ class MeshNetworkService {
   }
 
   private async stopRealBLE(): Promise<void> {
-    this.isRealMode = false;
+    // FIX: Set isRealMode=false AFTER stopping BLE to prevent in-flight
+    // broadcastPacket() calls from returning true (simulation success)
     highPerformanceBle.removePeerFoundListener(this.handleDiscoveredPeer);
+    if (this.incomingDataUnsubscribe) {
+      this.incomingDataUnsubscribe();
+      this.incomingDataUnsubscribe = null;
+    }
     await highPerformanceBle.stopDualMode();
+    this.isRealMode = false;
   }
 
   /**
@@ -1156,39 +1386,98 @@ class MeshNetworkService {
     }
   }
 
+  private isProcessingQueues = false;
+
   private async processQueues(): Promise<void> {
-    // Process critical (all)
-    while (this.criticalQueue.length > 0) {
-      const packet = this.criticalQueue.shift();
-      if (packet) await this.broadcastPacket(packet);
+    // CRITICAL: Concurrency guard — prevent concurrent queue processing
+    // from broadcastMessage SOS (fire-and-forget) racing with runLoop
+    if (this.isProcessingQueues) return;
+    this.isProcessingQueues = true;
+    try {
+      await this._processQueuesInternal();
+    } finally {
+      this.isProcessingQueues = false;
     }
+  }
 
-    // Process high (max 5)
-    let highCount = 0;
-    while (this.highQueue.length > 0 && highCount < 5) {
-      const packet = this.highQueue.shift();
-      if (packet) await this.broadcastPacket(packet);
-      highCount++;
-    }
+  private async _processQueuesInternal(): Promise<void> {
+    const now = Date.now();
+    // Max age for queued packets: 10 minutes for normal, 30 minutes for SOS/critical
+    const MAX_NORMAL_AGE_MS = 10 * 60 * 1000;
+    const MAX_CRITICAL_AGE_MS = 30 * 60 * 1000;
 
-    // Process normal (max 2)
-    let normalCount = 0;
-    while (this.normalQueue.length > 0 && normalCount < 2) {
-      const packet = this.normalQueue.shift();
-      if (packet) await this.broadcastPacket(packet);
-      normalCount++;
-    }
+    // Helper: process a queue with max count, skip failed packets instead of blocking
+    // CRITICAL FIX: Add retry cooldown to prevent rapid-fire retries when BLE is off.
+    // Without cooldown, deferred packets retry every loop cycle (1s) — wasting CPU/battery.
+    const DEFERRED_COOLDOWN_MS = 5000; // 5s cooldown between retries for deferred packets
+    const processQueue = async (queue: PendingMeshPacket[], maxCount: number, isCritical: boolean): Promise<void> => {
+      const deferred: PendingMeshPacket[] = [];
+      const maxAge = isCritical ? MAX_CRITICAL_AGE_MS : MAX_NORMAL_AGE_MS;
+      let sent = 0;
+      while (queue.length > 0 && sent < maxCount) {
+        const packet = queue.shift();
+        if (!packet) break;
 
-    // Process relay (max 2)
-    let relayCount = 0;
-    while (this.relayQueue.length > 0 && relayCount < 2) {
-      const packet = this.relayQueue.shift();
-      if (packet) await this.broadcastPacket(packet);
-      relayCount++;
+        // Expire stale packets to prevent zombie queue buildup (battery drain)
+        if (packet.enqueuedAt && (now - packet.enqueuedAt > maxAge)) {
+          logger.debug(`Dropping expired mesh packet (age: ${Math.round((now - packet.enqueuedAt) / 1000)}s)`);
+          continue;
+        }
+
+        // CRITICAL FIX: Skip deferred packets still in cooldown to prevent rapid-fire retries.
+        // When BLE is off, every packet fails and gets re-queued. Without cooldown,
+        // processQueues retries all of them every 1s loop cycle — burning CPU and battery.
+        if ((packet as any)._lastDeferredAt && (now - (packet as any)._lastDeferredAt < DEFERRED_COOLDOWN_MS)) {
+          deferred.push(packet); // Still in cooldown — re-defer without attempting
+          continue;
+        }
+
+        const ok = await this.broadcastPacket(packet);
+        if (ok) {
+          sent++;
+          // Clear deferred timestamp on success
+          delete (packet as any)._lastDeferredAt;
+          // Track for ACK if this is an outgoing message (not a relay) that requires delivery confirmation.
+          // Without this, processACK never finds a matching pendingACK → delivery status never updates in UI.
+          if (!packet.sourceIdOverride && packet.originalStringId && MeshProtocol.requiresACK(packet.type)) {
+            const payload = Buffer.from(packet.payloadBase64, 'base64');
+            meshStoreForwardService.trackForACK(
+              packet.messageId, 'broadcast', payload, packet.priority, packet.originalStringId
+            ).catch(() => { /* best-effort ACK tracking */ });
+          }
+        } else {
+          (packet as any)._lastDeferredAt = now; // Record when deferred for cooldown
+          deferred.push(packet); // Re-queue at end instead of blocking
+        }
+      }
+      // Put deferred packets back at the FRONT of the queue so original SOS stays at position 0.
+      // Previous approach (push to end) buried critical packets behind newer entries.
+      if (deferred.length > 0) queue.unshift(...deferred);
+    };
+
+    await processQueue(this.criticalQueue, Math.min(this.criticalQueue.length, 5), true); // max 5 per cycle to prevent BLE MTU overflow
+    await processQueue(this.highQueue, 5, false);
+    await processQueue(this.normalQueue, 2, false);
+    await processQueue(this.relayQueue, 2, false);
+
+    // Enforce queue size caps (max 500 per queue, drop oldest relay/normal first)
+    const MAX_QUEUE_SIZE = 500;
+    if (this.relayQueue.length > MAX_QUEUE_SIZE) this.relayQueue.splice(0, this.relayQueue.length - MAX_QUEUE_SIZE);
+    if (this.normalQueue.length > MAX_QUEUE_SIZE) this.normalQueue.splice(0, this.normalQueue.length - MAX_QUEUE_SIZE);
+    if (this.highQueue.length > MAX_QUEUE_SIZE) this.highQueue.splice(0, this.highQueue.length - MAX_QUEUE_SIZE);
+    // CRITICAL QUEUE: Protect original SOS messages (the initial distress call is most important).
+    // Instead of dropping oldest (splice from 0), drop the NEWEST entries first — the original
+    // SOS at the front of the queue is the one that MUST be delivered. Higher cap (1000) because
+    // SOS messages are life-critical and should rarely be trimmed.
+    const CRITICAL_MAX_QUEUE_SIZE = 1000;
+    if (this.criticalQueue.length > CRITICAL_MAX_QUEUE_SIZE) {
+      // Keep the first CRITICAL_MAX_QUEUE_SIZE entries (oldest = most important)
+      // Drop from the end (newest duplicates/beacons)
+      this.criticalQueue.splice(CRITICAL_MAX_QUEUE_SIZE);
     }
 
     // Save queues after processing
-    this.saveQueues();
+    await this.saveQueues();
   }
 
   // ===========================================================================
@@ -1320,6 +1609,7 @@ class MeshNetworkService {
     if (this.chunkCleanupTimer) return;
 
     this.chunkCleanupTimer = setInterval(() => {
+      if (!this.isRunning) return;
       const now = Date.now();
       for (const [key, state] of this.chunkReassembly.entries()) {
         if (now - state.firstReceivedAt > CHUNK_REASSEMBLY_TIMEOUT_MS) {
@@ -1361,8 +1651,11 @@ class MeshNetworkService {
       messageIdShort,
       missing,
       totalChunks,
+      _control: true, // Mark as control message — must NOT be rendered in chat
     });
-    this.broadcastMessage(nackPayload, MeshMessageType.TEXT, {
+    // Use PING type instead of TEXT to prevent NACK from appearing in chat UI
+    // (broadcastMessage with TEXT adds to MeshStore which renders in chat)
+    this.broadcastMessage(nackPayload, MeshMessageType.PING, {
       to: sourceId,
       from: this.myId,
     }).catch(err => logger.warn('NACK broadcast failed:', err));
@@ -1390,15 +1683,34 @@ class MeshNetworkService {
     for (const idx of missing) {
       const chunkBuf = cached.chunks.get(idx);
       if (!chunkBuf) continue;
-      const encoded = MeshProtocol.serialize(
-        cached.type,
-        this.myId,
-        chunkBuf,
-        cached.ttl,
-        this.getQScore(cached.priority),
-        cached.messageId,
-      );
-      await highPerformanceBle.startAdvertising(encoded);
+
+      // CRITICAL FIX: chunkBuf is already a fully serialized MeshProtocol packet
+      // (from chunkForGATT → MeshProtocol.serialize). Re-serializing wraps it in ANOTHER
+      // MeshProtocol header, producing a double-wrapped packet that the receiver cannot
+      // deserialize — corrupting ALL NACK-triggered chunk retransmissions.
+      // Use the cached buffer directly.
+      const encoded = chunkBuf;
+
+      // CRITICAL FIX: Use getCharacteristicForType() to match the characteristic used
+      // by broadcastPacket() for original transmission. The previous hardcoded check
+      // (SOS ? SOS_UUID : CHUNK_UUID) sent TEXT retransmissions on CHUNK_UUID instead of
+      // MSG_UUID, causing receivers to process retransmitted chunks on a different channel.
+      const charUUID = this.getCharacteristicForType(cached.type);
+
+      // Use GATT write for chunk retransmission (not advertisement — chunks are too large for 31-byte ads)
+      let sent = false;
+      const connectedPeerIds = highPerformanceBle.getConnectedPeerIds();
+      for (const peerId of connectedPeerIds) {
+        try {
+          const writeOk = await highPerformanceBle.writeToCharacteristic(peerId, charUUID, encoded);
+          if (writeOk) sent = true;
+        } catch { /* skip peer */ }
+      }
+      // Fallback to GATT server notification
+      if (!sent) {
+        highPerformanceBle.notifyGATTClients(charUUID, encoded);
+      }
+
       this.stats.packetsSent++;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
@@ -1408,98 +1720,369 @@ class MeshNetworkService {
   // BROADCAST (with chunking support)
   // ===========================================================================
 
-  private async broadcastPacket(packet: PendingMeshPacket): Promise<void> {
+  private async broadcastPacket(packet: PendingMeshPacket): Promise<boolean> {
     if (!this.isRealMode) {
       this.stats.packetsSent++;
-      logger.debug('Simulation mode: skipped BLE advertising for queued packet');
-      return;
+      logger.debug('Simulation mode: skipped BLE for queued packet');
+      return true;
+    }
+
+    const bluetoothReady = await highPerformanceBle.isBluetoothPoweredOn();
+    if (!bluetoothReady) {
+      logger.debug('Bluetooth not ready; deferring mesh packet for retry');
+      return false;
     }
 
     try {
       let payloadBuffer = Buffer.from(packet.payloadBase64, 'base64');
 
-      // Compress payload if beneficial (only for text-like payloads)
-      if (payloadBuffer.length > BLE_MAX_PAYLOAD_PER_ADV) {
-        try {
-          const payloadStr = payloadBuffer.toString('utf8');
-          if (meshCompressionService.shouldCompress(payloadStr)) {
-            const compressed = await meshCompressionService.compress(payloadStr);
-            const compressedBuf = Buffer.from(compressed, 'utf8');
-            if (compressedBuf.length < payloadBuffer.length) {
-              logger.debug(`Compression: ${payloadBuffer.length} -> ${compressedBuf.length} bytes`);
-              payloadBuffer = compressedBuf;
+      // Compress payload if beneficial
+      try {
+        const payloadStr = payloadBuffer.toString('utf8');
+        if (meshCompressionService.shouldCompress(payloadStr)) {
+          const compressed = meshCompressionService.compress(payloadStr);
+          const compressedBuf = Buffer.from(compressed, 'utf8');
+          if (compressedBuf.length < payloadBuffer.length) {
+            logger.debug(`Compression: ${payloadBuffer.length} -> ${compressedBuf.length} bytes`);
+            payloadBuffer = compressedBuf;
+          }
+        }
+      } catch {
+        // Compression failed; use original payload
+      }
+
+      // MeshProtocol serialize (header + payload)
+      // For relay packets, use the original sender's ID (sourceIdOverride) instead of this.myId.
+      // sourceIdOverride is a hex string from deserialize() — parse back to UInt32 to avoid re-hashing.
+      // FIX: Use explicit NaN check — parseInt returning 0 is valid (hash of ""),
+      // the fallback `|| this.myId` incorrectly substitutes sender's ID, breaking relay attribution
+      const parsedSourceId = packet.sourceIdOverride ? parseInt(packet.sourceIdOverride, 16) : NaN;
+      const sourceId = isNaN(parsedSourceId) ? this.myId : parsedSourceId;
+      const serialized = MeshProtocol.serialize(
+        packet.type,
+        sourceId,
+        payloadBuffer,
+        packet.ttl,
+        this.getQScore(packet.priority),
+        packet.messageId,
+      );
+
+      // Select characteristic based on message type
+      const charUUID = this.getCharacteristicForType(packet.type);
+
+      // === STRATEGY 1: Send to all connected peers via GATT write ===
+      const connectedPeers = highPerformanceBle.getConnectedPeerIds();
+      let sentToAny = false;
+
+      // Sprint 16-17: Adversarial peers blocked + reputation tracking
+      const { meshReputationService } = await import('./MeshReputationService');
+
+      for (const peerId of connectedPeers) {
+        // Adversarial check: skip peers we've blocked
+        if (meshReputationService.isBlocked(peerId)) {
+          logger.debug(`Peer ${peerId.slice(0, 8)} BLOCKED (reputation) — skipping`);
+          continue;
+        }
+
+        const peerMtu = highPerformanceBle.getPeerMTU(peerId);
+
+        if (serialized.length <= peerMtu) {
+          // Fits in a single GATT write — send the complete packet directly
+          const sent = await highPerformanceBle.writeToCharacteristic(peerId, charUUID, serialized);
+          if (sent) {
+            sentToAny = true;
+            meshReputationService.recordSent(peerId);
+          } else {
+            meshReputationService.recordFailure(peerId);
+          }
+        } else {
+          // Too large for one write — use MeshProtocol-level chunking.
+          // Each chunk is a complete MeshProtocol packet (with 0xCE chunk header in payload)
+          // so the receiver's existing deserialize → isChunkedPayload → processIncomingChunk works.
+          const chunkPackets = this.chunkForGATT(payloadBuffer, packet, peerMtu, sourceId);
+          let allChunksSent = true;
+
+          for (const chunkPkt of chunkPackets) {
+            const sent = await highPerformanceBle.writeToCharacteristic(peerId, charUUID, chunkPkt);
+            if (!sent) { allChunksSent = false; break; }
+          }
+          if (allChunksSent) sentToAny = true;
+        }
+      }
+
+      // === STRATEGY 2: Notify connected GATT clients via server notification ===
+      // Send to inbound GATT clients (devices that connected to OUR GATT server).
+      // These clients may NOT be in our outbound connectedPeers list — they connected
+      // to us but we haven't connected back to them yet (asymmetric connection).
+      // Without this path, messages only flow in one direction until both devices
+      // have established mutual outbound GATT connections.
+      const gattClientCount = highPerformanceBle.getGATTServerClientCount();
+      if (gattClientCount > 0) {
+        if (serialized.length <= MAX_CHUNK_SIZE) {
+          // Small payload — fits in a single GATT notification
+          highPerformanceBle.notifyGATTClients(charUUID, serialized);
+          sentToAny = true;
+        } else {
+          // CRITICAL FIX: Large payloads were previously SKIPPED for Strategy 2,
+          // meaning inbound-only GATT clients NEVER received chat messages.
+          // This caused one-way messaging: Device A could receive from B (via A's
+          // outbound connection) but B could NOT receive from A (A only had inbound
+          // clients, Strategy 2 was skipped for large payloads).
+          // Fix: Chunk the payload and send each chunk as a separate notification.
+          const chunkPackets = this.chunkForGATT(payloadBuffer, packet, MAX_CHUNK_SIZE, sourceId);
+          if (chunkPackets.length > 0) {
+            for (const chunkPkt of chunkPackets) {
+              highPerformanceBle.notifyGATTClients(charUUID, chunkPkt);
             }
+            sentToAny = true;
+            logger.debug(`Strategy 2: sent ${chunkPackets.length} chunks to ${gattClientCount} GATT clients`);
           }
-        } catch {
-          // Compression failed; use original payload
         }
       }
 
-      // If payload fits in a single BLE advertisement, send directly
-      if (payloadBuffer.length <= BLE_MAX_PAYLOAD_PER_ADV) {
-        const encoded = MeshProtocol.serialize(
-          packet.type,
-          this.myId,
-          payloadBuffer,
-          packet.ttl,
-          this.getQScore(packet.priority),
-          packet.messageId,
-        );
-        await highPerformanceBle.startAdvertising(encoded);
+      // === STRATEGY 3: Advertisement fallback for SOS beacon ===
+      // SOS payload is small enough to fit in advertisement (max 31 bytes)
+      if (serialized.length <= 31 && packet.type === MeshMessageType.SOS) {
+        highPerformanceBle.updateAdvertisementData(serialized);
+      }
+
+      if (sentToAny) {
         this.stats.packetsSent++;
-      } else {
-        // Payload too large: chunk it
-        const messageIdShort = packet.messageId & 0xFFFF;
-        const chunks = this.chunkPayload(payloadBuffer, messageIdShort);
+      }
 
-        if (chunks.length === 0) {
-          logger.error(`Failed to chunk payload (${payloadBuffer.length} bytes) - message dropped`);
-          return;
-        }
-
-        logger.info(`Chunking message: ${payloadBuffer.length} bytes -> ${chunks.length} chunks of ≤${BLE_MAX_PAYLOAD_PER_ADV} bytes each`);
-
-        // Cache sent chunks for NACK-based retransmission
-        const cacheKey = `${this.myId}:${messageIdShort}`;
-        const chunkMap = new Map<number, Buffer>();
-        chunks.forEach((ch, i) => chunkMap.set(i, ch));
-        this.sentChunkCache.set(cacheKey, {
-          chunks: chunkMap,
-          sentAt: Date.now(),
-          type: packet.type,
-          ttl: packet.ttl,
-          priority: packet.priority,
-          messageId: packet.messageId,
-        });
-
-        // Send each chunk as a separate BLE advertisement with a small delay
-        for (let i = 0; i < chunks.length; i++) {
-          const encoded = MeshProtocol.serialize(
-            packet.type,
-            this.myId,
-            chunks[i],
-            packet.ttl,
-            this.getQScore(packet.priority),
-            packet.messageId,
-          );
-          await highPerformanceBle.startAdvertising(encoded);
-          this.stats.packetsSent++;
-
-          // Small inter-chunk delay to avoid BLE congestion (skip after last chunk)
-          if (i < chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 50));
+      // CRITICAL FIX: If no peers received the message but we know of discovered
+      // (not yet connected) peers, urgently attempt GATT connections so the next
+      // retry cycle can deliver the message. Without this, messages sit in the
+      // deferred queue for 5s+ while discovered peers remain unconnected.
+      if (!sentToAny) {
+        const unconnected = highPerformanceBle.getUnconnectedDiscoveredPeerIds();
+        if (unconnected.length > 0) {
+          logger.debug(`broadcastPacket: 0 connected peers, urgently connecting to ${unconnected.length} discovered peers`);
+          // Fire-and-forget — connections happen async, message will be retried next cycle
+          for (const peerId of unconnected.slice(0, 3)) { // Max 3 concurrent connect attempts
+            highPerformanceBle.connectToPeer(peerId).catch(() => { /* best-effort */ });
           }
         }
       }
 
-      // Revert to heartbeat after advertising
-      const timer = setTimeout(() => {
-        this.startHeartbeat();
-      }, BLE_ADVERTISE_DURATION_MS);
-      this.cleanupTimers.add(timer);
+      // Only return true if we actually sent to at least one peer.
+      // Returning true with 0 peers causes messages to be silently dropped from the queue.
+      // Queue will retain the message and retry when peers are discovered.
+      return sentToAny;
 
     } catch (e) {
       logger.error('Broadcast failed', e);
+      return false;
+    }
+  }
+
+  /**
+   * Map message type to the appropriate GATT characteristic UUID
+   */
+  private getCharacteristicForType(type: MeshMessageType): string {
+    switch (type) {
+      case MeshMessageType.SOS:
+      case MeshMessageType.EMERGENCY_BEACON:
+      case MeshMessageType.HEALTH_SOS:
+      case MeshMessageType.RESCUE_SIGNAL:
+        return AFETNET_CHAR_SOS_UUID;
+      case MeshMessageType.LOCATION:
+        return AFETNET_CHAR_LOCATION_UUID;
+      case MeshMessageType.MEDIA_CHUNK:
+      case MeshMessageType.MEDIA_START:
+      case MeshMessageType.MEDIA_END:
+      case MeshMessageType.VOICE_CLIP:
+        return AFETNET_CHAR_CHUNK_UUID;
+      default:
+        return AFETNET_CHAR_MSG_UUID;
+    }
+  }
+
+  /**
+   * Create MeshProtocol-level chunks for GATT transmission.
+   * Unlike raw byte splitting, each chunk is a complete MeshProtocol packet
+   * that the receiver can deserialize independently. The PAYLOAD of each packet
+   * contains a 0xCE chunk header that the existing processIncomingChunk() reassembles.
+   *
+   * Returns array of complete MeshProtocol packets (each fits in one GATT write).
+   */
+  private chunkForGATT(
+    payload: Buffer,
+    packet: PendingMeshPacket,
+    peerMtu: number,
+    sourceId?: string | number,
+  ): Buffer[] {
+    // Each GATT write = MeshProtocol header (13) + chunk header (5) + chunk data
+    const chunkDataSize = Math.max(20, peerMtu - BLE_PROTOCOL_HEADER_SIZE - BLE_CHUNK_HEADER_SIZE);
+    const totalChunks = Math.ceil(payload.length / chunkDataSize);
+
+    if (totalChunks > 255) {
+      logger.warn(`Message too large for GATT chunking: ${payload.length} bytes (${totalChunks} chunks > 255 max)`);
+      return [];
+    }
+
+    const messageIdShort = packet.messageId & 0xFFFF;
+    const packets: Buffer[] = [];
+
+    for (let i = 0; i < totalChunks; i++) {
+      const dataStart = i * chunkDataSize;
+      const dataEnd = Math.min(dataStart + chunkDataSize, payload.length);
+      const dataSlice = payload.subarray(dataStart, dataEnd);
+
+      // Build chunk payload: [0xCE magic:1][messageIdShort:2][chunkIndex:1][totalChunks:1][data:N]
+      const chunkPayload = Buffer.alloc(BLE_CHUNK_HEADER_SIZE + dataSlice.length);
+      chunkPayload.writeUInt8(BLE_CHUNK_MAGIC, 0);
+      chunkPayload.writeUInt16BE(messageIdShort, 1);
+      chunkPayload.writeUInt8(i, 3);
+      chunkPayload.writeUInt8(totalChunks, 4);
+      dataSlice.copy(chunkPayload, BLE_CHUNK_HEADER_SIZE);
+
+      // Wrap chunk in a full MeshProtocol packet (receiver can deserialize independently)
+      // CRITICAL FIX: Use sourceId (from sourceIdOverride for relay) instead of this.myId
+      // to preserve original sender attribution on multi-chunk relayed messages.
+      const serializedChunk = MeshProtocol.serialize(
+        packet.type,
+        sourceId ?? this.myId,
+        chunkPayload,
+        packet.ttl,
+        this.getQScore(packet.priority),
+        packet.messageId,
+      );
+      packets.push(serializedChunk);
+    }
+
+    // CRITICAL FIX: Populate sentChunkCache so NACK-based retransmission works.
+    // Without this, handleChunkNack finds nothing in the cache and silently drops
+    // all retransmission requests, making chunked message delivery unreliable.
+    if (packets.length > 1) {
+      const cacheKey = `${sourceId ?? this.myId}:${messageIdShort}`;
+      const chunkMap = new Map<number, Buffer>();
+      for (let i = 0; i < packets.length; i++) {
+        chunkMap.set(i, packets[i]);
+      }
+      this.sentChunkCache.set(cacheKey, {
+        chunks: chunkMap,
+        sentAt: Date.now(),
+        type: packet.type,
+        ttl: packet.ttl,
+        priority: packet.priority,
+        messageId: packet.messageId,
+      });
+    }
+
+    return packets;
+  }
+
+  /**
+   * Handle incoming data received via GATT connection (server write or client notification).
+   * This is the GATT equivalent of handleDiscoveredPeer (which handles advertisement data).
+   */
+  private handleIncomingGATTData(deviceId: string, data: Buffer): void {
+    try {
+      const packet = MeshProtocol.deserialize(data);
+      if (!packet) return;
+
+      const peerId = packet.header.sourceId || deviceId;
+
+      // CRITICAL FIX (Bug 3): Extract full Firebase UID from PING payload.
+      // buildIdentityPacket() serializes the sender's full UID (~28 chars) as the payload,
+      // but packet.header.sourceId is only a 4-byte djb2 hash (e.g., "a1b2c3d4").
+      // Without extracting the payload, store-forward delivery relies on the hash fallback
+      // in getMessagesForPeer(), and the peer name is always "Peer a1b2" instead of the UID.
+      let fullUid: string | null = null;
+      if (packet.header.type === MeshMessageType.PING && packet.payload?.length > 0) {
+        try {
+          const payloadStr = packet.payload.toString('utf8');
+          // Valid Firebase UIDs are alphanumeric, 20-128 chars
+          if (payloadStr.length >= 10 && payloadStr.length <= 128 && /^[a-zA-Z0-9]+$/.test(payloadStr)) {
+            fullUid = payloadStr;
+          }
+        } catch { /* invalid payload — use hash peerId */ }
+      }
+
+      // Use full UID for store-forward delivery key (direct mailbox match),
+      // but keep peerId (hash) as the peer store key for BLE device tracking
+      const deliveryKey = fullUid || peerId;
+      const peerName = fullUid ? `Peer ${fullUid.substring(0, 8)}` : `Peer ${peerId.substring(0, 4)}`;
+
+      // Update peer in store
+      const existingPeer = useMeshStore.getState().peers.find(p => p.id === peerId);
+      if (existingPeer) {
+        useMeshStore.getState().updatePeer(peerId, { lastSeen: Date.now() });
+      } else {
+        useMeshStore.getState().addPeer({
+          id: peerId,
+          name: peerName,
+          isSelf: false,
+          rssi: -50, // GATT connections don't have RSSI in data
+          lastSeen: Date.now(),
+          status: 'unknown',
+          connections: [],
+        });
+        logger.debug(`New GATT peer: ${peerId}${fullUid ? ` (UID: ${fullUid.substring(0, 8)}...)` : ''}`);
+      }
+
+      // STORE-FORWARD: Deliver stored messages on every identity PING (not just first discovery).
+      // Messages may have been stored in the mailbox AFTER the initial peer discovery.
+      // For non-PING packets, only deliver on first discovery to avoid redundant checks.
+      // Use fullUid (if available) for direct mailbox key match; fall back to hash peerId.
+      if (packet.header.type === MeshMessageType.PING || !existingPeer) {
+        this.deliverStoredMessagesToPeer(deliveryKey);
+        // Also deliver by hash peerId if different from deliveryKey (covers both mailbox key types)
+        if (deliveryKey !== peerId) {
+          this.deliverStoredMessagesToPeer(peerId);
+        }
+      }
+
+      this.stats.lastPeerActivity = Date.now();
+      this.stats.packetsReceived++;
+
+      if (packet.header.type !== MeshMessageType.PING) {
+        // Check if this is a chunked payload
+        if (this.isChunkedPayload(packet.payload)) {
+          const reassembled = this.processIncomingChunk(
+            packet.payload,
+            packet.header.sourceId,
+            packet.header.type,
+            packet.header.ttl,
+            packet.header.qScore,
+            packet.header.messageId,
+          );
+          if (reassembled) {
+            let finalPayload = reassembled;
+            try {
+              const payloadStr = reassembled.toString('utf8');
+              if (payloadStr.startsWith('AFCMP:')) {
+                const decompressed = meshCompressionService.decompress(payloadStr);
+                finalPayload = Buffer.from(decompressed, 'utf8');
+              }
+            } catch { /* not compressed */ }
+
+            const fullPacket: MeshPacket = {
+              header: { ...packet.header },
+              payload: finalPayload,
+            };
+            this.processIncomingPacket(fullPacket, -50);
+          }
+        } else {
+          // Non-chunked: decompress if needed, then process
+          let processPacket = packet;
+          try {
+            const payloadStr = packet.payload.toString('utf8');
+            if (payloadStr.startsWith('AFCMP:')) {
+              const decompressed = meshCompressionService.decompress(payloadStr);
+              processPacket = {
+                header: { ...packet.header },
+                payload: Buffer.from(decompressed, 'utf8'),
+              };
+            }
+          } catch { /* not compressed */ }
+
+          this.processIncomingPacket(processPacket, -50);
+        }
+      }
+    } catch (error) {
+      logger.warn('handleIncomingGATTData error (packet may be malformed):', error);
     }
   }
 
@@ -1514,10 +2097,39 @@ class MeshNetworkService {
       if (!this.isActive) return;
 
       try {
-        // CRITICAL FIX: Advertise identity payload (not just PING) so peers can discover us.
-        // Include truncated device ID for peer identification and message routing.
-        const packet = this.buildIdentityPacket();
-        await highPerformanceBle.startAdvertising(packet);
+        // Send identity PING via GATT to all connected peers.
+        // This is critical for store-and-forward: peers discovered via service UUID
+        // only have a BLE device ID. Without identity exchange, the receiver can't
+        // match them to a Firebase UID mailbox key. The identity PING carries our
+        // Firebase UID hash in the header (sourceId), enabling hash-based matching
+        // in MeshStoreForwardService.getMessagesForPeer().
+        //
+        // NOTE: Do NOT use advertisement data for this — the identity packet (41+ bytes)
+        // exceeds the BLE advertisement limit (31 bytes) and causes Android advertising failures.
+        const connectedPeers = highPerformanceBle.getConnectedPeerIds?.() ?? [];
+        const gattClientCount = highPerformanceBle.getGATTServerClientCount?.() ?? 0;
+
+        if (connectedPeers.length === 0 && gattClientCount === 0) {
+          logger.debug('Heartbeat: no connected peers');
+          return;
+        }
+
+        const identityPacket = this.buildIdentityPacket();
+        const identityBuffer = Buffer.from(identityPacket);
+
+        // Strategy 1: GATT write to all outbound-connected peers
+        for (const peerId of connectedPeers) {
+          await highPerformanceBle.writeToCharacteristic(
+            peerId, AFETNET_CHAR_MSG_UUID, identityBuffer
+          ).catch(() => { /* dead peer — writeToCharacteristic cleans up */ });
+        }
+
+        // Strategy 2: Notify all inbound GATT server clients
+        if (gattClientCount > 0) {
+          highPerformanceBle.notifyGATTClients(AFETNET_CHAR_MSG_UUID, identityBuffer);
+        }
+
+        logger.debug(`Heartbeat: identity PING sent to ${connectedPeers.length} outbound + ${gattClientCount} inbound peers`);
       } catch (e) {
         logger.debug('Heartbeat error:', e);
       }
@@ -1528,7 +2140,47 @@ class MeshNetworkService {
    * Handle discovered BLE device
    */
   private handleDiscoveredPeer = async (blePeer: BlePeer): Promise<void> => {
-    if (!blePeer.manufacturerData) return;
+    // GATT-based discovery: peers may not always have manufacturer data.
+    // If they advertise our service UUID, they'll be connected via GATT auto-connect
+    // in HighPerformanceBle.processDiscoveredDevice().
+    // Still process manufacturer data when available for backward compatibility.
+    if (!blePeer.manufacturerData) {
+      // Peer discovered via service UUID only — track it but skip packet parsing
+      const peerId = blePeer.id;
+      const existingPeer = useMeshStore.getState().peers.find(p => p.id === peerId);
+      if (!existingPeer) {
+        useMeshStore.getState().addPeer({
+          id: peerId,
+          name: `Peer ${peerId.substring(0, 4)}`,
+          isSelf: false,
+          rssi: blePeer.rssi,
+          lastSeen: Date.now(),
+          status: 'unknown',
+          connections: [],
+        });
+        logger.debug(`Found new GATT Mesh Peer: ${peerId}`);
+
+        // STORE-FORWARD: Deliver stored messages to newly discovered peer
+        this.deliverStoredMessagesToPeer(peerId);
+      } else {
+        useMeshStore.getState().updatePeer(peerId, {
+          rssi: blePeer.rssi,
+          lastSeen: Date.now(),
+        });
+
+        // STORE-FORWARD (Bug 8 fix): Also check stored messages on re-discovery,
+        // throttled to avoid flooding (scan fires many times per second per peer).
+        // Between PINGs (15-60s), new messages may have been stored for this peer.
+        const now = Date.now();
+        const lastCheck = this.lastDeliveryCheckAt.get(peerId) || 0;
+        if (now - lastCheck >= MeshNetworkService.DELIVERY_CHECK_THROTTLE_MS) {
+          this.lastDeliveryCheckAt.set(peerId, now);
+          this.deliverStoredMessagesToPeer(peerId);
+        }
+      }
+      this.stats.lastPeerActivity = Date.now();
+      return;
+    }
 
     try {
       const buffer = Buffer.from(blePeer.manufacturerData, 'hex');
@@ -1557,6 +2209,9 @@ class MeshNetworkService {
           connections: [],
         });
         logger.debug(`Found new Mesh Peer: ${peerId}`);
+
+        // STORE-FORWARD: Deliver stored messages to newly discovered peer
+        this.deliverStoredMessagesToPeer(peerId);
       }
 
       this.stats.lastPeerActivity = Date.now();
@@ -1581,7 +2236,7 @@ class MeshNetworkService {
             try {
               const payloadStr = reassembled.toString('utf8');
               if (payloadStr.startsWith('AFCMP:')) {
-                const decompressed = await meshCompressionService.decompress(payloadStr);
+                const decompressed = meshCompressionService.decompress(payloadStr);
                 finalPayload = Buffer.from(decompressed, 'utf8');
                 logger.debug(`Decompressed reassembled payload: ${reassembled.length} -> ${finalPayload.length} bytes`);
               }
@@ -1595,7 +2250,7 @@ class MeshNetworkService {
               payload: finalPayload,
               receivedRssi: blePeer.rssi,
             };
-            this.processIncomingPacket(fullPacket, blePeer.rssi);
+            await this.processIncomingPacket(fullPacket, blePeer.rssi);
           }
           // else: still waiting for more chunks, do nothing
         } else {
@@ -1604,7 +2259,7 @@ class MeshNetworkService {
           try {
             const payloadStr = packet.payload.toString('utf8');
             if (payloadStr.startsWith('AFCMP:')) {
-              const decompressed = await meshCompressionService.decompress(payloadStr);
+              const decompressed = meshCompressionService.decompress(payloadStr);
               processPacket = {
                 header: { ...packet.header },
                 payload: Buffer.from(decompressed, 'utf8'),
@@ -1614,7 +2269,7 @@ class MeshNetworkService {
           } catch {
             // Not compressed; use original
           }
-          this.processIncomingPacket(processPacket, blePeer.rssi);
+          await this.processIncomingPacket(processPacket, blePeer.rssi);
         }
       }
 
@@ -1623,7 +2278,7 @@ class MeshNetworkService {
     }
   };
 
-  private processIncomingPacket(packet: MeshPacket, rssi: number): void {
+  private async processIncomingPacket(packet: MeshPacket, rssi: number): Promise<void> {
     // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
     // Skip if duplicate (checkAndAdd returns false when ID already existed)
     const transportMsgId = `${packet.header.sourceId}:${packet.header.messageId}`;
@@ -1632,16 +2287,98 @@ class MeshNetworkService {
       return;
     }
 
+    // STORE-FORWARD FIX 2: Handle ACK packets — wire to meshStoreForwardService + DeliveryManager
+    if (packet.header.type === MeshMessageType.ACK) {
+      try {
+        const ackData = MeshProtocol.parseACKPayload(packet.payload);
+        if (ackData) {
+          // Wire to store-forward ACK system
+          await meshStoreForwardService.processACK(
+            ackData.originalMessageId,
+            ackData.ackType as 'received' | 'delivered' | 'read',
+            ackData.receiverIdHash
+          );
+          // Wire to DeliveryManager ACK system
+          try {
+            const { deliveryManager } = require('../DeliveryManager');
+            deliveryManager.onAckReceived(ackData.originalMessageId.toString());
+          } catch { /* best-effort */ }
+        }
+      } catch (ackError) {
+        if (__DEV__) logger.debug('ACK processing failed:', ackError);
+      }
+      return; // ACK packets are fully handled — do not relay or process further
+    }
+
+    // SOS MULTI-HOP RELAY flag: set to true when SOS/SOS_CANCEL/SOS_BEACON handlers
+    // explicitly relay the packet, so the generic Q-Mesh relay at the bottom doesn't double-relay.
+    let sosRelayHandled = false;
+
     // Process chat-capable messages (TEXT / STATUS / SOS)
     if (
       packet.header.type === MeshMessageType.TEXT ||
       packet.header.type === MeshMessageType.STATUS ||
       packet.header.type === MeshMessageType.SOS
     ) {
-      const rawContent = sanitizeMessage(packet.payload.toString('utf8'));
+      // --- DECRYPTION LAYER ---
+      // Attempt to decrypt the incoming payload. If the payload is an encrypted
+      // envelope (has `_enc` marker), decrypt it. If decryption fails or the
+      // payload is plaintext, use it as-is (backward compatibility).
+      // CRITICAL: Never let decryption failure prevent message processing.
+      // Track encryption status so receiver knows if message was encrypted in transit.
+      const rawPayloadStr = packet.payload.toString('utf8');
+      let decryptedContent: string = rawPayloadStr;
+      let incomingIsEncrypted = false; // true only if we successfully decrypted an encrypted payload
+
+      try {
+        const maybeParsed = JSON.parse(rawPayloadStr);
+        if (maybeParsed && typeof maybeParsed === 'object' && typeof maybeParsed._enc === 'number') {
+          let plaintext: string | null = null;
+
+          if (maybeParsed._enc === ENC_BROADCAST && typeof maybeParsed.ct === 'string' && typeof maybeParsed.k === 'string') {
+            // Broadcast encryption: key is included in the envelope
+            if (meshCryptoService.getIsInitialized()) {
+              plaintext = await meshCryptoService.decryptBroadcast(maybeParsed.ct, maybeParsed.k);
+            }
+            if (plaintext) {
+              decryptedContent = plaintext;
+              incomingIsEncrypted = true;
+              logger.debug('Message decrypted (broadcast)');
+            } else {
+              logger.warn('Broadcast decryption failed, treating as opaque payload');
+              // Cannot recover — the original plaintext is not available
+              // Still set decryptedContent to rawPayloadStr so the envelope parsing
+              // below treats it as an unparseable payload rather than crashing
+            }
+          } else if (maybeParsed._enc === ENC_PEER && maybeParsed.ep && typeof maybeParsed.ep === 'object') {
+            // Peer-to-peer encryption: requires shared secret from key exchange
+            const encPayload = maybeParsed.ep;
+            const epSenderId = typeof encPayload.senderId === 'string' ? encPayload.senderId : packet.header.sourceId;
+            if (meshCryptoService.getIsInitialized()) {
+              plaintext = await meshCryptoService.decryptMessage(epSenderId, encPayload);
+            }
+            if (plaintext) {
+              decryptedContent = plaintext;
+              incomingIsEncrypted = true;
+              logger.debug(`Message decrypted (peer-to-peer) from ${epSenderId.slice(0, 8)}`);
+            } else {
+              logger.warn('Peer decryption failed (no shared secret or tampered), treating as opaque payload');
+            }
+          } else {
+            // Unknown encryption version — treat as plaintext (forward compatibility)
+            logger.debug(`Unknown encryption version: ${maybeParsed._enc}, treating as plaintext`);
+          }
+        }
+        // else: no _enc marker — plaintext message (backward compatibility or sender's _unencrypted flag)
+      } catch {
+        // JSON parse failed — payload is raw plaintext (legacy), use as-is
+      }
+
+      const rawContent = sanitizeMessage(decryptedContent);
 
       // Default routing for legacy/plain payloads
       let to = 'broadcast';
+      let toAliases: string[] = [];
       let senderId = packet.header.sourceId;
       let content = rawContent;
       let messageId = transportMsgId;
@@ -1668,6 +2405,12 @@ class MeshNetworkService {
           parsedEnvelope = parsed as Record<string, unknown>;
           if (typeof parsed.to === 'string' && parsed.to.trim().length > 0) {
             to = parsed.to.trim();
+          }
+          if (Array.isArray(parsed.toAliases)) {
+            toAliases = parsed.toAliases
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map((item: string) => item.trim())
+              .filter((item: string) => item.length > 0);
           }
           if (typeof parsed.from === 'string' && parsed.from.trim().length > 0) {
             senderId = parsed.from.trim();
@@ -1742,10 +2485,24 @@ class MeshNetworkService {
 
       // Drop non-targeted direct messages locally (still relayed below).
       const normalizedTo = this.normalizeRecipientId(to);
-      const isGroupRecipient = normalizedTo.startsWith('group:');
-      if (normalizedTo !== 'broadcast' && !isGroupRecipient && !this.isLocalRecipient(to)) {
+      const normalizedAliasTargets = toAliases
+        .map((alias) => this.normalizeRecipientId(alias))
+        .filter((alias) => alias.length > 0);
+      const isGroupRecipient = normalizedTo.startsWith('group:')
+        || normalizedAliasTargets.some((alias) => alias.startsWith('group:'));
+      const isLocalAliasTarget = normalizedAliasTargets.some((alias) =>
+        alias !== 'broadcast'
+        && !alias.startsWith('group:')
+        && this.isLocalRecipient(alias),
+      );
+      if (
+        normalizedTo !== 'broadcast'
+        && !isGroupRecipient
+        && !this.isLocalRecipient(to)
+        && !isLocalAliasTarget
+      ) {
         if (packet.header.ttl > 0) {
-          this.relayPacket(packet);
+          this.relayPacket(packet).catch(e => logger.warn('Relay failed:', e));
         }
         return;
       }
@@ -1762,6 +2519,13 @@ class MeshNetworkService {
       if (isMediaControlPacket && parsedEnvelope) {
         this.handleMeshMediaControlPacket(parsedEnvelope, senderId);
       } else {
+        // Determine encryption status for the received message:
+        // 1. If we successfully decrypted an encrypted payload → encrypted
+        // 2. If the plaintext envelope has `_unencrypted: true` → sender explicitly marked it as unencrypted
+        // 3. Otherwise → legacy plaintext (no encryption marker either way)
+        const senderMarkedUnencrypted = parsedEnvelope && parsedEnvelope._unencrypted === true;
+        const receivedIsEncrypted = incomingIsEncrypted && !senderMarkedUnencrypted;
+
         const message: MeshMessage = {
           id: messageId,
           senderId,
@@ -1776,6 +2540,7 @@ class MeshNetworkService {
           priority: this.getStorePriority(packet.header.type),
           acks: [],
           retryCount: 0,
+          isEncrypted: receivedIsEncrypted,
           ...(mediaType ? { mediaType } : {}),
           ...(mediaUrl ? { mediaUrl } : {}),
           ...(typeof mediaDuration === 'number' ? { mediaDuration } : {}),
@@ -1786,82 +2551,218 @@ class MeshNetworkService {
         // CRITICAL FIX: Only persist chat-renderable messages to MeshStore.
         // STATUS & LOCATION are system payloads consumed by FamilyScreen via
         // onMessage callbacks — they must NOT appear in the chat message store.
-        const isChatRenderable = messageType === 'CHAT' || messageType === 'SOS' ||
-          messageType === 'IMAGE' || messageType === 'VOICE';
+        // SOS_CANCEL and SOS_BEACON are control messages — they update existing SOS state
+        // but should NOT create new chat messages in the message list.
+        const envelopeTypeUpper = (parsedEnvelope?.type || '').toString().trim().toUpperCase();
+        const isSosControlMessage = envelopeTypeUpper === 'SOS_CANCEL' || envelopeTypeUpper === 'SOS_BEACON';
+        const isChatRenderable = !isSosControlMessage && (messageType === 'CHAT' || messageType === 'SOS' ||
+          messageType === 'IMAGE' || messageType === 'VOICE');
         if (isChatRenderable) {
           useMeshStore.getState().addMessage(message);
         }
-        this.messageListeners.forEach(listener => listener(message));
+        // CRITICAL: Do NOT emit SOS control messages (CANCEL, BEACON) to messageListeners.
+        // They are handled inline below. Emitting them would cause MeshMessageBridge to
+        // persist them in messageStore as regular chat/SOS messages, polluting the conversation.
+        if (!isSosControlMessage) {
+          // CRITICAL FIX: Spread to array — listener may modify the set during iteration
+          [...this.messageListeners].forEach(listener => listener(message));
+        }
+
+        // STORE-FORWARD FIX 3: Send ACK back to sender for messages that require it.
+        // This completes the delivery confirmation loop — without this, the sender's
+        // meshStoreForwardService never learns the message was delivered and keeps retrying.
+        if (MeshProtocol.requiresACK(packet.header.type) && !this.isLocalRecipient(senderId)) {
+          try {
+            const ackPacket = meshStoreForwardService.createACKPacket(packet);
+            // Use broadcastPacket to send via all available channels (GATT + notifications)
+            const ackQueuePacket: PendingMeshPacket = {
+              type: MeshMessageType.ACK,
+              payloadBase64: ackPacket.subarray(BLE_PROTOCOL_HEADER_SIZE).toString('base64'),
+              ttl: 1, // ACK is direct response, no multi-hop
+              priority: MeshPriority.HIGH,
+              messageId: (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0,
+              enqueuedAt: Date.now(),
+            };
+            this.broadcastPacket(ackQueuePacket).catch(() => { /* ACK send is best-effort */ });
+          } catch { /* ACK send is best-effort */ }
+        }
+
+        // MESH SOS CANCEL HANDLER: Process SOS cancellation received via mesh.
+        // Without this, mesh peers never learn that an SOS was cancelled — the alert
+        // stays active on their screens indefinitely until Firestore timeout (30min).
+        if (envelopeTypeUpper === 'SOS_CANCEL' && !this.isLocalRecipient(senderId)) {
+          try {
+            const { useSOSStore } = require('../sos/SOSStateManager');
+            const originalSignalId = parsedEnvelope?.originalSignalId || parsedEnvelope?.signalId || messageId;
+            const store = useSOSStore.getState();
+
+            // Remove from incoming SOS alerts (map marker)
+            store.removeIncomingSOSAlertBySignalId(originalSignalId);
+            logger.warn(`🚫 MESH SOS CANCEL: Removed alert for signal ${originalSignalId} from map`);
+
+            // Emit cancel event to dismiss fullscreen alert
+            try {
+              const { DeviceEventEmitter } = require('react-native');
+              DeviceEventEmitter.emit('SOS_FULLSCREEN_CANCEL', { signalId: originalSignalId });
+            } catch { /* DeviceEventEmitter always available */ }
+
+            logger.warn(`🚫 MESH SOS CANCEL received from ${senderName || senderId} for signal ${originalSignalId}`);
+          } catch (cancelError) {
+            logger.error('Failed to process mesh SOS cancel:', cancelError);
+          }
+
+          // SOS MULTI-HOP RELAY: Re-broadcast SOS_CANCEL to extend range
+          if (packet.header.ttl > 0) {
+            sosRelayHandled = true;
+            this.relayPacket(packet).catch(e => logger.debug('SOS_CANCEL relay failed:', e));
+            logger.debug(`📡 SOS_CANCEL RELAY: Forwarding cancel from ${senderName || senderId} (TTL: ${packet.header.ttl} → ${packet.header.ttl - 1})`);
+          }
+        }
+
+        // MESH SOS BEACON HANDLER: Process periodic SOS beacons received via mesh.
+        // These carry updated location and battery data from the trapped person.
+        // Without this, rescuers cannot track the person's latest position.
+        if (envelopeTypeUpper === 'SOS_BEACON' && !this.isLocalRecipient(senderId)) {
+          try {
+            const { useSOSStore } = require('../sos/SOSStateManager');
+            const beaconSignalId = parsedEnvelope?.signalId || parsedEnvelope?.id || messageId;
+            const envLocation = parsedEnvelope?.location as { latitude?: number; longitude?: number } | undefined;
+            const beaconLat = envLocation?.latitude ?? (parsedEnvelope as any)?.latitude ?? location?.lat;
+            const beaconLng = envLocation?.longitude ?? (parsedEnvelope as any)?.longitude ?? location?.lng;
+            const beaconBattery = typeof parsedEnvelope?.battery === 'number' ? parsedEnvelope.battery : undefined;
+            const store = useSOSStore.getState();
+
+            // Update existing map marker with latest location by remove+re-add
+            // (SOSStateManager has no in-place update method)
+            const hasValidBeaconLocation = typeof beaconLat === 'number' && typeof beaconLng === 'number' && isFinite(beaconLat) && isFinite(beaconLng);
+            if (hasValidBeaconLocation) {
+              const existingAlert = store.incomingSOSAlerts?.find?.((a: { signalId: string }) => a.signalId === beaconSignalId);
+              // Remove old entry if exists, then add updated one
+              if (existingAlert) {
+                store.removeIncomingSOSAlertBySignalId(beaconSignalId);
+              }
+              store.addIncomingSOSAlert({
+                id: `mesh_${beaconSignalId}`,
+                signalId: beaconSignalId,
+                senderDeviceId: senderId,
+                senderUid: (typeof parsedEnvelope?.senderUid === 'string' && parsedEnvelope.senderUid) || existingAlert?.senderUid || senderId,
+                senderName: senderName || existingAlert?.senderName || `Mesh Peer ${senderId.substring(0, 6)}`,
+                latitude: beaconLat!,
+                longitude: beaconLng!,
+                timestamp: Date.now(),
+                message: existingAlert?.message || content || 'SOS Beacon — konum güncellendi',
+                trapped: parsedEnvelope?.trapped === true || existingAlert?.trapped || false,
+                battery: beaconBattery ?? existingAlert?.battery,
+              });
+              logger.debug(`📡 MESH SOS BEACON: ${existingAlert ? 'Updated' : 'Created'} alert for signal ${beaconSignalId} (battery: ${beaconBattery ?? 'N/A'}%)`);
+            }
+          } catch (beaconError) {
+            logger.error('Failed to process mesh SOS beacon:', beaconError);
+          }
+
+          // SOS MULTI-HOP RELAY: Re-broadcast SOS_BEACON to extend range
+          if (packet.header.ttl > 0) {
+            sosRelayHandled = true;
+            this.relayPacket(packet).catch(e => logger.debug('SOS_BEACON relay failed:', e));
+            logger.debug(`📡 SOS_BEACON RELAY: Forwarding beacon from ${senderName || senderId} (TTL: ${packet.header.ttl} → ${packet.header.ttl - 1})`);
+          }
+        }
 
         // MESH SOS HANDLER: When receiving an SOS via mesh, also add to incomingSOSAlerts
         // so the DisasterMapScreen shows a marker for the nearby trapped/emergency user
-        if (messageType === 'SOS' && senderId !== this.myId) {
+        if (messageType === 'SOS' && !isSosControlMessage && !this.isLocalRecipient(senderId)) {
           try {
             const { useSOSStore } = require('../sos/SOSStateManager');
             const sosLat = location?.lat;
             const sosLng = location?.lng;
 
-            useSOSStore.getState().addIncomingSOSAlert({
-              id: `mesh_${messageId}`,
-              signalId: messageId,
-              senderDeviceId: senderId,
-              senderName: senderName || `Mesh Peer ${senderId.substring(0, 6)}`,
-              latitude: typeof sosLat === 'number' && isFinite(sosLat) ? sosLat : 0,
-              longitude: typeof sosLng === 'number' && isFinite(sosLng) ? sosLng : 0,
-              timestamp,
-              message: content || 'Acil yardım gerekiyor! (Mesh)',
-              trapped: content?.toLowerCase().includes('enkaz') || content?.toLowerCase().includes('trapped') || false,
-            });
+            // Extract trapped status from the SOS envelope boolean (primary), with text fallback
+            const isTrapped = parsedEnvelope?.trapped === true
+              || content?.toLowerCase().includes('enkaz')
+              || content?.toLowerCase().includes('trapped')
+              || false;
 
-            logger.warn(`🚨 MESH SOS received from ${senderName || senderId} — added to map markers`);
+            const hasValidLocation = typeof sosLat === 'number' && isFinite(sosLat) && sosLat !== 0
+              && typeof sosLng === 'number' && isFinite(sosLng) && sosLng !== 0;
 
-            // CRITICAL FIX: Show local notification for offline SOS
-            // Without this, user would never know someone nearby needs help!
-            try {
-              const { notificationCenter } = require('../notifications/NotificationCenter');
-              const resolvedName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
-              notificationCenter.notify('sos_received', {
-                from: resolvedName,
-                senderName: resolvedName,
-                senderId,
+            // Only add map marker when valid location exists — 0,0 (Gulf of Guinea) is not valid
+            if (hasValidLocation) {
+              useSOSStore.getState().addIncomingSOSAlert({
+                id: `mesh_${messageId}`,
                 signalId: messageId,
-                message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
-                location: typeof sosLat === 'number' && typeof sosLng === 'number' && isFinite(sosLat) && isFinite(sosLng)
-                  ? { latitude: sosLat, longitude: sosLng }
-                  : undefined,
+                senderDeviceId: senderId,
+                senderUid: (typeof parsedEnvelope?.senderUid === 'string' && parsedEnvelope.senderUid) || (typeof parsedEnvelope?.userId === 'string' && parsedEnvelope.userId) || senderId,
+                senderName: senderName || `Mesh Peer ${senderId.substring(0, 6)}`,
+                latitude: sosLat,
+                longitude: sosLng,
                 timestamp,
-              }, 'MeshNetworkService').catch((notifErr: unknown) => {
-                logger.error('Mesh SOS notification failed:', notifErr);
+                message: content || 'Acil yardım gerekiyor! (Mesh)',
+                trapped: isTrapped,
               });
-            } catch (notifImportErr) {
-              logger.error('Failed to import NotificationCenter for mesh SOS:', notifImportErr);
+              logger.warn(`🚨 MESH SOS received from ${senderName || senderId} — added to map markers`);
+            } else {
+              logger.warn(`🚨 MESH SOS received from ${senderName || senderId} — no valid location, notification only (no map marker)`);
             }
 
-            // ELITE V4: Direct full-screen alert as BACKUP for offline scenarios
-            // The notification chain (notify→schedule→foreground listener→emit) can break
-            // if expo-notifications isn't initialized. Direct emit guarantees the alert shows.
+            // ELITE V4: Direct full-screen alert for offline SOS
+            // Direct emit guarantees the alert shows even if expo-notifications isn't initialized.
+            let meshSosFullScreenEmitted = false;
             try {
               const { DeviceEventEmitter } = require('react-native');
               const directName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
               DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
                 signalId: messageId,
                 senderDeviceId: senderId,
+                senderUid: (typeof parsedEnvelope?.senderUid === 'string' && parsedEnvelope.senderUid) || (typeof parsedEnvelope?.userId === 'string' && parsedEnvelope.userId) || senderId,
                 senderName: directName,
                 message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
                 latitude: typeof sosLat === 'number' && isFinite(sosLat) ? sosLat : undefined,
                 longitude: typeof sosLng === 'number' && isFinite(sosLng) ? sosLng : undefined,
-                trapped: content?.toLowerCase().includes('enkaz') || content?.toLowerCase().includes('trapped') || false,
+                trapped: isTrapped,
               });
+              meshSosFullScreenEmitted = true;
             } catch { /* DeviceEventEmitter is always available in RN */ }
+
+            // Show local notification ONLY if full-screen alert was NOT shown
+            // (prevents double alarm sound from notification + full-screen alert)
+            if (!meshSosFullScreenEmitted) {
+              try {
+                const { notificationCenter } = require('../notifications/NotificationCenter');
+                const resolvedName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
+                notificationCenter.notify('sos_received', {
+                  from: resolvedName,
+                  senderName: resolvedName,
+                  senderId,
+                  signalId: messageId,
+                  message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
+                  location: typeof sosLat === 'number' && typeof sosLng === 'number' && isFinite(sosLat) && isFinite(sosLng)
+                    ? { latitude: sosLat, longitude: sosLng }
+                    : undefined,
+                  timestamp,
+                }, 'MeshNetworkService').catch((notifErr: unknown) => {
+                  logger.error('Mesh SOS notification failed:', notifErr);
+                });
+              } catch (notifImportErr) {
+                logger.error('Failed to import NotificationCenter for mesh SOS:', notifImportErr);
+              }
+            }
           } catch (sosError) {
             logger.error('Failed to add mesh SOS to incoming alerts:', sosError);
+          }
+
+          // SOS MULTI-HOP RELAY: Re-broadcast received SOS to extend range
+          // This is the most critical relay — initial distress call must propagate
+          if (packet.header.ttl > 0) {
+            sosRelayHandled = true;
+            this.relayPacket(packet).catch(e => logger.debug('SOS relay failed:', e));
+            logger.debug(`📡 SOS RELAY: Forwarding SOS from ${senderName || senderId} (TTL: ${packet.header.ttl} → ${packet.header.ttl - 1})`);
           }
         }
 
         // MESH RESCUE ACK HANDLER: When receiving a rescue ACK via mesh,
         // update SOSStore so the SOS sender sees help is coming
         // PERF: Only parse if content looks like a RESCUE_ACK JSON
-        if (content && typeof content === 'string' && content.includes('"RESCUE_ACK"') && senderId !== this.myId) {
+        if (content && typeof content === 'string' && content.includes('"RESCUE_ACK"') && !this.isLocalRecipient(senderId)) {
           try {
             const parsed = JSON.parse(content);
             if (parsed && parsed.type === 'RESCUE_ACK') {
@@ -1904,19 +2805,59 @@ class MeshNetworkService {
 
     // Handle location updates
     if (packet.header.type === MeshMessageType.LOCATION) {
-      this.processLocationPacket(packet);
+      await this.processLocationPacket(packet);
     }
 
-    // Q-Mesh Relay
-    if (packet.header.ttl > 0) {
-      this.relayPacket(packet);
+    // Q-Mesh Relay — only relay BROADCAST messages, NOT privately-addressed ones
+    // A message addressed specifically to us should NOT be forwarded to the entire mesh (privacy leak)
+    // Skip if SOS handlers above already explicitly relayed this packet (prevents double-relay)
+    if (packet.header.ttl > 0 && !sosRelayHandled) {
+      // Check if this packet was addressed to us specifically (not broadcast)
+      let to: string | undefined;
+      try {
+        const payloadStr = packet.payload.toString('utf8');
+        const parsed = JSON.parse(payloadStr);
+        to = typeof parsed.to === 'string' ? parsed.to : undefined;
+      } catch { /* not JSON — relay as broadcast */ }
+
+      const isDirectedToMe = to && this.isLocalRecipient(to);
+      if (!isDirectedToMe) {
+        this.relayPacket(packet).catch(e => logger.warn('Relay failed:', e));
+      }
     }
   }
 
-  private processLocationPacket(packet: MeshPacket): void {
+  private async processLocationPacket(packet: MeshPacket): Promise<void> {
     try {
       const payloadStr = packet.payload.toString('utf8');
-      const locationData = JSON.parse(payloadStr);
+
+      // --- DECRYPTION LAYER (location packets) ---
+      // Location packets may be encrypted if sent via broadcastMessage().
+      // Attempt decryption with same logic as chat messages.
+      let decryptedStr = payloadStr;
+      try {
+        const maybeParsed = JSON.parse(payloadStr);
+        if (maybeParsed && typeof maybeParsed === 'object' && typeof maybeParsed._enc === 'number') {
+          let plaintext: string | null = null;
+          if (maybeParsed._enc === ENC_BROADCAST && typeof maybeParsed.ct === 'string' && typeof maybeParsed.k === 'string') {
+            if (meshCryptoService.getIsInitialized()) {
+              plaintext = await meshCryptoService.decryptBroadcast(maybeParsed.ct, maybeParsed.k);
+            }
+          } else if (maybeParsed._enc === ENC_PEER && maybeParsed.ep && typeof maybeParsed.ep === 'object') {
+            const epSenderId = typeof maybeParsed.ep.senderId === 'string' ? maybeParsed.ep.senderId : packet.header.sourceId;
+            if (meshCryptoService.getIsInitialized()) {
+              plaintext = await meshCryptoService.decryptMessage(epSenderId, maybeParsed.ep);
+            }
+          }
+          if (plaintext) {
+            decryptedStr = plaintext;
+          }
+        }
+      } catch {
+        // Not JSON or decryption failed — use raw payload
+      }
+
+      const locationData = JSON.parse(decryptedStr);
 
       if (locationData.type === 'LOC') {
         useMeshStore.getState().updatePeer(packet.header.sourceId, {
@@ -1942,30 +2883,128 @@ class MeshNetworkService {
       return;
     }
 
-    const sourceIdHash = Number.parseInt(originalPacket.header.sourceId, 16);
-    const relaySourceId: string | number = Number.isFinite(sourceIdHash)
-      ? sourceIdHash
-      : originalPacket.header.sourceId;
+    // Sprint 16-17: Mesh hierarchy v2 — Backbone/Leaf gate.
+    // Leaf cihazlar relay yapmaz (pil + bandwidth korunmasi).
+    // Backbone cihazlar tum paketleri relay eder.
+    // EXCEPTION: SOS variant'lar her zaman relay edilir — leaf mode'da bile, cunku life-safety.
+    const isLifeSafetyPacket =
+      originalPacket.header.type === MeshMessageType.SOS ||
+      originalPacket.header.type === MeshMessageType.EMERGENCY_BEACON ||
+      originalPacket.header.type === MeshMessageType.RESCUE_SIGNAL ||
+      originalPacket.header.type === MeshMessageType.HEALTH_SOS;
 
-    const packet = MeshProtocol.serialize(
-      originalPacket.header.type,
-      relaySourceId,
-      originalPacket.payload,
-      newTtl,
-      originalPacket.header.qScore,
-      originalPacket.header.messageId
-    );
+    if (!isLifeSafetyPacket) {
+      try {
+        const { meshBackbonePeerService } = await import('./MeshBackbonePeerService');
+        if (meshBackbonePeerService.isLeaf()) {
+          logger.debug(`Leaf mode: skipping relay of non-life-safety packet type ${originalPacket.header.type}`);
+          return;
+        }
+      } catch {
+        // Service not available → relay anyway (graceful degradation)
+      }
+    }
 
-    await highPerformanceBle.stopAdvertising();
-    await highPerformanceBle.startAdvertising(packet);
+    // CRITICAL FIX: Pass the ORIGINAL PAYLOAD (not a re-serialized full packet) to broadcastPacket.
+    // broadcastPacket() will call MeshProtocol.serialize() internally — passing an already-serialized
+    // packet as payloadBase64 causes DOUBLE-WRAPPING: the receiver deserializes once and gets
+    // another MeshProtocol header as "payload" → garbled data.
+    //
+    // Use sourceIdOverride so broadcastPacket uses the original sender's ID, not this.myId.
+    const relayMeshPacket: PendingMeshPacket = {
+      type: originalPacket.header.type,
+      payloadBase64: originalPacket.payload.toString('base64'),
+      ttl: newTtl,
+      priority: originalPacket.header.type === MeshMessageType.SOS ? MeshPriority.CRITICAL : MeshPriority.NORMAL,
+      messageId: originalPacket.header.messageId,
+      enqueuedAt: Date.now(),
+      sourceIdOverride: originalPacket.header.sourceId, // Keep original sender's hex ID
+    };
+    const relayed = await this.broadcastPacket(relayMeshPacket);
+    if (!relayed) {
+      this.relayQueue.push({
+        type: originalPacket.header.type,
+        payloadBase64: originalPacket.payload.toString('base64'),
+        ttl: newTtl,
+        priority: originalPacket.header.type === MeshMessageType.SOS ? MeshPriority.CRITICAL : MeshPriority.NORMAL,
+        messageId: originalPacket.header.messageId,
+        enqueuedAt: Date.now(),
+        sourceIdOverride: originalPacket.header.sourceId,
+      });
+      logger.debug('Relay deferred: added to relay queue for retry');
+      return;
+    }
 
     this.stats.packetsRelayed++;
+  }
 
-    // Revert to heartbeat
-    const timer = setTimeout(() => {
-      this.startHeartbeat();
-    }, BLE_ADVERTISE_DURATION_MS);
-    this.cleanupTimers.add(timer);
+  // ===========================================================================
+  // STORE-FORWARD: Deliver stored messages to a newly discovered peer
+  // ===========================================================================
+
+  /**
+   * When a new peer is discovered, check if we have stored messages for them
+   * and deliver them via GATT write. This is the core of store-and-forward:
+   * messages queued while the peer was offline are delivered when they come
+   * back into BLE range.
+   */
+  private deliverStoredMessagesToPeer(peerId: string): void {
+    // Fire-and-forget async delivery — do not block peer discovery
+    (async () => {
+      try {
+        const storedMessages = meshStoreForwardService.getMessagesForPeer(peerId);
+        if (storedMessages.length === 0) return;
+
+        logger.info(`📬 Delivering ${storedMessages.length} stored messages to peer ${peerId}`);
+        for (const stored of storedMessages) {
+          try {
+            const payload = Buffer.from(stored.payload, 'base64');
+            const packet = MeshProtocol.serialize(
+              stored.type,
+              stored.senderId,
+              payload,
+              stored.ttl,
+              100,
+              stored.messageId,
+            );
+
+            // Try GATT write to the specific peer first
+            const charUUID = this.getCharacteristicForType(stored.type);
+            let sent = false;
+            try {
+              sent = await highPerformanceBle.writeToCharacteristic(peerId, charUUID, packet);
+            } catch {
+              // Peer may not be GATT-connected yet — fall back to broadcast
+            }
+
+            // Fallback: broadcast via all connected peers + GATT server notification
+            if (!sent) {
+              const connectedPeers = highPerformanceBle.getConnectedPeerIds();
+              for (const connPeerId of connectedPeers) {
+                try {
+                  const writeOk = await highPerformanceBle.writeToCharacteristic(connPeerId, charUUID, packet);
+                  if (writeOk) { sent = true; break; }
+                } catch { /* skip peer */ }
+              }
+              if (!sent && packet.length <= MAX_CHUNK_SIZE) {
+                highPerformanceBle.notifyGATTClients(charUUID, packet);
+                const gattClientCount = highPerformanceBle.getGATTServerClientCount();
+                if (gattClientCount > 0) sent = true;
+              }
+            }
+
+            if (sent) {
+              await meshStoreForwardService.markDelivered(stored.id, peerId);
+              logger.debug(`📬 Store-forward: delivered ${stored.id} to ${peerId}`);
+            }
+          } catch (e) {
+            if (__DEV__) logger.debug('Store-forward delivery failed for message:', e);
+          }
+        }
+      } catch (e) {
+        if (__DEV__) logger.debug('Store-forward retrieval failed:', e);
+      }
+    })().catch((e) => { if (__DEV__) logger.debug('Store-forward IIFE error:', e); });
   }
 
   // ===========================================================================
@@ -1995,6 +3034,95 @@ class MeshNetworkService {
 
   getStats(): typeof this.stats {
     return { ...this.stats };
+  }
+
+  getDiagnostics(): {
+    isInitialized: boolean;
+    isRunning: boolean;
+    isRealMode: boolean;
+    isActive: boolean;
+    myDeviceId: string;
+    queueDepth: {
+      critical: number;
+      high: number;
+      normal: number;
+      relay: number;
+    };
+    peerCount: number;
+    recipientAliasCount: number;
+    stats: typeof this.stats;
+  } {
+    const peerCount = useMeshStore.getState().peers.length;
+    return {
+      isInitialized: this.initialized,
+      isRunning: this.isRunning,
+      isRealMode: this.isRealMode,
+      isActive: this.isActive,
+      myDeviceId: this.myId,
+      queueDepth: {
+        critical: this.criticalQueue.length,
+        high: this.highQueue.length,
+        normal: this.normalQueue.length,
+        relay: this.relayQueue.length,
+      },
+      peerCount,
+      recipientAliasCount: this.recipientAliases.size,
+      stats: { ...this.stats },
+    };
+  }
+
+  // ===========================================================================
+  // FULL DESTROY (for app shutdown / account switch)
+  // ===========================================================================
+
+  /**
+   * Full teardown — call on app shutdown or account switch.
+   * Unlike stop(), this resets all internal state so the singleton can be
+   * re-initialized cleanly. stop() preserves messageListeners and initialized
+   * flag for stop/start cycles; destroy() clears everything.
+   */
+  async destroy(): Promise<void> {
+    await this.stop();
+
+    // Reset initialized flag so initialize() can run again
+    this.initialized = false;
+    this.initializePromise = null;
+
+    // Clear message listeners (stop() intentionally preserves them)
+    this.messageListeners = [];
+
+    // Clear identity state
+    this.recipientAliases.clear();
+    this.recipientAliases.add('me');
+
+    // Clear all queues
+    this.criticalQueue = [];
+    this.highQueue = [];
+    this.normalQueue = [];
+    this.relayQueue = [];
+
+    // Clear dedup
+    this.seenMessageIds.clear();
+
+    // Clear delivery check throttle map
+    this.lastDeliveryCheckAt.clear();
+
+    // Clean up ACK listener subscription
+    if (this.ackReceivedUnsubscribe) {
+      this.ackReceivedUnsubscribe();
+      this.ackReceivedUnsubscribe = null;
+    }
+
+    // CRITICAL FIX: Destroy/cleanup sub-services to prevent resource leaks.
+    // Previously, destroy() only called stop() which doesn't tear down sub-services.
+    // Sub-services retain timers, BLE connections, SecureStore refs, and event listeners.
+    // NOTE: Use module-level imports (not this.*) — these are singleton services.
+    try { meshStoreForwardService?.destroy?.(); } catch { /* ignore */ }
+    try { meshEmergencyService?.cleanup?.(); } catch { /* ignore */ }
+    try { await meshCryptoService?.destroy?.(); } catch { /* ignore */ }
+    try { await highPerformanceBle?.destroy?.(); } catch { /* ignore */ }
+
+    logger.info('MeshNetworkService fully destroyed');
   }
 
   // Helpers

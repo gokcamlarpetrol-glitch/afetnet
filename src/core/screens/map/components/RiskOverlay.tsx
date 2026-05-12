@@ -9,7 +9,7 @@
  * - Landslide prone areas
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Circle, Polygon } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -187,6 +187,10 @@ const UserRiskIndicator = ({ risk }: { risk: RegionalRisk | null }) => {
 export const RiskOverlay = ({ visible, userLocation, onRiskCalculated }: RiskOverlayProps) => {
     const [userRisk, setUserRisk] = useState<RegionalRisk | null>(null);
 
+    // AUDIT FIX: Use ref to avoid infinite re-render when onRiskCalculated is an unstable callback
+    const onRiskCalculatedRef = useRef(onRiskCalculated);
+    onRiskCalculatedRef.current = onRiskCalculated;
+
     // Calculate user's risk when location changes
     useEffect(() => {
         if (!visible || !userLocation) return;
@@ -198,14 +202,14 @@ export const RiskOverlay = ({ visible, userLocation, onRiskCalculated }: RiskOve
                     userLocation.longitude
                 );
                 setUserRisk(risk);
-                onRiskCalculated?.(risk);
+                onRiskCalculatedRef.current?.(risk);
             } catch (err) {
                 // Silent fail - risk calculation is optional
             }
         };
 
         calculateRisk();
-    }, [visible, userLocation, onRiskCalculated]);
+    }, [visible, userLocation]);
 
     if (!visible) return null;
 

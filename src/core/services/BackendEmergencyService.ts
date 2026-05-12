@@ -696,15 +696,14 @@ class BackendEmergencyService {
       this.syncInterval = null;
     }
 
-    // Final sync before shutdown
-    this.syncQueuedMessages().catch(error => {
-      logger.error('Final message sync failed:', error);
+    // Final sync before shutdown — run before clearing isInitialized
+    const syncPromise = Promise.all([
+      this.syncQueuedMessages().catch(e => logger.error('Final message sync failed:', e)),
+      this.syncQueuedFamilyMembers().catch(e => logger.error('Final family member sync failed:', e)),
+    ]);
+    syncPromise.finally(() => {
+      this.isInitialized = false;
     });
-    this.syncQueuedFamilyMembers().catch(error => {
-      logger.error('Final family member sync failed:', error);
-    });
-
-    this.isInitialized = false;
   }
 }
 

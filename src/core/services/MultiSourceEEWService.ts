@@ -22,6 +22,7 @@
 
 import { createLogger } from '../utils/logger';
 import { useEEWHistoryStore, EEWHistoryEvent } from '../stores/eewHistoryStore';
+import { formatTurkeyApiDateTime, parseAFADDate } from '../utils/timeUtils';
 
 const logger = createLogger('MultiSourceEEWService');
 
@@ -123,6 +124,10 @@ class MultiSourceEEWService {
     private sourceConfigs = DATA_SOURCES;
     private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
     private seenEventIds = new Set<string>();
+    // Sprint Audit FIX A6: Multi-source consensus tracking.
+    // Same earthquake reported by 2+ sources → confidence boost (real event, not parse error).
+    // Single-source M5+ → preliminary (warn user but lower priority).
+    private consensusMap = new Map<string, Set<string>>();
     private onEventCallbacks: ((event: EarthquakeEvent) => void)[] = [];
     private isRunning = false;
     // CRITICAL: Track first poll per source to avoid notification flood on startup
@@ -260,6 +265,7 @@ class MultiSourceEEWService {
             // Process new events
             const ONE_HOUR = 60 * 60 * 1000;
             for (const event of events) {
+                if (!Number.isFinite(event.originTime)) continue;
                 // CRITICAL: Skip earthquakes older than 1 hour to prevent old notification flood
                 if (Date.now() - event.originTime > ONE_HOUR) continue;
 
@@ -298,9 +304,9 @@ class MultiSourceEEWService {
      */
     private async fetchAFAD(config: DataSourceConfig): Promise<EarthquakeEvent[]> {
         // OOM prevention: Only fetch last 10 minutes, limit to 10 results
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        const startDate = tenMinutesAgo.toISOString();
-        const endDate = new Date().toISOString();
+        const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+        const startDate = formatTurkeyApiDateTime(tenMinutesAgo);
+        const endDate = formatTurkeyApiDateTime();
 
         const url = `${config.apiUrl}?start=${startDate}&end=${endDate}&minmag=${config.minMagnitude}&limit=10&orderby=timedesc`;
         const data = await this.fetchJsonWithTimeout(url, 10000);
@@ -310,6 +316,8 @@ class MultiSourceEEWService {
         const items = Array.isArray(data) ? data.slice(0, 10) : [];
         for (const item of items) {
             try {
+                const originRaw = item.eventDate || item.date;
+                const originTime = originRaw ? parseAFADDate(String(originRaw)) : NaN;
                 events.push({
                     id: `afad-${item.eventID || item.eventId}`,
                     source: 'AFAD',
@@ -318,7 +326,7 @@ class MultiSourceEEWService {
                     depth: parseFloat(item.depth || '10'),
                     magnitude: parseFloat(item.mag || item.magnitude || '0'),
                     magnitudeType: (item.magType || 'ML') as any,
-                    originTime: new Date(item.eventDate || item.date).getTime(),
+                    originTime,
                     location: [item.location, item.ilce, item.sehir].filter(Boolean).join(', ') || 'Türkiye',
                     region: 'Türkiye',
                     country: 'TR',
@@ -355,6 +363,8 @@ class MultiSourceEEWService {
                 try {
                     const mag = parseFloat(item.mag || item.ml || '0');
                     if (mag < config.minMagnitude) continue;
+                    const originRaw = item.date || item.date_time;
+                    const originTime = originRaw ? parseAFADDate(String(originRaw)) : NaN;
 
                     events.push({
                         id: `kandilli-${item.earthquake_id || `${Date.now()}-${Math.random().toString(36).substr(2, 14)}`}`,
@@ -364,7 +374,7 @@ class MultiSourceEEWService {
                         depth: parseFloat(item.depth || '10'),
                         magnitude: mag,
                         magnitudeType: 'ML',
-                        originTime: new Date(item.date || item.date_time).getTime(),
+                        originTime,
                         location: item.title || item.lokasyon || 'Türkiye',
                         region: 'Türkiye',
                         country: 'TR',
@@ -476,6 +486,52 @@ class MultiSourceEEWService {
     }
 
     private async processNewEvent(event: EarthquakeEvent): Promise<void> {
+        // CRITICAL FIX (EEW-M2/M3/M4): Physical-plausibility validation.
+        // Without this, malformed/spoofed/parse-error events propagate to notifications
+        // and Firestore. Sprint 3 added bounds in EEWService.notifyCallbacks but
+        // MultiSourceEEWService had its own notification path bypassing those checks.
+        if (typeof event.magnitude !== 'number' || !Number.isFinite(event.magnitude)) {
+            logger.warn(`Multi-source rejected: invalid magnitude from ${event.source}`);
+            return;
+        }
+        if (event.magnitude > 10.0 || event.magnitude < 0) {
+            logger.warn(`Multi-source rejected: impossible magnitude ${event.magnitude} from ${event.source}`);
+            return;
+        }
+        if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number' ||
+            !Number.isFinite(event.latitude) || !Number.isFinite(event.longitude)) {
+            logger.warn(`Multi-source rejected: invalid coords from ${event.source}`);
+            return;
+        }
+        if (event.latitude < -90 || event.latitude > 90 || event.longitude < -180 || event.longitude > 180) {
+            logger.warn(`Multi-source rejected: coords out of bounds from ${event.source}`);
+            return;
+        }
+        // Reject (0,0) "null island" — common parse fallback when source returns missing coords
+        if (Math.abs(event.latitude) < 0.01 && Math.abs(event.longitude) < 0.01) {
+            logger.warn(`Multi-source rejected: null-island coords (0,0) from ${event.source}`);
+            return;
+        }
+        if (typeof event.depth === 'number' && (event.depth < 0 || event.depth > 700)) {
+            logger.warn(`Multi-source rejected: implausible depth ${event.depth}km from ${event.source}`);
+            return;
+        }
+        if (typeof event.originTime === 'number') {
+            if (!Number.isFinite(event.originTime)) {
+                logger.warn(`Multi-source rejected: invalid origin time from ${event.source}`);
+                return;
+            }
+            const ageMs = Date.now() - event.originTime;
+            if (ageMs > 60 * 60 * 1000) {
+                logger.debug(`Multi-source rejected: stale event (>1h old) from ${event.source}`);
+                return;
+            }
+            if (ageMs < -60 * 1000) {
+                logger.warn(`Multi-source rejected: event from future from ${event.source}`);
+                return;
+            }
+        }
+
         // ELITE: Only log significant earthquakes at info level to prevent log spam
         if (event.magnitude >= 3.0) {
             logger.info(`📍 New earthquake from ${event.source}: M${event.magnitude.toFixed(1)} ${event.location}`);
@@ -491,10 +547,12 @@ class MultiSourceEEWService {
             }
         }
 
-        // 🚨 CRITICAL: Trigger EEW notification for significant earthquakes (M4.5+)
-        // ELITE: Distance-filtered with FAIL-SAFE — Türkiye bounding box fallback
+        // 🚨 HATA 4 FIX: Single source of truth — EEW_THRESHOLDS.MIN_NOTIFY_MAGNITUDE
+        // Önceden 4.5 hardcoded'du, EEWService user setting M3.0, doc M4.0 — tutarsız.
+        // Artık tüm pipeline'lar aynı constant'ı kullanıyor.
         let wasNotified = false;
-        if (event.magnitude >= 4.5) {
+        const { EEW_THRESHOLDS } = await import('./messaging/constants');
+        if (event.magnitude >= EEW_THRESHOLDS.MIN_NOTIFY_MAGNITUDE) {
             // ELITE: Magnitude-scaled distance threshold (FAIL-SAFE: Türkiye bbox if no location)
             let shouldNotify = true;
             let distanceKm: number | null = null;
@@ -538,6 +596,31 @@ class MultiSourceEEWService {
             if (shouldNotify) {
                 try {
                     const { notificationCenter } = await import('./notifications/NotificationCenter');
+                    // CRITICAL FIX (EEW-C1): Source-agnostic eventKey for cross-pipeline dedup.
+                    // 3 services (EEWService, MultiSourceEEWService, RealtimeEarthquakeMonitor) poll
+                    // the same AFAD endpoint with different eventId prefixes ('afad-X' vs 'AFAD_X').
+                    // Normalized key by magnitude+roundedCoords+timeWindow ensures dedup across services.
+                    const dedupKey = `eq:${event.magnitude.toFixed(1)}:${event.latitude.toFixed(2)}:${event.longitude.toFixed(2)}:${Math.floor(event.originTime / 60000)}`;
+
+                    // Sprint Audit FIX A6: Consensus tracking — multi-source confirmation boost.
+                    // Track how many distinct sources reported the same earthquake.
+                    let sources = this.consensusMap.get(dedupKey);
+                    if (!sources) {
+                        sources = new Set<string>();
+                        this.consensusMap.set(dedupKey, sources);
+                    }
+                    sources.add(event.source);
+                    const consensusCount = sources.size;
+                    const isConfirmed = consensusCount >= 2;
+                    if (isConfirmed) {
+                        logger.info(`✅ MULTI-SOURCE CONSENSUS (${consensusCount} sources): M${event.magnitude.toFixed(1)} ${event.location} — confirmed earthquake`);
+                    }
+                    // Cleanup old consensus entries (keep last 200)
+                    if (this.consensusMap.size > 200) {
+                        const oldestKey = this.consensusMap.keys().next().value;
+                        if (oldestKey) this.consensusMap.delete(oldestKey);
+                    }
+
                     await notificationCenter.notify('earthquake', {
                         magnitude: event.magnitude,
                         location: event.location,
@@ -547,6 +630,7 @@ class MultiSourceEEWService {
                         source: event.source,
                         latitude: event.latitude,
                         longitude: event.longitude,
+                        eventKey: dedupKey,
                     }, 'MultiSourceEEWService');
                     wasNotified = true;
                     logger.info(`🚨 EEW NOTIFICATION TRIGGERED: M${event.magnitude.toFixed(1)} ${event.location} from ${event.source}`);

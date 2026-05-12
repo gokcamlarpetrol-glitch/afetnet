@@ -159,14 +159,13 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     logger.info('Starting initialization... (auth-gated=' + (options.authenticated === true) + ')');
 
     // -----------------------------------------------------------------------
-    // CRITICAL DIAGNOSTIC: Check if MMKV is actually persistent.
-    // If MemoryStorage fallback is active, auth/onboarding/settings will NOT
-    // persist across restarts — the #1 cause of the "logs out on kill" bug.
+    // CRITICAL DIAGNOSTIC: Record which storage backend is active on this launch.
+    // AsyncStorage fallback is still persistent, but startup must wait for hydration.
     // -----------------------------------------------------------------------
     try {
-      const { isMMKVPersistent } = await import('./utils/storage');
-      if (!isMMKVPersistent) {
-        logger.error('MMKV fell back to MemoryStorage — auth/onboarding will NOT persist across restarts');
+      const { storageBackend, isStorageReady } = await import('./utils/storage');
+      if (storageBackend !== 'mmkv') {
+        logger.warn(`Persistent storage fallback active (${storageBackend}) — ready=${isStorageReady()}`);
       }
     } catch { /* non-blocking */ }
 
@@ -229,6 +228,19 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       logger.info('✅ Crashlytics');
     } catch (e: unknown) {
       logger.warn('Crashlytics init failed (non-blocking):', e);
+    }
+
+    // Sentry initialization (no-op if @sentry/react-native not installed)
+    try {
+      const { sentryService } = await import('./services/SentryService');
+      await sentryService.initialize();
+      if (sentryService.isReady()) {
+        logger.info('✅ Sentry (remote crash reporting active)');
+      } else {
+        logger.info('✅ Sentry (no-op — SDK or DSN missing)');
+      }
+    } catch (e: unknown) {
+      logger.warn('Sentry init failed (non-blocking):', e);
     }
 
     try {
@@ -549,6 +561,52 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
           const { contactRequestService } = await import('./services/ContactRequestService');
           await contactRequestService.initialize();
           logger.info('✅ ContactRequestService');
+        })(),
+        (async () => {
+          // Sprint 2: SessionSecurityService — inactivity timeout, background re-auth gate.
+          // Service exists since v1.x but was never wired. Now active.
+          const { sessionSecurityService } = await import('./services/security/SessionSecurityService');
+          await sessionSecurityService.initialize();
+          logger.info('✅ SessionSecurityService (inactivity + background timeout)');
+        })(),
+        (async () => {
+          // Sprint 2: ClockSkewService — detect device clock drift > 5min.
+          // Without this, all Firestore writes silently fail (rules reject stale timestamps).
+          const { clockSkewService } = await import('./services/ClockSkewService');
+          await clockSkewService.start();
+          logger.info('✅ ClockSkewService (drift monitor)');
+        })(),
+        (async () => {
+          // Sprint 4: DeepLinkService — afetnet:// URL handler for family invites,
+          // SOS detail, earthquake detail, etc. Viral loop için kritik.
+          const { deepLinkService } = await import('./services/DeepLinkService');
+          await deepLinkService.start();
+          // Process any pending URL captured before auth was ready
+          deepLinkService.processPending();
+          logger.info('✅ DeepLinkService (afetnet:// handler)');
+        })(),
+        (async () => {
+          // Sprint 18-19: MultiDeviceService — primary device tracking.
+          // Prevents duplicate SOS when user is logged in on multiple devices.
+          const { multiDeviceService } = await import('./services/MultiDeviceService');
+          await multiDeviceService.initialize();
+          logger.info('✅ MultiDeviceService (primary device gate)');
+        })(),
+        (async () => {
+          // Sprint 16-17: Mesh hierarchy v2 — backbone peer election.
+          // Battery/peer-count'a göre cihaz otomatik backbone/leaf mode'una geçer.
+          const { meshBackbonePeerService } = await import('./services/mesh/MeshBackbonePeerService');
+          await meshBackbonePeerService.start();
+          logger.info('✅ MeshBackbonePeerService (hierarchy v2)');
+        })(),
+        (async () => {
+          // HATA 1 FIX: EmergencyHealthSharingService initialize.
+          // Servis vardı ama init.ts'e WIRE EDİLMEMİŞTİ → SOS sırasında sağlık verisi
+          // mesh'e BROADCAST EDİLMİYORDU (isEnabled = false default, opt-in flag MMKV'den okunmuyordu).
+          // Vaad: "Kurtarma ekipleri kan grubu, alerji, ilaçları görür" — bu fix olmadan YALAN.
+          const { emergencyHealthSharingService } = await import('./services/EmergencyHealthSharingService');
+          await emergencyHealthSharingService.initialize();
+          logger.info('✅ EmergencyHealthSharingService (KVKK opt-in + mesh broadcast)');
         })(),
       ]);
       for (const r of optionalResults) {
@@ -1113,6 +1171,13 @@ export async function shutdownApp() {
     unifiedSOSController.destroy();
   } catch (e) { logger.error('UnifiedSOSController destroy failed:', e); }
 
+  // HATA 2 FIX: Reset SOS store on logout — clears signalHistory + incomingSOSAlerts.
+  // Without this, User B sees User A's SOS history on first login (cross-user data leak).
+  try {
+    const { useSOSStore } = await import('./services/sos/SOSStateManager');
+    useSOSStore.getState().reset();
+  } catch { /* best-effort */ }
+
   // Cleanup MeshEmergencyService (beacon timer, inactivity timer)
   // Without this, emergency beacons continue broadcasting for old user after account switch
   try {
@@ -1193,6 +1258,43 @@ export async function shutdownApp() {
   try {
     const { backendEmergencyService } = await import('./services/BackendEmergencyService');
     backendEmergencyService.shutdown();
+  } catch { /* already stopped */ }
+
+  // Cleanup ClockSkewService (periodic timer)
+  try {
+    const { clockSkewService } = await import('./services/ClockSkewService');
+    clockSkewService.stop();
+  } catch { /* already stopped */ }
+
+  // Cleanup DeepLinkService (Linking event listener)
+  try {
+    const { deepLinkService } = await import('./services/DeepLinkService');
+    deepLinkService.stop();
+  } catch { /* already stopped */ }
+
+  // REVIEW FIX: PermissionRePromptService reset (user-scoped storage cleanup)
+  // User A's "denied 3 times" state must NOT block User B on same device.
+  try {
+    const { permissionRePromptService } = await import('./services/PermissionRePromptService');
+    permissionRePromptService.reset();
+  } catch { /* already cleared */ }
+
+  // Cleanup MultiDeviceService (Firestore onSnapshot listener)
+  try {
+    const { multiDeviceService } = await import('./services/MultiDeviceService');
+    await multiDeviceService.destroy();
+  } catch { /* already stopped */ }
+
+  // Cleanup MeshBackbonePeerService (periodic timer)
+  try {
+    const { meshBackbonePeerService } = await import('./services/mesh/MeshBackbonePeerService');
+    meshBackbonePeerService.stop();
+  } catch { /* already stopped */ }
+
+  // Cleanup MeshReputationService (in-memory state)
+  try {
+    const { meshReputationService } = await import('./services/mesh/MeshReputationService');
+    meshReputationService.reset();
   } catch { /* already stopped */ }
 
   // Cleanup SessionSecurityService (check interval + AppState listener)

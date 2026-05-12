@@ -26,21 +26,18 @@ export interface Cluster {
 }
 
 /**
- * Cluster markers using Supercluster
+ * Create a reusable Supercluster index from markers.
+ * Call this once when data changes, then call getClustersAtZoom on pan/zoom.
  */
-export function clusterMarkers(
+export function createClusterIndex(
   markers: ClusterableMarker[],
-  zoomLevel: number,
-  minDistance: number = 40, // pixels approx, supercluster uses 40 default
-): (ClusterableMarker | Cluster)[] {
-
-  // Supercluster instance
+  minDistance: number = 40,
+): Supercluster {
   const index = new Supercluster({
     radius: minDistance,
     maxZoom: 16,
   });
 
-  // Convert to GeoJSON
   const points = markers.map(m => ({
     type: 'Feature' as const,
     properties: { cluster: false, ...m },
@@ -50,15 +47,24 @@ export function clusterMarkers(
     },
   }));
 
-  try {
-    index.load(points);
+  index.load(points);
+  return index;
+}
 
-    // Get clusters for the whole world
-    // In a real app with millions of points, we would pass the current BBox
-    // But for < 10k points, clustering all is fine and simplifies state
+/**
+ * Get clusters from a pre-built index at a given zoom level.
+ * This is O(log N) — safe to call on every pan/zoom.
+ */
+export function getClustersAtZoom(
+  index: Supercluster | null,
+  zoomLevel: number,
+  fallbackMarkers: ClusterableMarker[],
+): (ClusterableMarker | Cluster)[] {
+  if (!index) return fallbackMarkers;
+
+  try {
     const clusters = index.getClusters([-180, -90, 180, 90], Math.floor(zoomLevel));
 
-    // Map back to our flat structure
     return clusters.map(c => {
       const props = c.properties;
 
@@ -69,22 +75,32 @@ export function clusterMarkers(
           longitude: c.geometry.coordinates[0],
           point_count: props.point_count,
           count: props.point_count,
-          // expansionZoom: index.getClusterExpansionZoom(c.id as number),
         } as Cluster;
       }
 
-      // Return original marker with its properties
       return {
         ...props,
         latitude: c.geometry.coordinates[1],
         longitude: c.geometry.coordinates[0],
       } as ClusterableMarker;
     });
-
   } catch (error) {
     logger.error('Clustering error:', error);
-    return markers; // Fallback
+    return fallbackMarkers;
   }
+}
+
+/**
+ * Cluster markers using Supercluster (convenience wrapper).
+ * For repeated zoom changes on the same data, prefer createClusterIndex + getClustersAtZoom.
+ */
+export function clusterMarkers(
+  markers: ClusterableMarker[],
+  zoomLevel: number,
+  minDistance: number = 40,
+): (ClusterableMarker | Cluster)[] {
+  const index = createClusterIndex(markers, minDistance);
+  return getClustersAtZoom(index, zoomLevel, markers);
 }
 
 /**
@@ -93,7 +109,8 @@ export function clusterMarkers(
 export function isCluster(item: unknown): item is Cluster {
   if (!item || typeof item !== 'object') return false;
   const obj = item as Record<string, unknown>;
-  return (!!obj.point_count || !!obj.count || (typeof obj.id === 'string' && obj.id.startsWith('cluster-')));
+  return (typeof obj.point_count === 'number' && obj.point_count > 0) ||
+    (typeof obj.id === 'string' && obj.id.startsWith('cluster-'));
 }
 
 /**

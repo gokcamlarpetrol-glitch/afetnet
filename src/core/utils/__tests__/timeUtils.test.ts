@@ -8,6 +8,8 @@ import {
   formatToTurkishDate,
   formatToTurkishTimeOnly,
   formatToTurkishDateTime,
+  formatTurkeyApiDate,
+  formatTurkeyApiDateTime,
   getTimeDifferenceTurkish,
   parseAFADDate,
 } from '../timeUtils';
@@ -80,6 +82,16 @@ describe('timeUtils', () => {
     });
   });
 
+  describe('formatTurkeyApiDateTime', () => {
+    it('should format provider API datetime in Turkey local time', () => {
+      expect(formatTurkeyApiDateTime(TEST_TIMESTAMP)).toBe('2025-01-15T17:30:45');
+    });
+
+    it('should format provider API date in Turkey local time', () => {
+      expect(formatTurkeyApiDate(TEST_TIMESTAMP)).toBe('2025-01-15');
+    });
+  });
+
   describe('getTimeDifferenceTurkish', () => {
     it('should return "Az önce" for very recent timestamps', () => {
       const now = Date.now();
@@ -121,6 +133,11 @@ describe('timeUtils', () => {
       const result = parseAFADDate('2025-01-15 17:30:45');
       expect(result).toBeDefined();
       expect(typeof result).toBe('number');
+    });
+
+    it('should parse Kandilli dotted date format as Turkey local time', () => {
+      const result = parseAFADDate('2025.01.15 22:30:00');
+      expect(new Date(result).toISOString()).toBe('2025-01-15T19:30:00.000Z');
     });
 
     it('should handle empty string', () => {

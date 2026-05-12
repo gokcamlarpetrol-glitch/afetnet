@@ -489,6 +489,11 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         uid: uidToSave,
         name: trimmedName,
         status: 'unknown',
+        // HATA 5 FIX: Default approval state 'pending' — KVKK + stalking koruma.
+        // Karşı taraf onaylayana kadar GPS subscription kurulmaz, lokasyon görünmez,
+        // SOS broadcast'lerinde dahil edilmez. ContactRequestService onAcceptCallback
+        // çağrıldığında approvalState 'mutual' olarak güncellenmeli.
+        approvalState: 'pending',
         // New member has no confirmed activity yet; avoid false "just now" freshness.
         lastSeen: 0,
         latitude: 0,
@@ -501,6 +506,23 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
+
+      // SPRINT 4: Send mutual contact request — KVKK + stalking-prevention.
+      // Without this, anyone with target UID could silently add+track them.
+      // The recipient now sees a notification and can accept/decline.
+      // Best-effort: fire-and-forget; local add still succeeds even if cloud request fails.
+      try {
+        const { contactRequestService } = await import('../../services/ContactRequestService');
+        // toQrId is required by API but optional in flow — pass UID as fallback
+        await contactRequestService.sendContactRequest(
+          uidToSave,
+          uidToSave, // toQrId — fallback to uid when QR-based discovery not used
+          `${trimmedName} sizi aile listesine ekledi — kabul ederek karşılıklı görünür olun.`,
+        );
+        logger.info(`Mutual approval contact request sent to ${uidToSave}`);
+      } catch (mutualErr) {
+        logger.warn('Mutual approval request failed (non-blocking):', mutualErr);
+      }
 
       haptics.notificationSuccess();
       logger.info('Family member added successfully:', { uid: uidToSave, deviceId: resolvedDeviceId, name: trimmedName });
@@ -561,7 +583,7 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

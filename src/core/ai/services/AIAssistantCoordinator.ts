@@ -17,6 +17,7 @@ import { redactPII } from '../utils/piiRedactor';
 
 /** Intents related to health/first-aid that require a medical disclaimer */
 const HEALTH_INTENTS = new Set(['INJURY', 'FIRST_AID']);
+const HEALTH_DISCLAIMER = '⚠️ Bu bilgi tıbbi tavsiye değildir. Sağlık sorunları için 112\'yi arayın.';
 
 const logger = createLogger('AIAssistantCoordinator');
 
@@ -27,6 +28,13 @@ const PANIC_ASSISTANT_TTL = 5 * 60 * 1000; // 5 dakika
 function isFresh(timestamp: number | null, ttl: number) {
   if (!timestamp) return false;
   return Date.now() - timestamp < ttl;
+}
+
+function appendHealthDisclaimer(answer: string, intent: string): string {
+  if (!HEALTH_INTENTS.has(intent) || answer.includes(HEALTH_DISCLAIMER)) {
+    return answer;
+  }
+  return `${answer}\n\n${HEALTH_DISCLAIMER}`;
 }
 
 export const aiAssistantCoordinator = {
@@ -411,6 +419,7 @@ export const aiAssistantCoordinator = {
         logger.info('🚨 Emergency query - using instant offline response');
         return {
           ...offlineResponse,
+          answer: appendHealthDisclaimer(offlineResponse.answer, offlineResponse.intent),
           source: 'offline',
           responseTime: Date.now() - startTime,
         };
@@ -422,9 +431,7 @@ export const aiAssistantCoordinator = {
           const onlineResponse = await this.getOnlineResponse(message, offlineResponse, history);
           if (onlineResponse) {
             // Append medical disclaimer for health/first-aid intents
-            const answer = HEALTH_INTENTS.has(onlineResponse.intent)
-              ? onlineResponse.answer + '\n\n⚠️ Bu bilgi tıbbi tavsiye değildir. Sağlık sorunları için 112\'yi arayın.'
-              : onlineResponse.answer;
+            const answer = appendHealthDisclaimer(onlineResponse.answer, onlineResponse.intent);
             return {
               ...onlineResponse,
               answer,
@@ -441,6 +448,7 @@ export const aiAssistantCoordinator = {
       // 5. Return offline response
       return {
         ...offlineResponse,
+        answer: appendHealthDisclaimer(offlineResponse.answer, offlineResponse.intent),
         responseTime: Date.now() - startTime,
       };
 
@@ -612,4 +620,3 @@ export interface SuggestedAction {
   action: 'call' | 'navigate' | 'share' | 'info';
   data?: string;
 }
-

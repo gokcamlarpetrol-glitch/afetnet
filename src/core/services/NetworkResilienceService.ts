@@ -253,6 +253,28 @@ class NetworkResilienceService {
       logger.info(`🔄 Circuit breaker reset for ${endpoint}`);
     }
   }
+
+  /**
+   * ELITE: Clean up stale circuit breakers to prevent unbounded Map growth.
+   * Removes circuit breakers that haven't had activity in over 10 minutes.
+   */
+  cleanupStaleCircuitBreakers(): void {
+    const now = Date.now();
+    const STALE_THRESHOLD = 10 * 60 * 1000; // 10 minutes
+    for (const [endpoint, breaker] of this.circuitBreakers.entries()) {
+      if (!breaker.isOpen && now - breaker.lastFailureTime > STALE_THRESHOLD) {
+        this.circuitBreakers.delete(endpoint);
+      }
+    }
+  }
+
+  /**
+   * ELITE: Reset all state (for testing or shutdown)
+   */
+  destroy(): void {
+    this.circuitBreakers.clear();
+    this.requestCache.clear();
+  }
 }
 
 export const networkResilienceService = new NetworkResilienceService();

@@ -44,6 +44,7 @@ const CircularGauge = ({ score, color }: { score: number; color: string }) => {
   const [displayScore, setDisplayScore] = useState(0);
 
   useEffect(() => {
+    animatedValue.removeAllListeners();
     animatedValue.addListener(({ value }) => setDisplayScore(Math.round(value)));
 
     Animated.timing(animatedValue, {
@@ -120,6 +121,15 @@ export default function RiskScoreScreen() {
   const [regionData, setRegionData] = useState(REGIONAL_RISK_DATA.default);
   const [recentEarthquakes, setRecentEarthquakes] = useState<number>(0);
   const [nearbyMagnitude, setNearbyMagnitude] = useState<number | null>(null);
+  const mountedRef = useRef(true);
+  const analyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (analyzeTimerRef.current) clearTimeout(analyzeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     refreshRiskAssessment();
@@ -129,14 +139,17 @@ export default function RiskScoreScreen() {
 
   const fetchLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (!mountedRef.current) return;
       if (status !== 'granted') { setLocationName('İzin Verilmedi'); return; }
 
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (!mountedRef.current) return;
       const addresses = await Location.reverseGeocodeAsync({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
       });
+      if (!mountedRef.current) return;
 
       if (addresses.length > 0) {
         const city = addresses[0].city || addresses[0].region || 'Türkiye';
@@ -149,13 +162,14 @@ export default function RiskScoreScreen() {
         });
       }
     } catch (e) {
-      setLocationName('Konum Alınamadı');
+      if (mountedRef.current) setLocationName('Konum Alınamadı');
     }
   };
 
   const calculateRecentActivity = () => {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
     const recent = earthquakes.filter(eq => eq.time > oneDayAgo && eq.magnitude >= 3.0);
+    if (!mountedRef.current) return;
     setRecentEarthquakes(recent.length);
     if (recent.length > 0) setNearbyMagnitude(Math.max(...recent.map(eq => eq.magnitude)));
   };
@@ -166,7 +180,13 @@ export default function RiskScoreScreen() {
     refreshRiskAssessment();
     fetchLocation();
     calculateRecentActivity();
-    setTimeout(() => { setAnalyzing(false); haptics.notificationSuccess(); }, 2500);
+    analyzeTimerRef.current = setTimeout(() => {
+      analyzeTimerRef.current = null;
+      if (mountedRef.current) {
+        setAnalyzing(false);
+        haptics.notificationSuccess();
+      }
+    }, 2500);
   };
 
   const getScoreColor = (score: number) => {

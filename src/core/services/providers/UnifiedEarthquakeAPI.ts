@@ -9,7 +9,7 @@
 import { getErrorMessage } from '../../utils/errorUtils';
 import { createLogger } from '../../utils/logger';
 import { Earthquake } from '../../stores/earthquakeStore';
-import { parseAFADDate } from '../../utils/timeUtils';
+import { formatTurkeyApiDateTime, parseAFADDate } from '../../utils/timeUtils';
 import { safeLowerCase } from '../../utils/safeString';
 
 const logger = createLogger('UnifiedEarthquakeAPI');
@@ -171,9 +171,7 @@ export class UnifiedEarthquakeAPI {
 
           // Parse time
           // API returns: "2024-01-15 14:23:11" (Turkey timezone)
-          const dateTimeStr = item.date_time.replace(' ', 'T') + '+03:00';
-          const parsedDate = new Date(dateTimeStr);
-          const time = parsedDate.getTime();
+          const time = parseAFADDate(item.date_time);
 
           if (isNaN(time) || time <= 0) {
             if (__DEV__ && i < 5) {
@@ -289,16 +287,15 @@ export class UnifiedEarthquakeAPI {
       const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
       // Calculate date range (last 7 days)
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 7);
+      const endDate = Date.now();
+      const startDate = endDate - 7 * 24 * 60 * 60 * 1000;
 
       const requestBody = {
         provider: 'afad',
         match: {
           mag: 1.0, // Minimum magnitude
-          date_starts: startDate.toISOString().replace('T', ' ').substring(0, 19),
-          date_ends: endDate.toISOString().replace('T', ' ').substring(0, 19),
+          date_starts: formatTurkeyApiDateTime(startDate).replace('T', ' '),
+          date_ends: formatTurkeyApiDateTime(endDate).replace('T', ' '),
         },
         sort: 'date_-1', // Sort by date descending (newest first)
         limit: 100,
@@ -355,16 +352,15 @@ export class UnifiedEarthquakeAPI {
       const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
       // Calculate date range (last 7 days)
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 7);
+      const endDate = Date.now();
+      const startDate = endDate - 7 * 24 * 60 * 60 * 1000;
 
       const requestBody = {
         provider: 'kandilli',
         match: {
           mag: 1.0, // Minimum magnitude
-          date_starts: startDate.toISOString().replace('T', ' ').substring(0, 19),
-          date_ends: endDate.toISOString().replace('T', ' ').substring(0, 19),
+          date_starts: formatTurkeyApiDateTime(startDate).replace('T', ' '),
+          date_ends: formatTurkeyApiDateTime(endDate).replace('T', ' '),
         },
         sort: 'date_-1', // Sort by date descending (newest first)
         limit: 100,
@@ -432,9 +428,7 @@ export class UnifiedEarthquakeAPI {
         }
 
         const depth = parseFloat(String(item.depth));
-        const dateTimeStr = item.date_time.replace(' ', 'T') + '+03:00';
-        const parsedDate = new Date(dateTimeStr);
-        const time = parsedDate.getTime();
+        const time = parseAFADDate(item.date_time);
 
         if (isNaN(time) || time <= 0 || time < sevenDaysAgo) {
           continue;
@@ -470,4 +464,3 @@ export class UnifiedEarthquakeAPI {
 }
 
 export const unifiedEarthquakeAPI = new UnifiedEarthquakeAPI();
-

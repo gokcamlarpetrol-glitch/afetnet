@@ -38,7 +38,7 @@ import {
     deleteDoc,
     type Unsubscribe,
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 
@@ -236,7 +236,7 @@ export async function savePWaveDetection(
 
         // CRITICAL: Firestore rules require userId == auth.uid
         // Without this, all P-wave writes will be rejected with permission-denied
-        const currentUser = getAuth().currentUser;
+        const currentUser = getFirebaseAuth()?.currentUser;
         if (!currentUser) {
             logger.debug('No authenticated user, skipping P-wave save');
             return null;
@@ -316,7 +316,8 @@ export async function getRecentPWaveDetections(
 }
 
 /**
- * Subscribe to real-time P-wave detections in an area
+ * Subscribe to real-time P-wave detections in an area.
+ * Uses disposed flag to prevent race condition between async init and cleanup.
  */
 export function subscribeToPWaveDetections(
     latitude: number,
@@ -330,11 +331,16 @@ export function subscribeToPWaveDetections(
         return null;
     }
 
-    try {
-        // Synchronous call - we need the db instance immediately for onSnapshot
-        const getDb = async () => {
+    let disposed = false;
+    let unsubscribe: Unsubscribe | null = null;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 20;
+
+    const startSnapshot = async () => {
+        try {
             const db = await getFirestoreInstanceAsync();
-            if (!db) return null;
+            if (!db || disposed) return;
 
             const minTime = Date.now() - 60000; // Last 60 seconds
 
@@ -345,7 +351,9 @@ export function subscribeToPWaveDetections(
                 limit(20),
             );
 
-            return onSnapshot(q, (snapshot) => {
+            const unsub = onSnapshot(q, (snapshot) => {
+                if (disposed) return;
+                retryCount = 0; // Reset on successful snapshot
                 const detections: PWaveDetection[] = [];
                 snapshot.forEach((doc) => {
                     const data = doc.data() as PWaveDetection;
@@ -361,28 +369,44 @@ export function subscribeToPWaveDetections(
                 });
 
                 if (detections.length > 0) {
-                    logger.info(`📡 ${detections.length} P-wave detections in area`);
+                    logger.info(`${detections.length} P-wave detections in area`);
                     onDetection(detections);
                 }
+            }, (error) => {
+                logger.warn('P-wave detections listener error:', error);
+                // Retry with exponential backoff
+                if (disposed || retryCount >= MAX_RETRIES) {
+                    if (retryCount >= MAX_RETRIES) {
+                        logger.error(`P-wave subscription exhausted ${MAX_RETRIES} retries`);
+                    }
+                    return;
+                }
+                retryCount++;
+                const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+                logger.info(`P-wave subscription retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+                retryTimer = setTimeout(() => {
+                    retryTimer = null;
+                    if (!disposed) startSnapshot();
+                }, delay);
             });
-        };
 
-        // Start async subscription
-        let unsubscribe: Unsubscribe | null = null;
-        getDb().then((unsub) => {
-            unsubscribe = unsub;
-        });
-
-        // Return a function that will unsubscribe when called
-        return () => {
-            if (unsubscribe) {
-                unsubscribe();
+            if (disposed) {
+                unsub();
+                return;
             }
-        };
-    } catch (error) {
-        handleFirebaseError(error, 'P-wave subscription');
-        return null;
-    }
+            unsubscribe = unsub;
+        } catch (error) {
+            handleFirebaseError(error, 'P-wave subscription');
+        }
+    };
+
+    startSnapshot();
+
+    return () => {
+        disposed = true;
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        unsubscribe?.();
+    };
 }
 
 // ============================================================
@@ -469,7 +493,8 @@ export async function getActiveEEWBroadcasts(
 }
 
 /**
- * Subscribe to active EEW broadcasts (real-time)
+ * Subscribe to active EEW broadcasts (real-time).
+ * Uses disposed flag to prevent race condition between async init and cleanup.
  */
 export function subscribeToEEWBroadcasts(
     onBroadcast: (broadcasts: EEWBroadcast[]) => void,
@@ -480,12 +505,16 @@ export function subscribeToEEWBroadcasts(
         return null;
     }
 
-    try {
-        let unsubscribe: Unsubscribe | null = null;
+    let disposed = false;
+    let unsubscribe: Unsubscribe | null = null;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 20;
 
-        const setupSubscription = async () => {
+    const startSnapshot = async () => {
+        try {
             const db = await getFirestoreInstanceAsync();
-            if (!db) return;
+            if (!db || disposed) return;
 
             const q = query(
                 collection(db, 'eew_broadcasts'),
@@ -494,30 +523,53 @@ export function subscribeToEEWBroadcasts(
                 limit(5),
             );
 
-            unsubscribe = onSnapshot(q, (snapshot) => {
+            const unsub = onSnapshot(q, (snapshot) => {
+                if (disposed) return;
+                retryCount = 0; // Reset on successful snapshot
                 const broadcasts: EEWBroadcast[] = [];
                 snapshot.forEach((doc) => {
                     broadcasts.push({ ...doc.data() as EEWBroadcast, id: doc.id });
                 });
 
                 if (broadcasts.length > 0) {
-                    logger.info(`🚨 ${broadcasts.length} active EEW broadcasts`);
+                    logger.info(`${broadcasts.length} active EEW broadcasts`);
                     onBroadcast(broadcasts);
                 }
+            }, (error) => {
+                logger.warn('EEW broadcasts listener error:', error);
+                // Retry with exponential backoff
+                if (disposed || retryCount >= MAX_RETRIES) {
+                    if (retryCount >= MAX_RETRIES) {
+                        logger.error(`EEW broadcast subscription exhausted ${MAX_RETRIES} retries`);
+                    }
+                    return;
+                }
+                retryCount++;
+                const delay = Math.min(2000 * Math.pow(2, retryCount - 1), 60000);
+                logger.info(`EEW broadcast subscription retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+                retryTimer = setTimeout(() => {
+                    retryTimer = null;
+                    if (!disposed) startSnapshot();
+                }, delay);
             });
-        };
 
-        setupSubscription();
-
-        return () => {
-            if (unsubscribe) {
-                unsubscribe();
+            if (disposed) {
+                unsub();
+                return;
             }
-        };
-    } catch (error) {
-        handleFirebaseError(error, 'EEW broadcast subscription');
-        return null;
-    }
+            unsubscribe = unsub;
+        } catch (error) {
+            handleFirebaseError(error, 'EEW broadcast subscription');
+        }
+    };
+
+    startSnapshot();
+
+    return () => {
+        disposed = true;
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        unsubscribe?.();
+    };
 }
 
 /**

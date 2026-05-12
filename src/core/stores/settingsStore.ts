@@ -5,13 +5,75 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { eliteStorage } from '../utils/storage';
+import { eliteStorage, DirectStorage, waitForStorageReady } from '../utils/storage';
+
+const SETTINGS_STORE_KEY = 'afetnet-settings';
+const LEGACY_EULA_ACCEPTED_KEY = 'AFETNET_EULA_ACCEPTED';
+const AUTH_CACHE_KEY = 'afetnet_auth_cached';
+
+const getPersistedEulaAccepted = (): boolean | null => {
+  try {
+    const raw = DirectStorage.getString(SETTINGS_STORE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    const value = parsed?.state?.eulaAccepted;
+    if (value === true) return true;
+    if (value === false) return false;
+  } catch { /* ignore parse errors */ }
+
+  return null;
+};
+
+const persistLegacyEulaAccepted = (accepted: boolean): void => {
+  try {
+    if (accepted) {
+      DirectStorage.setString(LEGACY_EULA_ACCEPTED_KEY, '1');
+    } else {
+      DirectStorage.delete(LEGACY_EULA_ACCEPTED_KEY);
+    }
+  } catch {
+    // non-blocking
+  }
+};
+
+// CRITICAL FIX: Read eulaAccepted synchronously from MMKV at module load time.
+// Zustand persist is ASYNC — on app resume, eulaAccepted is false for ~300ms,
+// causing the EULA modal to flash. This mirrors the onboardingStore pattern.
+const getInitialEulaAccepted = (): boolean => {
+  const persistedValue = getPersistedEulaAccepted();
+  if (persistedValue !== null) {
+    return persistedValue;
+  }
+
+  try {
+    if (DirectStorage.getString(LEGACY_EULA_ACCEPTED_KEY) === '1') {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Final safety net: authenticated returning users should not be blocked
+  // by an EULA modal when persisted settings payload is unreadable.
+  try {
+    if (DirectStorage.getBoolean(AUTH_CACHE_KEY)) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+
+  return false;
+};
 
 interface SettingsState {
   // Notifications
   notificationsEnabled: boolean;
   // Location
   locationEnabled: boolean;
+  // Family Location Sharing — persisted so tracking auto-resumes on app restart
+  familyLocationSharingEnabled: boolean;
   // BLE Mesh
   bleMeshEnabled: boolean;
   // EEW (Earthquake Early Warning)
@@ -46,7 +108,7 @@ interface SettingsState {
 
   // ELITE: Comprehensive Earthquake Settings
   // Notification Thresholds
-  minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 3.0)
+  minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 4.0)
   maxDistanceForNotification: number; // Maximum distance in km (0 = unlimited, default: 0)
 
   // Critical Earthquake Settings
@@ -110,12 +172,14 @@ interface SettingsState {
 
   // ELITE: Compliance
   eulaAccepted: boolean;
+  aiDataSharingConsented: boolean; // Apple 5.1.2(i): explicit consent before sharing data with OpenAI
   blockedUsers: string[]; // List of blocked user IDs
 }
 
 interface SettingsActions {
   setNotifications: (enabled: boolean) => void;
   setLocation: (enabled: boolean) => void;
+  setFamilyLocationSharing: (enabled: boolean) => void;
   setBleMesh: (enabled: boolean) => void;
   setEew: (enabled: boolean) => void;
   setEarthquakeMonitoring: (enabled: boolean) => void;
@@ -180,6 +244,7 @@ interface SettingsActions {
 
   // ELITE: Compliance
   setEulaAccepted: (accepted: boolean) => void;
+  setAiDataSharingConsented: (consented: boolean) => void;
   blockUser: (userId: string) => void;
   unblockUser: (userId: string) => void;
   isUserBlocked: (userId: string) => boolean;
@@ -190,6 +255,7 @@ interface SettingsActions {
 const defaultSettings: SettingsState = {
   notificationsEnabled: true,
   locationEnabled: true,
+  familyLocationSharingEnabled: false,
   bleMeshEnabled: true,
   eewEnabled: true,
   earthquakeMonitoringEnabled: true,
@@ -253,8 +319,9 @@ const defaultSettings: SettingsState = {
   notificationShowPreview: true,
   notificationGroupByMagnitude: false,
 
-  // ELITE: Compliance
-  eulaAccepted: false,
+  // ELITE: Compliance — use synchronous MMKV read to prevent EULA flash on app resume
+  eulaAccepted: getInitialEulaAccepted(),
+  aiDataSharingConsented: false,
   blockedUsers: [],
 };
 
@@ -265,6 +332,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
 
       setNotifications: (enabled) => set({ notificationsEnabled: enabled }),
       setLocation: (enabled) => set({ locationEnabled: enabled }),
+      setFamilyLocationSharing: (enabled) => set({ familyLocationSharingEnabled: enabled }),
       setBleMesh: (enabled) => set({ bleMeshEnabled: enabled }),
       setEew: (enabled) => set({ eewEnabled: enabled }),
       setEarthquakeMonitoring: (enabled) => set({ earthquakeMonitoringEnabled: enabled }),
@@ -328,7 +396,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setNotificationGroupByMagnitude: (enabled) => set({ notificationGroupByMagnitude: enabled }),
 
       // ELITE: Compliance
-      setEulaAccepted: (accepted) => set({ eulaAccepted: accepted }),
+      setEulaAccepted: (accepted) => {
+        persistLegacyEulaAccepted(accepted);
+        set({ eulaAccepted: accepted });
+      },
+      setAiDataSharingConsented: (consented) => set({ aiDataSharingConsented: consented }),
 
       blockUser: (userId) => set((state) => ({
         blockedUsers: state.blockedUsers.includes(userId) ? state.blockedUsers : [...state.blockedUsers, userId],
@@ -338,11 +410,58 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       })),
       isUserBlocked: (userId) => get().blockedUsers.includes(userId),
 
-      resetToDefaults: () => set(defaultSettings),
+      resetToDefaults: () => {
+        const eulaAccepted = get().eulaAccepted || getInitialEulaAccepted();
+        const aiDataSharingConsented = get().aiDataSharingConsented;
+        persistLegacyEulaAccepted(eulaAccepted);
+        set({ ...defaultSettings, eulaAccepted, aiDataSharingConsented });
+      },
     }),
     {
-      name: 'afetnet-settings',
+      name: SETTINGS_STORE_KEY,
       storage: createJSONStorage(() => eliteStorage),
+      // Preserve synchronously-read eulaAccepted value after async hydration.
+      // Without this, Zustand persist can overwrite the sync value with stale data.
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          if (__DEV__) console.warn('[SettingsStore] Hydration error:', error);
+        }
+        // FIX: Restore eulaAccepted on hydration failure (state=null) too.
+        // Previously, corrupted JSON → null state → eulaAccepted never restored
+        // → user forced to re-accept EULA after storage corruption.
+        if (!state || !state.eulaAccepted) {
+          const syncValue = getInitialEulaAccepted();
+          if (syncValue) {
+            useSettingsStore.setState({ eulaAccepted: true });
+          }
+        }
+      },
     },
   ),
 );
+
+let eulaGuardInstalled = false;
+
+const ensureEulaGuard = () => {
+  if (eulaGuardInstalled || !getInitialEulaAccepted()) {
+    return;
+  }
+  eulaGuardInstalled = true;
+  useSettingsStore.subscribe((state) => {
+    if (!state.eulaAccepted) {
+      console.warn('[SettingsStore] eulaAccepted was set to false despite persistent accepted=true — restoring immediately');
+      useSettingsStore.setState({ eulaAccepted: true });
+    }
+  });
+};
+
+ensureEulaGuard();
+
+waitForStorageReady().then(() => {
+  if (getInitialEulaAccepted() && !useSettingsStore.getState().eulaAccepted) {
+    useSettingsStore.setState({ eulaAccepted: true });
+  }
+  ensureEulaGuard();
+}).catch((error) => {
+  if (__DEV__) console.warn('[SettingsStore] Storage readiness wait failed:', error);
+});

@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["AfetNetBlePeripheralModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.afetnetbleperipheral.AfetNetBlePeripheralModule"]
+  }
+}

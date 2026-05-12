@@ -162,6 +162,17 @@ class BackgroundMeshService {
             this.appStateSubscription = null;
         }
 
+        // FIX: Unregister background tasks to prevent orphan tasks running after destroy.
+        // Best-effort — unregisterTaskAsync may throw if task wasn't registered.
+        if (this.isBackgroundEnabled) {
+            this.unregisterBackgroundTasks().catch(() => { /* best effort */ });
+        }
+
+        // FIX: Stop Android foreground service if running
+        if (this.foregroundServiceRunning) {
+            this.stopAndroidForegroundService().catch(() => { /* best effort */ });
+        }
+
         this.isInitialized = false;
     }
 

@@ -29,18 +29,26 @@ export async function registerTokenWithWorker(
   }
 
   try {
-    const response = await fetch(`${BACKEND_URL}/api/push/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        token,
-        provinces,
-        platform: require('react-native').Platform.OS,
-        timestamp: Date.now(),
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response: Response;
+    try {
+      response = await fetch(`${BACKEND_URL}/api/push/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token,
+          provinces,
+          platform: require('react-native').Platform.OS,
+          timestamp: Date.now(),
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       if (__DEV__) {
@@ -66,13 +74,21 @@ export async function unregisterToken(token: string): Promise<boolean> {
   if (!token) return false;
 
   try {
-    const response = await fetch(`${BACKEND_URL}/api/push/unregister`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ token }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response: Response;
+    try {
+      response = await fetch(`${BACKEND_URL}/api/push/unregister`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     return response.ok;
   } catch (error) {
@@ -96,16 +112,24 @@ export async function updateNotificationPreferences(
   if (!token) return false;
 
   try {
-    const response = await fetch(`${BACKEND_URL}/api/push/preferences`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        token,
-        preferences,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response: Response;
+    try {
+      response = await fetch(`${BACKEND_URL}/api/push/preferences`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token,
+          preferences,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     return response.ok;
   } catch (error) {

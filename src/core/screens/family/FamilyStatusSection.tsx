@@ -61,6 +61,7 @@ let styles: any = {};
 try { styles = require('./FamilyScreen.styles').styles; } catch { /* fallback */ }
 
 import type { FamilyMember } from '../../types/family';
+import { isApprovedFamilyMember } from '../../utils/familyApproval';
 
 const logger = createLogger('FamilyStatusSection');
 const FAMILY_TRACKING_CONSUMER_ID = 'family-screen';
@@ -292,6 +293,7 @@ function FamilyStatusSectionInner({
         ].filter((value): value is string => !!value && value.trim().length > 0),
       );
       const reachableMembers = familyMembers.filter((member: FamilyMember) => {
+        if (!isApprovedFamilyMember(member)) return false;
         const targets = [
           member.uid?.trim(),
           member.deviceId?.trim(),

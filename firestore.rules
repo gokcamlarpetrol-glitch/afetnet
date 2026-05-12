@@ -47,18 +47,58 @@ service cloud.firestore {
       return isDeviceOwner(deviceId) || isLinkedFamilyMember(deviceId);
     }
 
-    // V3: Check if two users share a family group
-    // Uses denormalized mapping: users/{uid}/familyMembers/{otherUid}
-    // This mapping is created by FirebaseFamilyOperations.saveFamilyMember()
-    // Falls back to isAuthenticated() during migration (mapping may not exist for all users)
+    // V3: Check if two users have a mutual, explicitly accepted family link.
+    // Pending invitation documents must never unlock live location, SOS, or status reads.
+    function hasMutualFamilyLink(ownerUid, otherUid) {
+      return ownerUid is string
+             && otherUid is string
+             && ownerUid != otherUid
+             && exists(/databases/$(database)/documents/users/$(ownerUid)/familyMembers/$(otherUid))
+             && get(/databases/$(database)/documents/users/$(ownerUid)/familyMembers/$(otherUid)).data.approvalState == 'mutual'
+             && exists(/databases/$(database)/documents/users/$(otherUid)/familyMembers/$(ownerUid))
+             && get(/databases/$(database)/documents/users/$(otherUid)/familyMembers/$(ownerUid)).data.approvalState == 'mutual';
+    }
+
     function sharesFamilyWith(targetUid) {
       return isAuthenticated()
+             && hasMutualFamilyLink(request.auth.uid, targetUid);
+    }
+
+    function hasAcceptedContactRequest(userA, userB) {
+      return userA is string
+             && userB is string
+             && userA != userB
              && (
-               // Check denormalized familyMembers mapping
-               exists(/databases/$(database)/documents/users/$(request.auth.uid)/familyMembers/$(targetUid))
-               // Fallback: target shares a familyId with requester (either direction)
-               || exists(/databases/$(database)/documents/users/$(targetUid)/familyMembers/$(request.auth.uid))
+               (
+                 exists(/databases/$(database)/documents/users/$(userA)/contactRequests/$(userB))
+                 && get(/databases/$(database)/documents/users/$(userA)/contactRequests/$(userB)).data.status == 'accepted'
+               )
+               || (
+                 exists(/databases/$(database)/documents/users/$(userB)/contactRequests/$(userA))
+                 && get(/databases/$(database)/documents/users/$(userB)/contactRequests/$(userA)).data.status == 'accepted'
+               )
              );
+    }
+
+    function isPendingFamilyLinkWrite(userId, otherUid) {
+      return request.resource.data.familyId is string
+             && request.resource.data.approvalState == 'pending'
+             && request.resource.data.requestedBy is string
+             && request.resource.data.requestedBy == request.auth.uid
+             && (
+               request.auth.uid == userId
+               || (
+                 request.auth.uid == otherUid
+                 && exists(/databases/$(database)/documents/users/$(request.auth.uid)/familyMembers/$(userId))
+               )
+             );
+    }
+
+    function isAcceptedFamilyLinkWrite(userId, otherUid) {
+      return request.resource.data.familyId is string
+             && request.resource.data.approvalState == 'mutual'
+             && hasAcceptedContactRequest(userId, otherUid)
+             && (request.auth.uid == userId || request.auth.uid == otherUid);
     }
 
     function isSenderOwned(senderDeviceId) {
@@ -100,6 +140,64 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/rate_limits/$(request.auth.uid))
              || !(get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.messagingBlockedUntil is number)
              || request.time.toMillis() > get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.messagingBlockedUntil;
+    }
+
+    function notBlockedByServerSosRateLimit() {
+      return !exists(/databases/$(database)/documents/rate_limits/$(request.auth.uid))
+             || !(get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.sosBlockedUntil is number)
+             || request.time.toMillis() > get(/databases/$(database)/documents/rate_limits/$(request.auth.uid)).data.sosBlockedUntil;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/conversations/$(conversationId))
+             && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
+             && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+    }
+
+    function isConversationMessageReceiptUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'readBy',
+               'deliveredTo',
+               'status',
+               'read',
+               'delivered',
+               'readAt',
+               'deliveredAt',
+               'updatedAt'
+             ])
+             && (!('status' in request.resource.data)
+                 || !('status' in resource.data)
+                 || request.resource.data.status == resource.data.status
+                 || request.resource.data.status in ['sent', 'delivered', 'read']);
+    }
+
+    function isConversationMessageSenderUpdate() {
+      return resource.data.senderUid == request.auth.uid
+             && request.resource.data.senderUid == resource.data.senderUid
+             && request.resource.data.timestamp == resource.data.timestamp
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'content',
+               'isEdited',
+               'editedAt',
+               'deleted',
+               'deletedAt',
+               'status',
+               'delivered',
+               'deliveredAt',
+               'read',
+               'readAt',
+               'readBy',
+               'deliveredTo',
+               'updatedAt'
+             ])
+             && (!('content' in request.resource.data)
+                 || (request.resource.data.content is string
+                     && request.resource.data.content.size() <= 5000))
+             && (!('status' in request.resource.data)
+                 || !('status' in resource.data)
+                 || request.resource.data.status == resource.data.status
+                 || request.resource.data.status in ['sent', 'delivered', 'read']);
     }
 
     // NOTE: isNewsSummaryJobOwner, hasAppCheck, isNotSpamming removed — unused
@@ -328,6 +426,7 @@ service cloud.firestore {
       match /sos_alerts/{alertId} {
         allow read: if isDeviceReadable(deviceId);
         allow create: if isAuthenticated()
+                      && (isDeviceOwner(deviceId) || isLinkedFamilyMember(deviceId))
                       && request.resource.data.signalId is string
                       && request.resource.data.timestamp is number
                       && isRecentClientTimestamp(request.resource.data.timestamp)
@@ -369,9 +468,12 @@ service cloud.firestore {
                     && request.resource.data.deviceId is string
                     && request.resource.data.latitude is number
                     && request.resource.data.longitude is number
-                    && request.resource.data.userId == request.auth.uid;
+                    && request.resource.data.userId == request.auth.uid
+                    && isRecentClientTimestamp(request.resource.data.timestamp);
       allow update: if isAuthenticated()
-                    && resource.data.userId == request.auth.uid;
+                    && resource.data.userId == request.auth.uid
+                    && (!('timestamp' in request.resource.data.diff(resource.data).affectedKeys())
+                        || isRecentClientTimestamp(request.resource.data.timestamp));
       allow delete: if false;
     }
     
@@ -596,6 +698,7 @@ service cloud.firestore {
       match /status_updates/{updateId} {
         allow read: if isOwner(userId) || sharesFamilyWith(userId);
         allow create: if isAuthenticated()
+                      && (isOwner(userId) || sharesFamilyWith(userId))
                       && request.resource.data.timestamp is number
                       && request.resource.data.senderUid is string
                       && request.resource.data.senderUid == request.auth.uid;
@@ -607,24 +710,22 @@ service cloud.firestore {
       // Written by: saveFamilyMember (both directions), deleted by: deleteFamilyMember
       // Read by: sharesFamilyWith() via exists() check
       match /familyMembers/{otherUid} {
-        allow read: if isOwner(userId) || sharesFamilyWith(userId);
-        // SECURITY FIX: Prevent unauthorized family link injection (stalking vector).
-        // saveFamilyMember writes to BOTH users' subcollections:
-        //   1. users/{myUid}/familyMembers/{otherUid} — direct write (auth.uid == userId)
-        //   2. users/{otherUid}/familyMembers/{myUid} — reciprocal write (auth.uid == otherUid)
-        // The reciprocal write is ONLY allowed if the writer has ALREADY added the target
-        // to their OWN familyMembers (proving they initiated the family link).
-        // Attack scenario blocked: attacker writes to victim's familyMembers without
-        // having the victim in their own familyMembers first.
+        allow read: if isOwner(userId)
+                    || (request.auth.uid == otherUid && sharesFamilyWith(userId));
+        // Pending links are invitation metadata only. Live data access requires both
+        // directions to become approvalState='mutual' after an accepted contact request.
         allow create: if isAuthenticated()
+                      && userId != otherUid
                       && (
-                        request.auth.uid == userId
-                        || (
-                          request.auth.uid == otherUid
-                          && exists(/databases/$(database)/documents/users/$(request.auth.uid)/familyMembers/$(userId))
-                        )
+                        isPendingFamilyLinkWrite(userId, otherUid)
+                        || isAcceptedFamilyLinkWrite(userId, otherUid)
                       );
-        allow update: if isOwner(userId); // Only the doc owner can update
+        allow update: if isAuthenticated()
+                      && userId != otherUid
+                      && (
+                        isPendingFamilyLinkWrite(userId, otherUid)
+                        || isAcceptedFamilyLinkWrite(userId, otherUid)
+                      );
         allow delete: if isOwner(userId)
                       || request.auth.uid == otherUid; // Either side can remove mapping
       }
@@ -785,8 +886,13 @@ service cloud.firestore {
     match /families/{familyId} {
       // Any member can read family metadata
       allow read: if isAuthenticated()
-                  && resource.data.members is list
-                  && request.auth.uid in resource.data.members;
+                  && (
+                    (
+                      resource.data.members is list
+                      && request.auth.uid in resource.data.members
+                    )
+                    || hasMutualFamilyLink(resource.data.createdBy, request.auth.uid)
+                  );
       // Any authenticated user can create a family (creator becomes admin)
       allow create: if isAuthenticated()
                     && request.resource.data.members is list
@@ -804,13 +910,24 @@ service cloud.firestore {
       // Family members subcollection
       match /members/{memberUid} {
         allow read: if isAuthenticated()
-                    && get(/databases/$(database)/documents/families/$(familyId)).data.members is list
-                    && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members;
-        // SECURITY FIX: Only existing family members can add new members
+                    && (
+                      (
+                        get(/databases/$(database)/documents/families/$(familyId)).data.members is list
+                        && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members
+                      )
+                      || hasMutualFamilyLink(get(/databases/$(database)/documents/families/$(familyId)).data.createdBy, request.auth.uid)
+                    );
+        // Existing members can add records; accepted invitees can create their own record.
         allow create: if isAuthenticated()
                       && request.resource.data.uid is string
                       && exists(/databases/$(database)/documents/families/$(familyId))
-                      && request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members;
+                      && (
+                        request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.members
+                        || (
+                          request.auth.uid == memberUid
+                          && hasMutualFamilyLink(get(/databases/$(database)/documents/families/$(familyId)).data.createdBy, memberUid)
+                        )
+                      );
         // Only the member themselves or family admin can update
         allow update: if isAuthenticated()
                       && (request.auth.uid == memberUid
@@ -866,7 +983,8 @@ service cloud.firestore {
                       && request.resource.data.timestamp is number
                       && isRecentClientTimestamp(request.resource.data.timestamp)
                       && request.resource.data.senderUid is string
-                      && request.resource.data.senderUid == request.auth.uid;
+                      && request.resource.data.senderUid == request.auth.uid
+                      && (isOwner(userId) || sharesFamilyWith(userId));
         // CRITICAL FIX: Allow SOS sender to update (cancel) their own alerts on family member paths.
         // Previously only the path owner (family member) could update → SOS cancellation SILENTLY FAILED.
         // The SOS sender's UID is stored in resource.data.senderUid at creation time.
@@ -902,7 +1020,15 @@ service cloud.firestore {
       // Only participants can update (typing, last message, etc.)
       allow update: if isAuthenticated()
                     && resource.data.participants is list
-                    && request.auth.uid in resource.data.participants;
+                    && request.auth.uid in resource.data.participants
+                    && (
+                      (!('createdAt' in resource.data) && !('createdAt' in request.resource.data))
+                      || request.resource.data.createdAt == resource.data.createdAt
+                    )
+                    && (
+                      (!('createdBy' in resource.data) && !('createdBy' in request.resource.data))
+                      || request.resource.data.createdBy == resource.data.createdBy
+                    );
       allow delete: if false;
 
       // Messages subcollection — V3: senderUid validation
@@ -927,10 +1053,14 @@ service cloud.firestore {
                       && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
                       && passesConversationMessageRateLimit(conversationId)
                       && notBlockedByServerMessageRateLimit();
-        // Allow any participant to update (read receipts, status, etc.)
-        allow update: if isAuthenticated()
-                      && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
-                      && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        // Participants may only write receipt state; only the original sender may
+        // edit/delete message content. This prevents conversation members from
+        // rewriting another user's emergency/chat content.
+        allow update: if isConversationParticipant(conversationId)
+                      && (
+                        isConversationMessageReceiptUpdate()
+                        || isConversationMessageSenderUpdate()
+                      );
         allow delete: if false; // Messages are preserved
       }
     }
@@ -982,12 +1112,9 @@ service cloud.firestore {
     // ============================================================
 
     match /sos_broadcasts/{broadcastId} {
-      // SECURITY FIX: Restrict SOS broadcast reads to authenticated users only.
-      // Client-side NearbySOSListener filters by proximity (50km radius).
-      // Firestore rules cannot filter by geo-distance, but we limit exposure by
-      // requiring authentication + the Cloud Function only sends push to nearby users.
-      // Full geo-filtering requires server-side query (Cloud Function pattern).
-      allow read: if isAuthenticated();
+      // Global broadcast docs are private. Cloud Functions perform geo-distance checks
+      // and fan out eligible alerts into sos_alerts/{uid}/items for recipients.
+      allow read: if isAuthenticated() && resource.data.senderUid == request.auth.uid;
       // SECURITY FIX: Bind creatorUid to auth.uid to prevent spoofed SOS broadcasts
       // ANTI-ABUSE: Timestamp must be recent (within 5 min) to prevent replay attacks
       // CRITICAL FIX: latitude/longitude made optional — SOS without location permission
@@ -999,12 +1126,14 @@ service cloud.firestore {
       // collection. For now, the timestamp check provides basic replay protection.
       allow create: if isAuthenticated()
                     && request.resource.data.signalId is string
+                    && !('healthInfo' in request.resource.data)
                     && (!('latitude' in request.resource.data) || request.resource.data.latitude == null || request.resource.data.latitude is number)
                     && (!('longitude' in request.resource.data) || request.resource.data.longitude == null || request.resource.data.longitude is number)
                     && request.resource.data.timestamp is number
                     && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.senderUid is string
                     && request.resource.data.senderUid == request.auth.uid
+                    && notBlockedByServerSosRateLimit()
                     // SECURITY: Validate senderName length to prevent abuse via oversized payloads
                     && (!('senderName' in request.resource.data) || (request.resource.data.senderName is string && request.resource.data.senderName.size() <= 100));
       // CRITICAL FIX: Allow the SOS creator to update their own broadcast (cancellation).
@@ -1058,7 +1187,11 @@ service cloud.firestore {
     match /voice_calls_incoming/{userId} {
       allow read, delete: if isOwner(userId);
       allow create, update: if isAuthenticated()
-                            && request.resource.data.callerUid == request.auth.uid;
+                            && request.resource.data.callerUid == request.auth.uid
+                            && request.resource.data.callId is string
+                            && exists(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId))
+                            && get(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId)).data.callerUid == request.auth.uid
+                            && get(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId)).data.recipientUid == userId;
     }
 
     // ============================================================
@@ -1099,6 +1232,29 @@ service cloud.firestore {
                     && isRecentClientTimestamp(request.resource.data.createdAt);
 
       // Users cannot update or delete reports — only admins/Cloud Functions
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // FEEDBACK COLLECTION - In-app user feedback (bug/feature/praise)
+    // Sprint 2: In-app feedback widget
+    // ============================================================
+    match /feedback/{feedbackId} {
+      // Users can read their own feedback
+      allow read: if isAuthenticated()
+                  && resource.data.uid == request.auth.uid;
+
+      // Users can submit feedback — must be their own UID
+      // Rate limiting handled client-side (modal is gated by user action)
+      allow create: if isAuthenticated()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.type in ['bug', 'feature', 'praise', 'other']
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() >= 3
+                    && request.resource.data.message.size() <= 5000;
+
+      // Only admins can update/delete (e.g., responses, GDPR deletion)
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }

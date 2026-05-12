@@ -3,11 +3,12 @@
  * Offline drill mode with alarm simulation, assembly scenarios, report output
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { multiChannelAlertService } from '../../services/MultiChannelAlertService';
 import { createLogger } from '../../utils/logger';
@@ -87,20 +88,25 @@ const DRILL_SCENARIOS: DrillScenario[] = [
 
 
 export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
+  const insets = useSafeAreaInsets();
   const [activeDrill, setActiveDrill] = useState<DrillScenario | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [isDrillActive, setIsDrillActive] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
 
+  // Ref to avoid stale closure in setInterval callback
+  const handleDrillCompleteRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
 
-    if (isDrillActive && timeRemaining > 0) {
+    if (isDrillActive) {
       interval = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-            handleDrillComplete();
+            // Use ref to call the latest handleDrillComplete without stale closure
+            handleDrillCompleteRef.current();
             return 0;
           }
           return prev - 1;
@@ -111,7 +117,7 @@ export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isDrillActive, timeRemaining]);
+  }, [isDrillActive]);
 
   const handleStartDrill = async (scenario: DrillScenario) => {
     const confirmed = await new Promise<boolean>((resolve) => {
@@ -163,18 +169,21 @@ export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
     }
   };
 
-  const handleDrillComplete = () => {
+  const handleDrillComplete = useCallback(() => {
     setIsDrillActive(false);
+    const totalSteps = activeDrill?.steps.length ?? 0;
+    const completedCount = completedSteps.length;
+    const percentage = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+    const grade = percentage >= 80 ? 'Mükemmel' : percentage >= 50 ? 'İyi' : 'Geliştirilmeli';
+
     Alert.alert(
       'Tatbikat Tamamlandı',
-      `Tebrikler! ${activeDrill?.title} senaryosunu tamamladınız.\n\nTamamlanan adımlar: ${completedSteps.length}/${activeDrill?.steps.length}`,
+      `Tebrikler! ${activeDrill?.title} senaryosunu tamamladınız.\n\n` +
+      `Tamamlanan adımlar: ${completedCount}/${totalSteps}\n` +
+      `Başarı oranı: %${percentage}\n` +
+      `Değerlendirme: ${grade}\n\n` +
+      `${percentage < 80 ? 'Tüm adımları tamamlamak için tatbikatı tekrar deneyebilirsiniz.' : 'Harika performans! Afet hazırlığınız güçlü.'}`,
       [
-        {
-          text: 'Raporu Gör',
-          onPress: () => {
-            // Show report
-          },
-        },
         {
           text: 'Kapat',
           onPress: () => {
@@ -185,7 +194,12 @@ export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
         },
       ],
     );
-  };
+  }, [activeDrill, completedSteps]);
+
+  // Keep ref in sync so the interval callback always calls the latest version
+  useEffect(() => {
+    handleDrillCompleteRef.current = handleDrillComplete;
+  }, [handleDrillComplete]);
 
   const handleStopDrill = () => {
     Alert.alert(
@@ -217,10 +231,11 @@ export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
   if (activeDrill && isDrillActive) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable onPress={handleStopDrill}>
+        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+          <Pressable onPress={handleStopDrill} accessibilityRole="button" accessibilityLabel="Tatbikatı durdur">
             <Ionicons name="close" size={24} color={colors.text.primary} />
           </Pressable>
+          <Text style={styles.headerTitle}>Tatbikat</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -307,10 +322,11 @@ export default function DrillModeScreen({ navigation }: DrillModeScreenProps) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()}>
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Pressable onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Geri">
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
+        <Text style={styles.headerTitle}>Tatbikat Modu</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -380,8 +396,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 60,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
     backgroundColor: colors.background.secondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border.primary,

@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import * as haptics from '../../utils/haptics';
 

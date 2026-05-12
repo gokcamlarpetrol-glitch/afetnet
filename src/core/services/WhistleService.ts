@@ -60,7 +60,8 @@ class WhistleService {
   }
 
   /**
-   * SOS Morse Pattern: --- ••• ---
+   * SOS Morse Pattern: ••• --- •••
+   * S = 3 short (dots), O = 3 long (dashes)
    * Long: 300ms, Short: 100ms, Gap: 100ms
    */
   private async playMorsePattern() {
@@ -70,15 +71,7 @@ class WhistleService {
     const WORD_GAP = 1000;
 
     const pattern = async () => {
-      // --- (SOS: S)
-      await this.beep(LONG);
-      await this.wait(GAP);
-      await this.beep(LONG);
-      await this.wait(GAP);
-      await this.beep(LONG);
-      await this.wait(GAP * 3);
-
-      // ••• (SOS: O)
+      // ••• (S = 3 short dots)
       await this.beep(SHORT);
       await this.wait(GAP);
       await this.beep(SHORT);
@@ -86,12 +79,20 @@ class WhistleService {
       await this.beep(SHORT);
       await this.wait(GAP * 3);
 
-      // --- (SOS: S)
+      // --- (O = 3 long dashes)
       await this.beep(LONG);
       await this.wait(GAP);
       await this.beep(LONG);
       await this.wait(GAP);
       await this.beep(LONG);
+      await this.wait(GAP * 3);
+
+      // ••• (S = 3 short dots)
+      await this.beep(SHORT);
+      await this.wait(GAP);
+      await this.beep(SHORT);
+      await this.wait(GAP);
+      await this.beep(SHORT);
       await this.wait(WORD_GAP);
     };
 
@@ -235,14 +236,7 @@ class WhistleService {
     // Use Haptics as fallback
     if (mode === 'morse') {
       while (this.isPlaying) {
-        // --- ••• ---
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        await this.wait(300);
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        await this.wait(300);
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        await this.wait(500);
-
+        // ••• --- ••• (S O S)
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         await this.wait(100);
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -255,6 +249,13 @@ class WhistleService {
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
         await this.wait(300);
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        await this.wait(500);
+
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await this.wait(100);
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await this.wait(100);
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         await this.wait(1000);
       }
     } else {

@@ -423,6 +423,11 @@ class AccountDeletionService {
     }
 
     try {
+      // APPLE GUIDELINE 4.8: If user signed in via Apple, revoke the token BEFORE deleting.
+      // Without revocation, "Sign in with Apple" still appears in user's Apple ID settings
+      // even though our app no longer has access — confusing and policy-violating.
+      await this.revokeAppleSignInIfApplicable(user);
+
       await deleteUser(user);
       await signOut(auth).catch(e => { if (__DEV__) logger.debug('Sign-out after delete failed:', e); });
       logger.info('Firebase auth account deleted');
@@ -451,12 +456,42 @@ class AccountDeletionService {
     if (!user) throw new Error('No authenticated user');
 
     const uid = user.uid;
+    // APPLE GUIDELINE 4.8: revoke Apple token if applicable.
+    await this.revokeAppleSignInIfApplicable(user);
+
     await deleteUser(user);
     await signOut(auth).catch(e => { if (__DEV__) logger.debug('Sign-out after delete failed:', e); });
     logger.info('Firebase auth account deleted (after re-auth retry)');
 
     // Now finish local cleanup (was deferred when reauthRequired was returned)
     await this.clearLocalDataAfterDeletion(uid);
+  }
+
+  /**
+   * Revoke Apple Sign-In access token (iOS 16+ only).
+   * Apple requires this on account deletion (App Store Review Guideline 4.8).
+   * Best-effort — fails silently on Android, older iOS, or non-Apple users.
+   */
+  private async revokeAppleSignInIfApplicable(user: { providerData?: Array<{ providerId?: string }> } | null): Promise<void> {
+    if (!user?.providerData) return;
+    const isAppleSignedIn = user.providerData.some((p) => p?.providerId === 'apple.com');
+    if (!isAppleSignedIn) return;
+
+    try {
+      // Dynamic import to avoid hard dep + Android no-op
+      const AppleAuth = await import('expo-apple-authentication');
+      if (typeof (AppleAuth as { revokeAsync?: () => Promise<void> }).revokeAsync === 'function') {
+        // expo-apple-authentication v6+: revokeAsync(); older versions: not supported
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (AppleAuth as any).revokeAsync();
+        logger.info('Apple Sign-In token revoked (Guideline 4.8)');
+      } else {
+        logger.debug('Apple revokeAsync not available in current SDK — skipping');
+      }
+    } catch (error) {
+      // Non-fatal: account deletion proceeds even if Apple revoke fails
+      logger.warn('Apple token revocation failed (non-fatal):', error);
+    }
   }
 
   /**

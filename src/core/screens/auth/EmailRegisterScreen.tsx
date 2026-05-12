@@ -6,7 +6,7 @@
  * @version 2.0.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
     View,
     Text,
@@ -25,8 +25,8 @@ import { useNavigation } from '@react-navigation/native';
 import { EmailAuthService } from '../../services/EmailAuthService';
 import * as Haptics from 'expo-haptics';
 
-// ELITE: Email validation regex
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ELITE: Robust email validation — rejects invalid patterns like `.@b.c`, `a@b.c`
+const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z]{2,})+$/;
 const MIN_PASSWORD_LENGTH = 8;
 
 export const EmailRegisterScreen = () => {
@@ -39,27 +39,42 @@ export const EmailRegisterScreen = () => {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    // ELITE: Double-tap prevention + input refs for keyboard chaining
+    const isSubmittingRef = useRef(false);
+    const emailRef = useRef<TextInput>(null);
+    const passwordRef = useRef<TextInput>(null);
+    const confirmPasswordRef = useRef<TextInput>(null);
+
     const handleRegister = async () => {
+        // ELITE: Double-tap prevention (ref-based, immune to setState micro-delay)
+        if (isSubmittingRef.current) return;
+        isSubmittingRef.current = true;
+
         // ELITE: Enhanced validation
         if (!displayName.trim()) {
             Alert.alert('Uyarı', 'Lütfen adınızı girin.');
+            isSubmittingRef.current = false;
             return;
         }
         if (!email || !password) {
             Alert.alert('Uyarı', 'Lütfen e-posta ve şifrenizi girin.');
+            isSubmittingRef.current = false;
             return;
         }
         // ELITE: Email format validation
         if (!EMAIL_REGEX.test(email.trim())) {
             Alert.alert('Uyarı', 'Lütfen geçerli bir e-posta adresi girin.');
+            isSubmittingRef.current = false;
             return;
         }
         if (password !== confirmPassword) {
             Alert.alert('Uyarı', 'Şifreler eşleşmiyor.');
+            isSubmittingRef.current = false;
             return;
         }
         if (password.length < MIN_PASSWORD_LENGTH) {
             Alert.alert('Uyarı', `Şifre en az ${MIN_PASSWORD_LENGTH} karakter olmalıdır.`);
+            isSubmittingRef.current = false;
             return;
         }
 
@@ -83,6 +98,7 @@ export const EmailRegisterScreen = () => {
             Alert.alert('Kayıt Hatası', error.message);
         } finally {
             setIsLoading(false);
+            isSubmittingRef.current = false;
         }
     };
 
@@ -151,6 +167,10 @@ export const EmailRegisterScreen = () => {
                             onChangeText={setDisplayName}
                             autoCapitalize="words"
                             autoComplete="name"
+                            maxLength={100}
+                            returnKeyType="next"
+                            onSubmitEditing={() => emailRef.current?.focus()}
+                            accessibilityLabel="Ad Soyad"
                         />
                     </View>
 
@@ -158,6 +178,7 @@ export const EmailRegisterScreen = () => {
                     <View style={styles.inputContainer}>
                         <Ionicons name="mail-outline" size={18} color="rgba(255,255,255,0.5)" style={styles.inputIcon} />
                         <TextInput
+                            ref={emailRef}
                             style={styles.input}
                             placeholder="E-posta"
                             placeholderTextColor="rgba(255,255,255,0.35)"
@@ -167,6 +188,9 @@ export const EmailRegisterScreen = () => {
                             autoCapitalize="none"
                             autoCorrect={false}
                             autoComplete="email"
+                            returnKeyType="next"
+                            onSubmitEditing={() => passwordRef.current?.focus()}
+                            accessibilityLabel="E-posta adresi"
                         />
                     </View>
 
@@ -174,6 +198,7 @@ export const EmailRegisterScreen = () => {
                     <View style={styles.inputContainer}>
                         <Ionicons name="lock-closed-outline" size={18} color="rgba(255,255,255,0.5)" style={styles.inputIcon} />
                         <TextInput
+                            ref={passwordRef}
                             style={styles.input}
                             placeholder="Şifre"
                             placeholderTextColor="rgba(255,255,255,0.35)"
@@ -182,6 +207,9 @@ export const EmailRegisterScreen = () => {
                             secureTextEntry={!showPassword}
                             autoCapitalize="none"
                             autoComplete="password-new"
+                            returnKeyType="next"
+                            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                            accessibilityLabel="Şifre"
                         />
                         <TouchableOpacity
                             onPress={() => setShowPassword(!showPassword)}
@@ -199,6 +227,7 @@ export const EmailRegisterScreen = () => {
                     <View style={styles.inputContainer}>
                         <Ionicons name="shield-checkmark-outline" size={18} color="rgba(255,255,255,0.5)" style={styles.inputIcon} />
                         <TextInput
+                            ref={confirmPasswordRef}
                             style={styles.input}
                             placeholder="Şifreyi tekrar girin"
                             placeholderTextColor="rgba(255,255,255,0.35)"
@@ -207,6 +236,9 @@ export const EmailRegisterScreen = () => {
                             secureTextEntry={!showConfirmPassword}
                             autoCapitalize="none"
                             autoComplete="password-new"
+                            returnKeyType="go"
+                            onSubmitEditing={handleRegister}
+                            accessibilityLabel="Şifre tekrar"
                         />
                         <TouchableOpacity
                             onPress={() => setShowConfirmPassword(!showConfirmPassword)}
@@ -302,6 +334,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 28,
         paddingTop: 60,
         paddingBottom: 40,
+        maxWidth: 500,
+        width: '100%',
+        alignSelf: 'center',
     },
     header: {
         marginBottom: 28,

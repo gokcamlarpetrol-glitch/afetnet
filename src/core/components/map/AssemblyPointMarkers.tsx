@@ -14,7 +14,7 @@
 import React, { memo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Modal, Linking, Platform } from 'react-native';
 import { Marker, Callout } from 'react-native-maps';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { turkeyAssemblyPointsService, AssemblyPoint } from '../../services/TurkeyAssemblyPointsService';
 import * as haptics from '../../utils/haptics';
@@ -152,8 +152,8 @@ export const AssemblyPointMarkers = memo(({
                                     <View style={styles.badgeRow}>
                                         {selectedPoint.isAfadApproved && (
                                             <View style={styles.afadBadge}>
-                                                <Ionicons name="shield-checkmark" size={14} color="#34C759" />
-                                                <Text style={styles.afadText}>AFAD Onaylı</Text>
+                                                <Ionicons name="list" size={14} color="#34C759" />
+                                                <Text style={styles.afadText}>AFAD Listesi</Text>
                                             </View>
                                         )}
                                         <View style={styles.capacityBadge}>

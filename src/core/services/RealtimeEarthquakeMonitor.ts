@@ -34,6 +34,7 @@ import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
 import { notificationCenter } from './notifications/NotificationCenter';
 import { useEarthquakeStore } from '../stores/earthquakeStore';
+import { formatTurkeyApiDateTime, parseAFADDate } from '../utils/timeUtils';
 
 const logger = createLogger('RealtimeEarthquakeMonitor');
 
@@ -69,7 +70,7 @@ interface SourceStatus {
 // ELITE: Multi-source configuration
 // VERIFIED ENDPOINTS (2024):
 // - EMSC: wss://www.seismicportal.eu/standing_order/websocket (confirmed)
-// - AFAD: https://deprem.afad.gov.tr/EventData/GetEventsByFilter (POST)
+// - AFAD: https://deprem.afad.gov.tr/apiv2/event/filter (GET)
 // - Kandilli: HTML parsing required
 const SOURCES = {
     EMSC: {
@@ -80,7 +81,7 @@ const SOURCES = {
     },
     AFAD: {
         name: 'AFAD',
-        http: 'https://deprem.afad.gov.tr/EventData/GetEventsByFilter',
+        http: 'https://deprem.afad.gov.tr/apiv2/event/filter',
         priority: 2,
     },
     KANDILLI: {
@@ -116,6 +117,7 @@ class RealtimeEarthquakeMonitorService {
     private isRunning = false;
     private websocket: WebSocket | null = null;
     private pollingTimers: NodeJS.Timeout[] = [];
+    private miscTimers: NodeJS.Timeout[] = [];
     private seenEvents: Map<string, EarthquakeEvent> = new Map();
     private pendingVerification: Map<string, EarthquakeEvent> = new Map();
     private sourceStatus: Record<string, SourceStatus> = {};
@@ -125,8 +127,8 @@ class RealtimeEarthquakeMonitorService {
     private appStateSubscription: any = null;
     // ELITE: Exponential backoff for WebSocket reconnection
     private wsReconnectAttempts = 0;
-    private readonly WS_MAX_BACKOFF_MS = 300000; // 5 minutes max
-    private readonly WS_BASE_DELAY_MS = 5000; // 5 seconds base
+    private readonly WS_MAX_BACKOFF_MS = 60000; // 1 minute max — aggressive reconnect for life-safety
+    private readonly WS_BASE_DELAY_MS = 3000; // 3 seconds base
 
     // ==================== INITIALIZATION ====================
 
@@ -182,6 +184,10 @@ class RealtimeEarthquakeMonitorService {
         // Clear polling timers
         this.pollingTimers.forEach(timer => clearInterval(timer));
         this.pollingTimers = [];
+
+        // Clear misc timers (reconnect, delay, verification)
+        this.miscTimers.forEach(timer => clearTimeout(timer));
+        this.miscTimers = [];
 
         // ELITE: Remove app state listener (fixed memory leak)
         if (this.appStateSubscription) {
@@ -251,7 +257,7 @@ class RealtimeEarthquakeMonitorService {
                     if (this.wsReconnectAttempts <= 3) {
                         logger.info(`🔄 EMSC reconnect in ${delay / 1000}s (attempt ${this.wsReconnectAttempts})`);
                     }
-                    setTimeout(() => this.connectEMSCWebSocket(), delay);
+                    this.miscTimers.push(setTimeout(() => this.connectEMSCWebSocket(), delay));
                 }
             };
 
@@ -269,8 +275,9 @@ class RealtimeEarthquakeMonitorService {
      */
     private processEMSCEvent(data: any): void {
         try {
-            // EMSC sends events in specific format
-            if (data.action !== 'create') return;
+            // EMSC sends events as 'create' (new earthquake) or 'update' (magnitude revision)
+            // ELITE: Process updates too — initial magnitude estimates can be wrong (e.g., M3.5 → M5.0)
+            if (data.action !== 'create' && data.action !== 'update') return;
 
             const info = data.data?.properties;
             const geometry = data.data?.geometry;
@@ -309,42 +316,27 @@ class RealtimeEarthquakeMonitorService {
             try {
                 const startTime = Date.now();
 
-                // AFAD requires POST with date filter
-                // Get last 24 hours of data
-                const now = new Date();
-                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                const now = Date.now();
+                const tenMinutesAgo = now - 10 * 60 * 1000;
+                const start = encodeURIComponent(formatTurkeyApiDateTime(tenMinutesAgo));
+                const end = encodeURIComponent(formatTurkeyApiDateTime(now));
+                const url = `${SOURCES.AFAD.http}?start=${start}&end=${end}&minmag=3.0&limit=20&orderby=timedesc`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-                const filterBody = {
-                    EventSearchFilterList: [
-                        {
-                            FilterType: 8, // Date filter
-                            Value: yesterday.toISOString().split('T')[0],
+                let response: Response;
+                try {
+                    response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                            'User-Agent': 'AfetNet/1.0',
                         },
-                        {
-                            FilterType: 9, // End date
-                            Value: now.toISOString().split('T')[0],
-                        },
-                        {
-                            FilterType: 3, // Min magnitude
-                            Value: '3.0',
-                        },
-                    ],
-                    Skip: 0,
-                    Take: 20,
-                    SortDescriptor: {
-                        field: 'eventDate',
-                        dir: 'desc',
-                    },
-                };
-
-                const response = await fetch(SOURCES.AFAD.http, {
-                    method: 'POST',
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(filterBody),
-                });
+                        signal: controller.signal,
+                    });
+                } finally {
+                    clearTimeout(timeoutId);
+                }
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -352,7 +344,7 @@ class RealtimeEarthquakeMonitorService {
                 const latency = Date.now() - startTime;
                 this.updateSourceStatus('AFAD', true, latency);
 
-                // AFAD returns { eventList: [...] }
+                // AFAD v2 returns an array; keep legacy object shape as a defensive fallback.
                 const events = data.eventList || data;
                 this.processAFADEvents(events);
 
@@ -382,21 +374,23 @@ class RealtimeEarthquakeMonitorService {
 
         data.forEach(item => {
             try {
+                const eventDate = item.date || item.eventDate || item.originTime;
+                const eventTime = eventDate ? parseAFADDate(String(eventDate)) : NaN;
                 const event: EarthquakeEvent = {
-                    id: `AFAD_${item.eventID || item.id}`,
-                    magnitude: parseFloat(item.magnitude) || 0,
-                    latitude: parseFloat(item.latitude) || 0,
-                    longitude: parseFloat(item.longitude) || 0,
+                    id: `AFAD_${item.eventID || item.eventId || item.id}`,
+                    magnitude: parseFloat(item.magnitude || item.mag) || 0,
+                    latitude: parseFloat(item.geojson?.coordinates?.[1] || item.latitude || item.lat) || 0,
+                    longitude: parseFloat(item.geojson?.coordinates?.[0] || item.longitude || item.lng) || 0,
                     depth: parseFloat(item.depth) || 10,
                     location: item.location || item.title || 'Türkiye',
-                    time: new Date(item.date || item.eventDate).getTime(),
+                    time: eventTime,
                     source: 'AFAD',
                     verified: false,
                     verificationCount: 1,
                     firstSeenAt: Date.now(),
                 };
 
-                if (event.magnitude >= 3.0) {
+                if (event.magnitude >= 3.0 && Number.isFinite(event.time)) {
                     this.handleNewEvent(event);
                 }
             } catch (e) {
@@ -416,8 +410,11 @@ class RealtimeEarthquakeMonitorService {
 
             try {
                 const startTime = Date.now();
+                const kandilliController = new AbortController();
+                const kandilliTimeout = setTimeout(() => kandilliController.abort(), 15000);
                 // Note: Kandilli returns HTML, needs parsing
-                const response = await fetch(SOURCES.KANDILLI.http);
+                const response = await fetch(SOURCES.KANDILLI.http, { signal: kandilliController.signal });
+                clearTimeout(kandilliTimeout);
                 const html = await response.text();
                 const latency = Date.now() - startTime;
 
@@ -434,11 +431,11 @@ class RealtimeEarthquakeMonitorService {
         };
 
         // Start with delay (lower priority)
-        setTimeout(() => {
+        this.miscTimers.push(setTimeout(() => {
             poll();
             const timer = setInterval(poll, POLLING_INTERVAL.PRIMARY * 2);
             this.pollingTimers.push(timer);
-        }, 2000);
+        }, 2000));
     }
 
     /**
@@ -464,6 +461,8 @@ class RealtimeEarthquakeMonitorService {
                 const location = parts.slice(8).join(' ');
 
                 if (isNaN(mag) || mag < 3.0) return;
+                const eventTime = parseAFADDate(`${dateStr} ${timeStr}`);
+                if (!Number.isFinite(eventTime)) return;
 
                 events.push({
                     id: `KANDILLI_${dateStr}_${timeStr}`,
@@ -472,7 +471,7 @@ class RealtimeEarthquakeMonitorService {
                     longitude: lon,
                     depth: depth,
                     location: location || 'Türkiye',
-                    time: new Date(`${dateStr}T${timeStr}Z`).getTime(),
+                    time: eventTime,
                     source: 'KANDILLI',
                     verified: false,
                     verificationCount: 1,
@@ -494,7 +493,10 @@ class RealtimeEarthquakeMonitorService {
 
             try {
                 const startTime = Date.now();
-                const response = await fetch(SOURCES.EMSC.http);
+                const emscController = new AbortController();
+                const emscTimeout = setTimeout(() => emscController.abort(), 15000);
+                const response = await fetch(SOURCES.EMSC.http, { signal: emscController.signal });
+                clearTimeout(emscTimeout);
                 const data = await response.json();
                 const latency = Date.now() - startTime;
 
@@ -537,9 +539,21 @@ class RealtimeEarthquakeMonitorService {
      * ELITE: Deduplication + Verification Logic
      */
     private async handleNewEvent(event: EarthquakeEvent): Promise<void> {
+        if (!Number.isFinite(event.time) ||
+            !Number.isFinite(event.magnitude) ||
+            !Number.isFinite(event.latitude) ||
+            !Number.isFinite(event.longitude) ||
+            event.latitude < -90 || event.latitude > 90 ||
+            event.longitude < -180 || event.longitude > 180 ||
+            (Math.abs(event.latitude) < 0.01 && Math.abs(event.longitude) < 0.01)) {
+            logger.warn(`Realtime monitor rejected malformed event from ${event.source}`);
+            return;
+        }
+
         // Skip old events (> 10 minutes)
         const age = Date.now() - event.time;
         if (age > 10 * 60 * 1000) return;
+        if (age < -60 * 1000) return;
 
         // Check for duplicates
         const existingKey = this.findDuplicateEvent(event);
@@ -586,18 +600,20 @@ class RealtimeEarthquakeMonitorService {
             this.pendingVerification.set(eventKey, event);
 
             // Check after delay if still unverified
-            // PRODUCTION FIX: Increased window to 60s and threshold to M5.0+
-            // M4.0 unverified single-source alerts were a significant spam source
-            setTimeout(() => {
+            // ELITE: 15s verification window — fast enough for life-safety, long enough for cross-source check
+            // M4.0+ in Turkey get unverified alert (AFAD/Kandilli confirm within seconds)
+            // M5.0+ anywhere get unverified alert (significant earthquake)
+            this.miscTimers.push(setTimeout(() => {
                 const pending = this.pendingVerification.get(eventKey);
                 if (pending && !pending.verified) {
-                    // Only alert unverified if magnitude is significant (M5.0+)
-                    if (pending.magnitude >= 5.0) {
+                    const isInTurkey = pending.latitude >= 35.8 && pending.latitude <= 42.1
+                        && pending.longitude >= 25.6 && pending.longitude <= 44.8;
+                    if (pending.magnitude >= 5.0 || (pending.magnitude >= 4.0 && isInTurkey)) {
                         this.triggerAlert(pending);
                     }
                     this.pendingVerification.delete(eventKey);
                 }
-            }, 60000); // 60 second verification window
+            }, 15000)); // 15 second verification window
         }
     }
 
@@ -858,7 +874,7 @@ export function useRealtimeEarthquakeMonitor() {
         const init = async () => {
             // Get user location first
             try {
-                const { status } = await Location.requestForegroundPermissionsAsync();
+                const { status } = await Location.getForegroundPermissionsAsync();
                 if (status === 'granted') {
                     const location = await Location.getCurrentPositionAsync({});
                     realtimeEarthquakeMonitor.setUserLocation(

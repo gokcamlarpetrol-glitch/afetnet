@@ -10,7 +10,7 @@
  * - Unified SOS Controller integration
  */
 
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,10 +21,12 @@ import {
   Vibration,
   ScrollView,
   Linking,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { BlurView } from './SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // theme colors managed via inline styles
 import * as haptics from '../utils/haptics';
 import {
@@ -58,6 +60,9 @@ export default function SOSModal({
   reason = EmergencyReason.MANUAL_SOS,
   message = 'Acil yardım gerekiyor!',
 }: SOSModalProps) {
+  // Safe area insets for Dynamic Island / notch
+  const insets = useSafeAreaInsets();
+
   // Store
   const {
     currentSignal,
@@ -81,25 +86,41 @@ export default function SOSModal({
   useEffect(() => {
     if (visible && !hasFiredRef.current) {
       hasFiredRef.current = true;
-      const state = useSOSStore.getState();
-      // Reset any stale state from a previous crashed session
-      if (state.isCountingDown && !state.isActive) {
-        state.reset();
-      }
-      // CRITICAL: Reset stale active SOS from killed app sessions
-      // If SOS has been "active" for 30+ minutes, it's orphaned — reset
-      if (state.isActive && state.currentSignal) {
-        const ageMs = Date.now() - state.currentSignal.timestamp;
-        if (ageMs > 30 * 60 * 1000) {
+      // FIX: Wrap in async IIFE to properly await cancelSOS() for stale SOS cleanup
+      (async () => {
+        const state = useSOSStore.getState();
+        // Reset any stale state from a previous crashed session
+        if (state.isCountingDown && !state.isActive) {
           state.reset();
         }
-      }
-      if (!state.isActive) {
-        unifiedSOSController.triggerSOS(reason, message);
-      }
+        // CRITICAL FIX: Stale active SOS from killed app sessions.
+        // If SOS has been "active" for 30+ minutes, it's orphaned.
+        // Must use cancelSOS() instead of state.reset() to:
+        // 1. Update Firestore documents to 'cancelled' (family/nearby users stop seeing active SOS)
+        // 2. Stop beacon service
+        // 3. Clear isSOS location flag
+        // 4. Broadcast cancellation via mesh
+        if (state.isActive && state.currentSignal) {
+          const ageMs = Date.now() - state.currentSignal.timestamp;
+          if (ageMs > 30 * 60 * 1000) {
+            // FIX: await cancelSOS() — it's async (broadcasts cancellation, stops beacon).
+            // Without await, the freshState read below may see stale isActive=true.
+            await unifiedSOSController.cancelSOS();
+          }
+        }
+        // Re-read state after potential cancel (cancelSOS sets isActive=false synchronously in store)
+        const freshState = useSOSStore.getState();
+        if (!freshState.isActive) {
+          unifiedSOSController.triggerSOS(reason, message);
+        }
+      })().catch(e => { if (__DEV__) console.warn('SOSModal trigger error:', e); });
     } else if (!visible) {
-      // Reset guard when modal closes so next open can trigger again
-      hasFiredRef.current = false;
+      // Reset guard when modal closes so next open can trigger again.
+      // Delay reset to prevent double-trigger: modal fade animation takes ~200ms.
+      // Without delay, rapid SOS button tap during fade re-opens modal with
+      // hasFiredRef already false → triggers SOS twice.
+      const resetTimer = setTimeout(() => { hasFiredRef.current = false; }, 300);
+      return () => clearTimeout(resetTimer);
     }
   }, [visible, reason, message]);
 
@@ -108,9 +129,16 @@ export default function SOSModal({
     if (isActive) {
       // Start broadcasting health data via BLE mesh
       emergencyHealthSharingService.startBroadcast().catch((err) => {
-        console.debug('Health broadcast start error:', err);
+        if (__DEV__) console.debug('Health broadcast start error:', err);
       });
     }
+    // FIX: Stop broadcast on unmount/deactivation to prevent orphaned BLE broadcast
+    // when modal is closed without explicit Cancel/Stop press
+    return () => {
+      if (isActive) {
+        emergencyHealthSharingService.stopBroadcast().catch(() => {});
+      }
+    };
   }, [isActive]);
 
   // Pulse animation
@@ -167,6 +195,19 @@ export default function SOSModal({
     return () => shake.stop();
   }, [isActive, shakeAnim]);
 
+  // FIX: SOSModal should NOT modify countdown state — UnifiedSOSController's setInterval
+  // handles all countdown logic including background catch-up via absolute timestamps.
+  // Instead, just force a UI re-render on foreground resume so the display updates.
+  const [, setForceRender] = useState(0);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        setForceRender(n => n + 1);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   // Countdown haptic feedback
   useEffect(() => {
     if (isCountingDown && countdownSeconds > 0) {
@@ -188,14 +229,14 @@ export default function SOSModal({
   const handleCancel = useCallback(() => {
     haptics.impactLight();
     unifiedSOSController.cancelSOS();
-    emergencyHealthSharingService.stopBroadcast(); // Stop health broadcast
+    emergencyHealthSharingService.stopBroadcast().catch(e => { if (__DEV__) console.debug('Health stop error:', e); });
     onClose();
   }, [onClose]);
 
   const handleStop = useCallback(() => {
     haptics.impactMedium();
     unifiedSOSController.cancelSOS();
-    emergencyHealthSharingService.stopBroadcast(); // Stop health broadcast
+    emergencyHealthSharingService.stopBroadcast().catch(e => { if (__DEV__) console.debug('Health stop error:', e); });
     onClose();
   }, [onClose]);
 
@@ -266,6 +307,14 @@ export default function SOSModal({
   // RENDER
   // ============================================================================
 
+  // PREMIUM FAZ 2: SURVIVAL MODE LOGIC
+  // If networkStatus === 'offline' (No Wi-Fi, No Cellular) -> Trigger Survival Mode
+  // If it's pure mesh, we can also consider it partially survival, but let's strictly use 'offline' definition for max battery saving
+  const isSurvivalMode = currentSignal?.device.networkStatus === 'offline';
+  const bgColors = isSurvivalMode
+    ? ['#000000', '#0a0a0a'] as const // OLED true black for battery saving
+    : ['rgba(220, 38, 38, 0.5)', 'rgba(153, 27, 27, 0.9)'] as const; // Red emergency gradient
+
   return (
     <Modal
       visible={visible}
@@ -274,15 +323,16 @@ export default function SOSModal({
       onRequestClose={handleCancel}
     >
       <View style={styles.overlay}>
-        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        {!isSurvivalMode && <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />}
+        {isSurvivalMode && <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />}
         <LinearGradient
-          colors={['rgba(220, 38, 38, 0.5)', 'rgba(153, 27, 27, 0.9)']}
+          colors={bgColors}
           style={styles.gradient}
         >
           {/* Close Button (only during countdown) */}
           {isCountingDown && (
             <TouchableOpacity
-              style={styles.closeButton}
+              style={[styles.closeButton, { top: Math.max(insets.top + 8, 50) }]}
               onPress={handleCancel}
               accessibilityLabel="İptal"
               accessibilityRole="button"
@@ -326,15 +376,38 @@ export default function SOSModal({
                 <Text style={styles.countdownText}>{countdownSeconds}</Text>
                 <Text style={styles.title}>Yardım Çağrısı Başlıyor</Text>
                 <Text style={styles.subtitle}>İptal etmek için X'e dokunun</Text>
+
+                {/* Silent Mode Toggle (Elite) */}
+                <TouchableOpacity
+                  style={[styles.silentToggle, currentSignal?.isSilent && styles.silentToggleActive]}
+                  onPress={() => useSOSStore.getState().setSilentMode(!currentSignal?.isSilent)}
+                >
+                  <Ionicons name={currentSignal?.isSilent ? 'volume-mute' : 'volume-high'} size={20} color={currentSignal?.isSilent ? '#000' : '#fff'} />
+                  <Text style={[styles.silentToggleText, currentSignal?.isSilent && styles.silentToggleTextActive]}>
+                    {currentSignal?.isSilent ? 'SESSİZ MOD AKTİF' : 'SESSİZ MODA GEÇ'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
 
             {/* Active State */}
             {isActive && currentSignal && (
               <View style={styles.stateContainer}>
-                <Text style={styles.activeTitle}>🆘 SOS AKTİF</Text>
-                <Text style={styles.subtitle}>
-                  Yayın yapılıyor • Beacon #{currentSignal.beaconCount}
+                {isSurvivalMode && (
+                  <View style={styles.survivalBadge}>
+                    <Ionicons name="battery-dead" size={16} color="#fbbf24" />
+                    <Text style={styles.survivalBadgeText}>SURVIVAL MODU AKTİF</Text>
+                  </View>
+                )}
+
+                <Text style={[styles.activeTitle, isSurvivalMode && { color: '#fbbf24', fontSize: 28 }]}>
+                  {isSurvivalMode ? '⚠️ OFFLINE SOS YAYINI' : '🆘 SOS AKTİF'}
+                </Text>
+                <Text style={[styles.subtitle, isSurvivalMode && { color: '#ef4444', fontWeight: '800' }]}>
+                  {isSurvivalMode
+                    ? `OLED Güç Tasarrufu • Beacon #${currentSignal.beaconCount}`
+                    : `Yayın yapılıyor • Beacon #${currentSignal.beaconCount}`
+                  }
                 </Text>
 
                 {/* Channel Status */}
@@ -389,8 +462,8 @@ export default function SOSModal({
 
                 {/* ACKs */}
                 {currentSignal.acks.length > 0 && (
-                  <BlurView intensity={30} tint="light" style={styles.ackContainer}>
-                    <Text style={styles.sectionTitle}>
+                  <BlurView intensity={isSurvivalMode ? 10 : 30} tint="light" style={[styles.ackContainer, isSurvivalMode && { borderColor: '#ef4444', borderWidth: 1 }]}>
+                    <Text style={[styles.sectionTitle, isSurvivalMode && { color: '#fbbf24' }]}>
                       ✅ Yanıt Alındı ({currentSignal.acks.length})
                     </Text>
                     {currentSignal.acks.slice(0, 3).map((ack, index) => (
@@ -398,9 +471,9 @@ export default function SOSModal({
                         <Ionicons
                           name={ack.type === 'onsite' ? 'location' : 'person'}
                           size={16}
-                          color="#4CAF50"
+                          color={isSurvivalMode ? '#fbbf24' : '#4CAF50'}
                         />
-                        <Text style={styles.ackText}>
+                        <Text style={[styles.ackText, isSurvivalMode && { color: '#fff' }]}>
                           {ack.receiverName || `Kurtarıcı ${index + 1}`}
                           {ack.type === 'onsite' && ' - Yolda!'}
                         </Text>
@@ -411,24 +484,26 @@ export default function SOSModal({
 
                 {/* Stop Button */}
                 <TouchableOpacity
-                  style={styles.stopButton}
+                  style={[styles.stopButton, isSurvivalMode && styles.stopButtonSurvival]}
                   onPress={handleStop}
                   accessibilityLabel="SOS'u Durdur"
                   accessibilityRole="button"
                 >
-                  <Text style={styles.stopButtonText}>SOS'U DURDUR</Text>
+                  <Text style={[styles.stopButtonText, isSurvivalMode && { color: '#000' }]}>SOS'U DURDUR</Text>
                 </TouchableOpacity>
 
-                {/* 112 Emergency Call Button */}
-                <TouchableOpacity
-                  style={styles.call112Button}
-                  onPress={handleCall112}
-                  accessibilityLabel="112 Acil Ara"
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="call" size={22} color="#fff" />
-                  <Text style={styles.call112ButtonText}>112 ACİL ARA</Text>
-                </TouchableOpacity>
+                {/* 112 Emergency Call Button (Only if not in Survival Mode, because survival usually implies no network/cell coverage) */}
+                {!isSurvivalMode && (
+                  <TouchableOpacity
+                    style={styles.call112Button}
+                    onPress={handleCall112}
+                    accessibilityLabel="112 Acil Ara"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="call" size={22} color="#fff" />
+                    <Text style={styles.call112ButtonText}>112 ACİL ARA</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </ScrollView>
@@ -529,7 +604,7 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     position: 'absolute',
-    top: 60,
+    // top is set dynamically via useSafeAreaInsets
     right: 20,
     width: 48,
     height: 48,
@@ -587,6 +662,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+  silentToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 24,
+  },
+  silentToggleActive: {
+    backgroundColor: '#fbbf24',
+    borderColor: '#fbbf24',
+  },
+  silentToggleText: {
+    color: '#fff',
+    fontWeight: '700',
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  silentToggleTextActive: {
+    color: '#000',
+  },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
@@ -639,7 +739,7 @@ const styles = StyleSheet.create({
   },
   statusLabel: {
     fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 2,
   },
   statusValue: {
@@ -699,5 +799,27 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#fff',
     textAlign: 'center',
+  },
+  stopButtonSurvival: {
+    backgroundColor: '#ef4444',
+  },
+  survivalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251, 191, 36, 0.2)',
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  survivalBadgeText: {
+    color: '#fbbf24',
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginLeft: 6,
+    fontSize: 12,
   },
 });

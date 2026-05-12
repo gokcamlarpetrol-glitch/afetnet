@@ -61,8 +61,7 @@ class MBTilesProvider {
     }
 
     try {
-      // In a real implementation, this would query the SQLite database
-      // For now, return null to trigger online fallback
+      // MBTiles offline tile reading not yet implemented - returns null to use online tiles
       return null;
     } catch (error) {
       logger.error('Tile fetch error:', error);

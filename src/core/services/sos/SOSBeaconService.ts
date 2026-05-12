@@ -45,6 +45,7 @@ const BEACON_CONFIG = {
 
 class SOSBeaconService {
     private isActive = false;
+    private isSending = false; // Concurrency guard: prevent overlapping sendBeacon calls
     private beaconTimer: NodeJS.Timeout | null = null;
     private locationTimer: NodeJS.Timeout | null = null;
     private batteryCheckTimer: NodeJS.Timeout | null = null;
@@ -91,6 +92,7 @@ class SOSBeaconService {
         if (!this.isActive) return;
 
         this.isActive = false;
+        this.isSending = false; // Reset concurrency guard to prevent stuck state after crash
 
         // Clear all timers
         if (this.beaconTimer) {
@@ -114,8 +116,13 @@ class SOSBeaconService {
             this.appStateSubscription = null;
         }
 
-        // Clear isSOS flag on Firestore so rescuers see the cancellation
-        this.clearSOSLocationFlag().catch(() => {});
+        // CRITICAL FIX: Capture userId BEFORE calling clearSOSLocationFlag().
+        // store.stopSOS() nulls currentSignal, so the async clearSOSLocationFlag()
+        // reads null and returns early — leaving isSOS:true on Firestore forever.
+        const capturedUserId = useSOSStore.getState().currentSignal?.userId;
+        if (capturedUserId) {
+            this.clearSOSLocationFlag(capturedUserId).catch(e => { if (__DEV__) logger.debug('SOSBeacon: clear location flag failed:', e); });
+        }
 
         logger.info('🛑 SOS Beacon Service STOPPED');
     }
@@ -124,19 +131,23 @@ class SOSBeaconService {
     // BEACON LOOP
     // ============================================================================
 
-    private startBeaconLoop(): void {
+    private startBeaconLoop(sendImmediate = true): void {
         // Clear existing timer
         if (this.beaconTimer) {
             clearInterval(this.beaconTimer);
         }
 
-        // Send initial beacon
-        this.sendBeacon();
+        // Send initial beacon (skip when called from updateBeaconInterval to avoid duplicate)
+        if (sendImmediate) {
+            // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
+            this.sendBeacon().catch(e => logger.debug('Initial beacon send failed:', e));
+        }
 
         // Start periodic beacon
         this.beaconTimer = setInterval(() => {
             if (this.isActive) {
-                this.sendBeacon();
+                // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
+                this.sendBeacon().catch(e => logger.debug('Periodic beacon send failed:', e));
             }
         }, this.currentInterval);
 
@@ -144,42 +155,80 @@ class SOSBeaconService {
     }
 
     private async sendBeacon(): Promise<void> {
-        const store = useSOSStore.getState();
-        const signal = store.currentSignal;
-
-        if (!signal || (signal.status !== 'broadcasting' && signal.status !== 'acknowledged')) {
-            return;
-        }
+        // Concurrency guard: setInterval can fire before previous sendBeacon completes
+        // (e.g., mesh start takes 5s but interval is 5s). Without this, overlapping calls
+        // send duplicate beacons and corrupt beacon count.
+        if (this.isSending) return;
+        this.isSending = true;
 
         try {
+            const store = useSOSStore.getState();
+            const signal = store.currentSignal;
+
+            if (!signal || (signal.status !== 'broadcasting' && signal.status !== 'acknowledged')) {
+                return;
+            }
+
             // Broadcast via mesh (always works offline)
             const { meshNetworkService } = await import('../mesh');
             const { MeshMessageType } = await import('../mesh/MeshProtocol');
 
-            // V5: Ensure mesh is running before sending beacon
+            // V5: Ensure mesh is running before sending beacon — with timeout to prevent beacon hang
             if (!meshNetworkService.getIsRunning()) {
                 logger.debug('Mesh not running, attempting to start for beacon...');
                 try {
-                    await meshNetworkService.start();
+                    await Promise.race([
+                        meshNetworkService.start(),
+                        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Mesh start timeout')), 12000)),
+                    ]);
                 } catch (startError) {
                     logger.warn('Failed to start mesh for beacon:', startError);
                     // Continue anyway - may still work
                 }
             }
 
+            // CRITICAL FIX: Include senderName, senderUid, and signalId in beacon payload.
+            // Without these, receivers who missed the initial SOS broadcast (and only catch
+            // periodic beacons) have no sender identity — just an anonymous map marker.
+            let senderName = 'Bilinmeyen';
+            try {
+                const { identityService } = require('../IdentityService');
+                const identity = identityService.getIdentity?.();
+                senderName = identity?.displayName || 'Bilinmeyen';
+            } catch { /* best-effort */ }
+
+            // CRITICAL FIX: Include healthInfo in beacon payload so rescuers who
+            // only receive periodic beacons (missed initial SOS) still see blood type,
+            // allergies, and medications — life-saving data for first responders.
+            let healthInfo: Record<string, string> | null = null;
+            try {
+                healthInfo = await sosChannelRouter.loadHealthProfileForBeacon();
+            } catch { /* best-effort — health info is supplementary */ }
+
             const beaconPayload = JSON.stringify({
                 type: 'SOS_BEACON',
                 id: signal.id,
+                signalId: signal.id,
                 userId: signal.userId,
+                senderUid: signal.userId,
+                senderName,
+                status: signal.status,
                 timestamp: Date.now(),
                 location: signal.location,
                 message: signal.message,
+                reason: signal.reason || 'SOS',
                 trapped: signal.trapped,
                 beaconNumber: signal.beaconCount + 1,
                 battery: signal.device.batteryLevel,
+                healthInfo,
             });
 
-            await meshNetworkService.broadcastMessage(beaconPayload, MeshMessageType.SOS);
+            // LIFE-SAFETY: Timeout prevents isSending from staying true forever
+            // if mesh broadcast hangs (e.g., BLE stack frozen)
+            await Promise.race([
+                meshNetworkService.broadcastMessage(beaconPayload, MeshMessageType.SOS),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Beacon broadcast timeout')), 4000)),
+            ]);
 
             // Update beacon count
             store.incrementBeaconCount();
@@ -187,6 +236,8 @@ class SOSBeaconService {
             logger.debug(`📡 Beacon #${signal.beaconCount + 1} sent`);
         } catch (error) {
             logger.error('Beacon send failed:', error);
+        } finally {
+            this.isSending = false;
         }
     }
 
@@ -200,7 +251,8 @@ class SOSBeaconService {
         }
 
         // Initial location update
-        this.updateLocation();
+        // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
+        this.updateLocation().catch(e => logger.debug('Initial location update failed:', e));
 
         // Periodic updates
         const interval = this.isLowBattery()
@@ -209,7 +261,8 @@ class SOSBeaconService {
 
         this.locationTimer = setInterval(() => {
             if (this.isActive) {
-                this.updateLocation();
+                // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
+                this.updateLocation().catch(e => logger.debug('Periodic location update failed:', e));
             }
         }, interval);
     }
@@ -240,7 +293,7 @@ class SOSBeaconService {
 
             // ELITE V4: Write to Firestore locations_current so rescuers can track live
             // Non-blocking, fails silently if offline (mesh beacon still works)
-            this.writeLocationToFirestore(sosLocation).catch(() => {});
+            this.writeLocationToFirestore(sosLocation).catch(e => { if (__DEV__) logger.debug('SOSBeacon: Firestore location write failed:', e); });
         } catch (error) {
             logger.debug('Location update failed:', error);
         }
@@ -259,6 +312,11 @@ class SOSBeaconService {
         if (!signal?.userId) return;
 
         try {
+            // Auth guard: don't attempt Firestore write if user is logged out / token expired
+            const { getFirebaseAuth } = await import('../../../lib/firebase');
+            const auth = getFirebaseAuth();
+            if (!auth.currentUser) return;
+
             const { getFirestoreInstanceAsync } = await import(
                 '../firebase/FirebaseInstanceManager'
             );
@@ -279,9 +337,8 @@ class SOSBeaconService {
                 },
                 { merge: true },
             );
-        } catch {
-            // Offline — Firestore write queued by SDK or silently dropped
-            // Mesh beacon is the primary offline location channel
+        } catch (err) {
+            logger.debug('Location sync to Firestore failed (mesh backup active):', err);
         }
     }
 
@@ -289,9 +346,10 @@ class SOSBeaconService {
      * Clear the isSOS flag on Firestore when SOS is cancelled.
      * Rescuers watching locations_current will see isSOS: false.
      */
-    private async clearSOSLocationFlag(): Promise<void> {
-        const signal = useSOSStore.getState().currentSignal;
-        if (!signal?.userId) return;
+    private async clearSOSLocationFlag(userId?: string): Promise<void> {
+        // Use passed userId (captured before stopSOS nulls currentSignal) or fall back to store
+        const effectiveUserId = userId || useSOSStore.getState().currentSignal?.userId;
+        if (!effectiveUserId) return;
 
         try {
             const { getFirestoreInstanceAsync } = await import(
@@ -302,7 +360,7 @@ class SOSBeaconService {
 
             const { doc, setDoc } = await import('firebase/firestore');
             await setDoc(
-                doc(db, 'locations_current', signal.userId),
+                doc(db, 'locations_current', effectiveUserId),
                 { isSOS: false, cancelledAt: Date.now() },
                 { merge: true },
             );
@@ -323,7 +381,8 @@ class SOSBeaconService {
         // Check every 30 seconds
         this.batteryCheckTimer = setInterval(() => {
             if (this.isActive) {
-                this.updateBeaconInterval();
+                // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
+                this.updateBeaconInterval().catch(e => logger.debug('Battery interval update failed:', e));
             }
         }, 30000);
     }
@@ -353,9 +412,11 @@ class SOSBeaconService {
                 this.currentInterval = newInterval;
                 logger.debug(`Beacon interval adjusted: ${newInterval}ms (battery: ${batteryLevel}%)`);
 
-                // Restart beacon loop with new interval
+                // Restart beacon loop AND location updates with new interval
+                // Pass false to avoid unnecessary immediate beacon on interval change
                 if (this.isActive) {
-                    this.startBeaconLoop();
+                    this.startBeaconLoop(false);
+                    this.startLocationUpdates();
                 }
             }
         } catch (error) {
@@ -383,8 +444,9 @@ class SOSBeaconService {
         } else if (nextState === 'active') {
             this.isInBackground = false;
             // Force location update when returning to foreground
+            // CRITICAL FIX: Add .catch() for unhandled promise rejection from async function
             if (this.isActive) {
-                this.updateLocation();
+                this.updateLocation().catch(e => logger.debug('Foreground location update failed:', e));
             }
         }
     };

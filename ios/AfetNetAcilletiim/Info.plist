@@ -2,10 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array>
-      <string>com.expo.modules.backgroundtask.processing</string>
-    </array>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>CFBundleAllowMixedLocalizations</key>
@@ -25,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.8</string>
+    <string>1.6.1</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -45,7 +41,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>10</string>
+    <string>3</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSApplicationQueriesSchemes</key>
@@ -57,11 +53,10 @@
       <string>http</string>
       <string>https</string>
       <string>maps</string>
-      <string>comgooglemaps</string>
       <string>whatsapp</string>
     </array>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>15.1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppTransportSecurity</key>
@@ -71,42 +66,30 @@
       <key>NSAllowsLocalNetworking</key>
       <true/>
       <key>NSExceptionDomains</key>
-      <dict>
-        <key>www.koeri.boun.edu.tr</key>
-        <dict>
-          <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
-          <key>NSIncludesSubdomains</key>
-          <false/>
-        </dict>
-      </dict>
+      <dict/>
     </dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>AfetNet, şebeke olmadan offline mesajlaşma ve acil durum yardım çağrısı için Bluetooth kullanır.</string>
+    <string>AfetNet, internet olmadan mesh ağı ile mesaj göndermek, SOS yardım çağrısı yaymak ve yakındaki kullanıcıları keşfetmek için Bluetooth kullanır.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>AfetNet, yakındaki kişilere şebekesiz SOS sinyali göndermek için Bluetooth kullanır.</string>
+    <string>AfetNet, mesh ağında yakındaki cihazlara mesaj ve SOS sinyali iletmek için Bluetooth çevre birimi olarak çalışır.</string>
     <key>NSCameraUsageDescription</key>
-    <string>AfetNet, aile üyeleri eklemek için kamera kullanır.</string>
-    <key>NSContactsUsageDescription</key>
-    <string>AfetNet, acil durum kişilerinize hızlı erişim için kişilerinize erişir.</string>
+    <string>AfetNet kameranızı sohbette paylaşmak için fotoğraf çekmek, aile üyesi eklerken QR kod taramak ve afet raporuna fotoğraf eklemek için kullanır. Örneğin, deprem sonrası hasar fotoğrafı çekip siz paylaşmayı seçtiğinizde rapor olarak gönderebilirsiniz.</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>AfetNet, uygulama güvenliği için Face ID kullanır.</string>
+    <string>AfetNet, hesabınıza yetkisiz erişimi engellemek ve oturum açma işlemini hızlandırmak için Face ID ile kimlik doğrulaması yapar.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>AfetNet, aile üyelerinizin gerçek zamanlı konumunu takip etmek için arka planda konum erişimi gerektirir.</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>AfetNet, aile üyelerinizle gerçek zamanlı konum paylaşımı ve arka planda deprem erken uyarısı için sürekli konum erişimi gerektirir.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>AfetNet, acil durum sinyali gönderirken konumunuzu kurtarma ekiplerine iletmek için konum kullanır.</string>
+    <string>AfetNet, SOS sinyali gönderirken, sohbette konum paylaşırken, deprem yakınlık hesabı yaparken, toplanma alanlarını gösterirken ve afet haritasını kullanırken konumunuza erişir.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AfetNet, acil durum sesli yönlendirme vermek için mikrofon kullanır.</string>
+    <string>AfetNet, sohbette sesli mesaj göndermek, sesli arama yapmak ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.</string>
     <key>NSMotionUsageDescription</key>
-    <string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek için hareket sensörlerini kullanır.</string>
+    <string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek, düşme/çarpışma tespiti yapmak ve kullanıcı aktivitesini değerlendirmek için hareket sensörlerini kullanır.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>AfetNet, acil durum fotoğraflarını kaydetmek için fotoğraf kütüphanenize erişir.</string>
+    <string>AfetNet, acil durum fotoğraflarını cihazınıza kaydetmek için fotoğraf kütüphanenize erişir.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>AfetNet, acil durum fotoğraflarını görüntülemek için fotoğraf kütüphanenize erişir.</string>
+    <string>AfetNet, sohbette ve afet raporlarında paylaşmak üzere fotoğraf kütüphanenizden görsel seçmek için erişir.</string>
     <key>RCTNewArchEnabled</key>
-    <true/>
+    <false/>
     <key>UIBackgroundModes</key>
     <array>
       <string>fetch</string>
@@ -114,8 +97,6 @@
       <string>location</string>
       <string>bluetooth-central</string>
       <string>bluetooth-peripheral</string>
-      <string>processing</string>
-      <string>voip</string>
     </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
@@ -124,20 +105,13 @@
       <string>arm64</string>
     </array>
     <key>UIRequiresFullScreen</key>
-    <false/>
+    <true/>
     <key>UIStatusBarStyle</key>
     <string>UIStatusBarStyleDefault</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
       <string>UIInterfaceOrientationPortraitUpsideDown</string>
-    </array>
-    <key>UISupportedInterfaceOrientations~ipad</key>
-    <array>
-      <string>UIInterfaceOrientationPortrait</string>
-      <string>UIInterfaceOrientationPortraitUpsideDown</string>
-      <string>UIInterfaceOrientationLandscapeLeft</string>
-      <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UIUserInterfaceStyle</key>
     <string>Automatic</string>

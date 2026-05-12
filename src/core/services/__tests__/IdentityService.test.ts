@@ -71,10 +71,21 @@ describe('IdentityService QR payload parsing', () => {
     expect(parsed?.uid).toBe('uidDeep12345678901234');
   });
 
-  it('accepts plain UID-like raw QR values', async () => {
-    const uid = await identityService.parseQRPayload('AbCdEf1234567890GhIjKlMn');
+  it('accepts plain UID-like raw QR values including phone and custom providers', async () => {
+    // Standard alphanumeric
+    let uid = await identityService.parseQRPayload('AbCdEf1234567890GhIjKlMn');
     expect(uid).not.toBeNull();
     expect(uid?.uid).toBe('AbCdEf1234567890GhIjKlMn');
+
+    // Phone number UID (+90...)
+    uid = await identityService.parseQRPayload('+905551234567');
+    expect(uid).not.toBeNull();
+    expect(uid?.uid).toBe('+905551234567');
+
+    // Custom auth UID with special chars
+    uid = await identityService.parseQRPayload('custom-auth_123.test:uid');
+    expect(uid).not.toBeNull();
+    expect(uid?.uid).toBe('custom-auth_123.test:uid');
   });
 
   it('returns null for AFN code without Firebase', async () => {

@@ -19,8 +19,8 @@
 
 import { createLogger } from '../utils/logger';
 import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import {
-  getFirestore,
   doc,
   setDoc,
   getDoc,
@@ -33,6 +33,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { DeviceEventEmitter } from 'react-native';
+import { isLikelyFirebaseUid } from '../utils/messaging/identityUtils';
 
 const logger = createLogger('VoiceCallService');
 
@@ -94,6 +95,9 @@ class VoiceCallServiceImpl {
   private localStream: any = null;
   private remoteStream: any = null;
   private unsubscribers: Unsubscribe[] = [];
+  private retryTimers: NodeJS.Timeout[] = [];
+  private isDestroyed = false;
+  private autoTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private state: CallState = {
     callId: null,
     status: 'idle',
@@ -104,6 +108,50 @@ class VoiceCallServiceImpl {
     startTime: null,
     isIncoming: false,
   };
+
+  private applySpeakerRouting(enableSpeaker: boolean): void {
+    (async () => {
+      let applied = false;
+
+      // Expo Audio route control (works on Expo-managed/native runtimes)
+      try {
+        const { setAudioModeAsync } = require('expo-audio');
+        if (typeof setAudioModeAsync === 'function') {
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+            shouldPlayInBackground: true,
+            shouldRouteThroughEarpiece: !enableSpeaker,
+          });
+          applied = true;
+        }
+      } catch (error) {
+        logger.debug('expo-audio speaker routing unavailable:', error);
+      }
+
+      // Native fallback (bare RN projects)
+      try {
+        const InCallManager = require('react-native-incall-manager');
+        if (InCallManager) {
+          if (typeof InCallManager.setForceSpeakerphoneOn === 'function') {
+            InCallManager.setForceSpeakerphoneOn(enableSpeaker);
+          }
+          if (typeof InCallManager.setSpeakerphoneOn === 'function') {
+            InCallManager.setSpeakerphoneOn(enableSpeaker);
+          }
+          applied = true;
+        }
+      } catch (error) {
+        logger.debug('InCallManager speaker routing unavailable:', error);
+      }
+
+      if (!applied) {
+        logger.warn('Speaker routing module unavailable; state changed without native route update');
+      }
+    })().catch((error) => {
+      logger.warn('Failed to apply speaker routing:', error);
+    });
+  }
 
   // ── Public getters ──────────────────────────────────────────────────────
   getState(): Readonly<CallState> {
@@ -125,22 +173,52 @@ class VoiceCallServiceImpl {
 
     const app = initializeFirebase();
     if (!app) return () => {};
+    const { getFirestore } = require('firebase/firestore');
     const db = getFirestore(app);
 
     const incomingRef = doc(db, 'voice_calls_incoming', myUid);
-    const unsub = onSnapshot(incomingRef, (snapshot) => {
-      if (!snapshot.exists()) return;
-      const data = snapshot.data();
-      if (!data?.callId || !data?.callerUid) return;
 
-      // Emit incoming call event
-      DeviceEventEmitter.emit(VOICE_CALL_EVENTS.INCOMING_CALL, {
-        callId: data.callId,
-        callerUid: data.callerUid,
-        callerName: data.callerName || 'Bilinmeyen',
-      } as IncomingCallData);
-    });
+    // Retry-with-backoff for onSnapshot (errors kill subscription permanently)
+    let retryCount = 0;
+    const MAX_RETRIES = 20;
 
+    const subscribe = (): (() => void) => {
+      const unsub = onSnapshot(incomingRef, (snapshot) => {
+        retryCount = 0; // Reset on success
+        if (!snapshot.exists()) return;
+        const data = snapshot.data();
+        if (!data?.callId || !data?.callerUid) return;
+
+        // Emit incoming call event
+        DeviceEventEmitter.emit(VOICE_CALL_EVENTS.INCOMING_CALL, {
+          callId: data.callId,
+          callerUid: data.callerUid,
+          callerName: data.callerName || 'Bilinmeyen',
+        } as IncomingCallData);
+      }, (error) => {
+        logger.warn('Incoming call listener error:', error);
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          const delay = Math.min(2000 * Math.pow(1.5, retryCount - 1), 60000);
+          logger.info(`Retrying incoming call listener in ${delay}ms (attempt ${retryCount}/${MAX_RETRIES})`);
+          const retryTimer = setTimeout(() => {
+            // CRITICAL FIX: Remove fired timer from retryTimers to prevent unbounded array growth.
+            // Without this, each subscription error adds a timer ref that is never removed,
+            // leaking memory over long sessions with intermittent network issues.
+            const timerIdx = this.retryTimers.indexOf(retryTimer);
+            if (timerIdx >= 0) this.retryTimers.splice(timerIdx, 1);
+            if (this.isDestroyed) return;
+            const newUnsub = subscribe();
+            const idx = this.unsubscribers.indexOf(unsub);
+            if (idx >= 0) this.unsubscribers[idx] = newUnsub;
+          }, delay);
+          this.retryTimers.push(retryTimer);
+        }
+      });
+      return unsub;
+    };
+
+    const unsub = subscribe();
     this.unsubscribers.push(unsub);
     return unsub;
   }
@@ -153,6 +231,14 @@ class VoiceCallServiceImpl {
       return null;
     }
 
+    // CRITICAL FIX: Guard against calling startCall() twice while already in a call.
+    // Without this, a second call creates orphaned WebRTC connections and Firestore docs.
+    if (this.state.status !== 'idle') {
+      logger.warn(`startCall blocked: already in call state=${this.state.status}, callId=${this.state.callId}`);
+      DeviceEventEmitter.emit(VOICE_CALL_EVENTS.CALL_FAILED, { reason: 'Zaten bir arama devam ediyor' });
+      return null;
+    }
+
     const auth = getFirebaseAuth();
     const myUid = auth?.currentUser?.uid;
     const myName = auth?.currentUser?.displayName || 'AfetNet Kullanıcı';
@@ -161,24 +247,35 @@ class VoiceCallServiceImpl {
       return null;
     }
 
+    const normalizedRecipientUid = typeof recipientUid === 'string' ? recipientUid.trim() : '';
+    if (!normalizedRecipientUid || !isLikelyFirebaseUid(normalizedRecipientUid)) {
+      logger.warn('startCall blocked: invalid recipientUid', { recipientUid });
+      DeviceEventEmitter.emit(VOICE_CALL_EVENTS.CALL_FAILED, { reason: 'Geçersiz arama hedefi' });
+      return null;
+    }
+
     try {
       const app = initializeFirebase();
       if (!app) throw new Error('Firebase not initialized');
-      const db = getFirestore(app);
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return null;
 
       // Generate call ID
-      const callId = `call_${myUid}_${recipientUid}_${Date.now()}`;
+      const callId = `call_${myUid}_${normalizedRecipientUid}_${Date.now()}`;
 
       this.state = {
         callId,
         status: 'ringing',
         isMuted: false,
         isSpeaker: false,
-        remoteUid: recipientUid,
+        remoteUid: normalizedRecipientUid,
         remoteName: recipientName,
         startTime: null,
         isIncoming: false,
       };
+
+      // Ensure call starts on earpiece by default for privacy.
+      this.applySpeakerRouting(false);
 
       // CRITICAL FIX: Request microphone permission before getUserMedia
       try {
@@ -221,7 +318,7 @@ class VoiceCallServiceImpl {
           addDoc(
             collection(db, 'voice_calls', callId, 'callerCandidates'),
             event.candidate.toJSON(),
-          ).catch(() => {});
+          ).catch(e => { if (__DEV__) logger.debug('VoiceCall: caller ICE candidate store failed:', e); });
         }
       };
 
@@ -248,7 +345,7 @@ class VoiceCallServiceImpl {
       await setDoc(doc(db, 'voice_calls', callId), {
         callerUid: myUid,
         callerName: myName,
-        recipientUid,
+        recipientUid: normalizedRecipientUid,
         recipientName,
         offer: {
           type: offer.type,
@@ -259,7 +356,7 @@ class VoiceCallServiceImpl {
       });
 
       // Notify recipient (write to their incoming calls doc)
-      await setDoc(doc(db, 'voice_calls_incoming', recipientUid), {
+      await setDoc(doc(db, 'voice_calls_incoming', normalizedRecipientUid), {
         callId,
         callerUid: myUid,
         callerName: myName,
@@ -273,10 +370,10 @@ class VoiceCallServiceImpl {
         const functions = getFunctions(getFirebaseApp(), 'europe-west1');
         const sendCallNotification = httpsCallable(functions, 'sendCallNotification');
         await sendCallNotification({
-          recipientUid,
+          recipientUid: normalizedRecipientUid,
           callerName: myName,
           callId,
-        }).catch(() => {});
+        }).catch(e => { if (__DEV__) logger.debug('VoiceCall: push notification failed:', e); });
       } catch {
         // Push notification is best-effort
       }
@@ -299,6 +396,9 @@ class VoiceCallServiceImpl {
         if (callData.status === 'rejected' || callData.status === 'ended') {
           this.endCall();
         }
+      }, (error) => {
+        logger.warn('Call status listener error:', error);
+        this.endCall();
       });
       this.unsubscribers.push(callUnsub);
 
@@ -309,15 +409,19 @@ class VoiceCallServiceImpl {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added' && this.pc) {
               const candidate = new RTCIceCandidate(change.doc.data());
-              this.pc.addIceCandidate(candidate).catch(() => {});
+              this.pc.addIceCandidate(candidate).catch(e => { if (__DEV__) logger.debug('VoiceCall: callee ICE candidate add failed:', e); });
             }
           });
+        },
+        (error) => {
+          logger.warn('Callee ICE candidates listener error:', error);
         },
       );
       this.unsubscribers.push(candidateUnsub);
 
       // Auto-timeout: end call if not answered in 45 seconds
-      setTimeout(() => {
+      this.autoTimeoutId = setTimeout(() => {
+        this.autoTimeoutId = null;
         if (this.state.status === 'ringing') {
           this.endCall();
         }
@@ -337,6 +441,13 @@ class VoiceCallServiceImpl {
   async answerCall(callId: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
 
+    // CRITICAL FIX: Guard against double-answer (same pattern as startCall).
+    // Without this, two rapid taps create duplicate WebRTC connections & Firestore listeners.
+    if (this.state.status !== 'idle') {
+      logger.warn(`answerCall blocked: already in call state=${this.state.status}`);
+      return false;
+    }
+
     const auth = getFirebaseAuth();
     const myUid = auth?.currentUser?.uid;
     if (!myUid) return false;
@@ -344,7 +455,8 @@ class VoiceCallServiceImpl {
     try {
       const app = initializeFirebase();
       if (!app) throw new Error('Firebase not initialized');
-      const db = getFirestore(app);
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return false;
 
       // Read call document
       const callSnap = await getDoc(doc(db, 'voice_calls', callId));
@@ -359,6 +471,13 @@ class VoiceCallServiceImpl {
         return false;
       }
 
+      // CRITICAL FIX: Validate this call is actually intended for current user.
+      // Without this, any authenticated user could answer any call by guessing callId.
+      if (callData.recipientUid && callData.recipientUid !== myUid) {
+        logger.warn(`answerCall blocked: call is for ${callData.recipientUid}, not ${myUid}`);
+        return false;
+      }
+
       this.state = {
         callId,
         status: 'connecting',
@@ -369,6 +488,9 @@ class VoiceCallServiceImpl {
         startTime: null,
         isIncoming: true,
       };
+
+      // Ensure default route is earpiece when answering.
+      this.applySpeakerRouting(false);
 
       // CRITICAL FIX: Request microphone permission before getUserMedia
       try {
@@ -409,7 +531,7 @@ class VoiceCallServiceImpl {
           addDoc(
             collection(db, 'voice_calls', callId, 'calleeCandidates'),
             event.candidate.toJSON(),
-          ).catch(() => {});
+          ).catch(e => { if (__DEV__) logger.debug('VoiceCall: callee ICE candidate store failed:', e); });
         }
       };
 
@@ -443,7 +565,7 @@ class VoiceCallServiceImpl {
       });
 
       // Clean up incoming notification
-      await deleteDoc(doc(db, 'voice_calls_incoming', myUid)).catch(() => {});
+      await deleteDoc(doc(db, 'voice_calls_incoming', myUid)).catch(e => { if (__DEV__) logger.debug('VoiceCall: incoming call doc cleanup failed:', e); });
 
       // Listen for caller ICE candidates
       const candidateUnsub = onSnapshot(
@@ -452,9 +574,12 @@ class VoiceCallServiceImpl {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added' && this.pc) {
               const candidate = new RTCIceCandidate(change.doc.data());
-              this.pc.addIceCandidate(candidate).catch(() => {});
+              this.pc.addIceCandidate(candidate).catch(e => { if (__DEV__) logger.debug('VoiceCall: caller ICE candidate add failed:', e); });
             }
           });
+        },
+        (error) => {
+          logger.warn('Caller ICE candidates listener error:', error);
         },
       );
       this.unsubscribers.push(candidateUnsub);
@@ -465,6 +590,9 @@ class VoiceCallServiceImpl {
         if (!data || data.status === 'ended') {
           this.endCall();
         }
+      }, (error) => {
+        logger.warn('Call status listener error (callee):', error);
+        this.endCall();
       });
       this.unsubscribers.push(callUnsub);
 
@@ -482,7 +610,8 @@ class VoiceCallServiceImpl {
     try {
       const app = initializeFirebase();
       if (!app) return;
-      const db = getFirestore(app);
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
 
       await updateDoc(doc(db, 'voice_calls', callId), {
         status: 'rejected',
@@ -491,7 +620,7 @@ class VoiceCallServiceImpl {
       const auth = getFirebaseAuth();
       const myUid = auth?.currentUser?.uid;
       if (myUid) {
-        await deleteDoc(doc(db, 'voice_calls_incoming', myUid)).catch(() => {});
+        await deleteDoc(doc(db, 'voice_calls_incoming', myUid)).catch(e => { if (__DEV__) logger.debug('VoiceCall: reject incoming doc cleanup failed:', e); });
       }
 
       logger.info(`📞 Call rejected: ${callId}`);
@@ -508,14 +637,46 @@ class VoiceCallServiceImpl {
       return;
     }
 
+    // CRITICAL FIX: Capture remoteUid BEFORE cleanup() resets this.state to idle defaults.
+    // The setTimeout below fires 3s later — by then this.state.remoteUid is already null,
+    // so the incoming-call doc for the remote user was never cleaned up (phantom notifications).
+    const remoteUid = this.state.remoteUid;
+
     try {
       const app = initializeFirebase();
       if (app) {
-        const db = getFirestore(app);
-        await updateDoc(doc(db, 'voice_calls', callId), {
-          status: 'ended',
-          endedAt: serverTimestamp(),
-        }).catch(() => {});
+        const db = await getFirestoreInstanceAsync();
+        // CRITICAL FIX: Do NOT return early if db is null — cleanup() MUST still run below.
+        // Previously, `if (!db) return;` exited endCall() without closing the peer connection,
+        // releasing the microphone, or emitting CALL_ENDED — the call appeared to hang forever.
+        if (!db) {
+          logger.warn('Firestore unavailable during endCall — skipping Firestore cleanup, proceeding with local cleanup');
+        } else {
+          // Update status to 'ended'
+          await updateDoc(doc(db, 'voice_calls', callId), {
+            status: 'ended',
+            endedAt: serverTimestamp(),
+          }).catch(e => { if (__DEV__) logger.debug('VoiceCall: end call update failed:', e); });
+
+          // ELITE: Delete call doc after short delay to prevent stuck incoming calls.
+          // Without cleanup, stale call docs cause phantom incoming call notifications.
+          setTimeout(async () => {
+            try {
+              await deleteDoc(doc(db, 'voice_calls', callId)).catch(e => {
+                if (__DEV__) logger.debug('VoiceCall: call doc delete failed:', e);
+              });
+
+              // Also clean up incoming call notification doc for remote user
+              if (remoteUid) {
+                await deleteDoc(doc(db, 'voice_calls_incoming', remoteUid)).catch(e => {
+                  if (__DEV__) logger.debug('VoiceCall: remote incoming doc cleanup failed:', e);
+                });
+              }
+            } catch (e) {
+              if (__DEV__) logger.debug('VoiceCall: post-hangup cleanup failed:', e);
+            }
+          }, 3000); // 3s delay to let remote side process the status change
+        }
       }
     } catch {
       // best-effort
@@ -540,14 +701,20 @@ class VoiceCallServiceImpl {
 
   // ── Toggle speaker ──────────────────────────────────────────────────────
   toggleSpeaker(): boolean {
-    this.state.isSpeaker = !this.state.isSpeaker;
-    // Note: Speaker mode requires InCallManager or native module
-    // For now, track the state for UI purposes
-    return this.state.isSpeaker;
+    const newSpeakerState = !this.state.isSpeaker;
+    this.state.isSpeaker = newSpeakerState;
+    this.applySpeakerRouting(newSpeakerState);
+    return newSpeakerState;
   }
 
   // ── Cleanup ─────────────────────────────────────────────────────────────
   private cleanup(): void {
+    // Clear auto-timeout timer
+    if (this.autoTimeoutId) {
+      clearTimeout(this.autoTimeoutId);
+      this.autoTimeoutId = null;
+    }
+
     // Unsubscribe all Firestore listeners
     this.unsubscribers.forEach((unsub) => {
       try { unsub(); } catch { /* ignore */ }
@@ -579,10 +746,24 @@ class VoiceCallServiceImpl {
       startTime: null,
       isIncoming: false,
     };
+
+    // Return route to earpiece/default after call teardown.
+    this.applySpeakerRouting(false);
+  }
+
+  // ── Re-initialization after destroy (app re-login) ──────────────────────
+  // CRITICAL FIX: destroy() sets isDestroyed=true which permanently disables
+  // retry logic in listenForIncomingCalls(). Without resetting this flag on
+  // re-login, incoming call listener retries are dead for the new user session.
+  reinitialize(): void {
+    this.isDestroyed = false;
   }
 
   // ── Full cleanup (app shutdown) ─────────────────────────────────────────
   destroy(): void {
+    this.isDestroyed = true;
+    this.retryTimers.forEach(t => clearTimeout(t));
+    this.retryTimers = [];
     this.cleanup();
   }
 }

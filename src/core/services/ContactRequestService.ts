@@ -15,12 +15,15 @@
 import {
     collection,
     doc,
+    getDoc,
     setDoc,
+    updateDoc,
     query,
     where,
     orderBy,
     onSnapshot,
-    serverTimestamp
+    serverTimestamp,
+    arrayUnion
 } from 'firebase/firestore';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { identityService } from './IdentityService';
@@ -41,6 +44,7 @@ export interface ContactRequest {
     fromPhotoURL?: string;
     toUserId: string;
     status: RequestStatus;
+    familyId?: string;
     createdAt: number;
     updatedAt: number;
     message?: string;
@@ -55,6 +59,12 @@ class ContactRequestService {
     private unsubscribe: (() => void) | null = null;
     private listeners: RequestCallback[] = [];
     private pendingRequests: ContactRequest[] = [];
+    private retryTimer: ReturnType<typeof setTimeout> | null = null;
+    private retryCount = 0;
+    // CRITICAL FIX: Increased from 5 to 20 to match other Firestore onSnapshot retry patterns.
+    // 5 retries with exponential backoff dies within minutes of network blips;
+    // contact request subscription stays dead for the rest of the session.
+    private static readonly MAX_RETRIES = 20;
 
     /**
      * Initialize the service
@@ -93,6 +103,13 @@ class ContactRequestService {
      * Subscribe to incoming contact requests
      */
     private async subscribeToIncomingRequests(): Promise<void> {
+        // ELITE: Unsubscribe existing listener before creating new one
+        // Prevents duplicate subscriptions if initialize() called twice
+        if (this.unsubscribe) {
+            try { this.unsubscribe(); } catch { /* no-op */ }
+            this.unsubscribe = null;
+        }
+
         const cloudUid = identityService.getCloudUid();
         if (!cloudUid) return;
 
@@ -107,6 +124,7 @@ class ContactRequestService {
             );
 
             this.unsubscribe = onSnapshot(q, (snapshot) => {
+                this.retryCount = 0; // Subscription alive — reset retry counter
                 this.pendingRequests = snapshot.docs.map(doc => {
                     const data = doc.data();
                     return {
@@ -117,6 +135,7 @@ class ContactRequestService {
                         fromPhotoURL: data.fromPhotoURL,
                         toUserId: data.toUserId || cloudUid,
                         status: data.status,
+                        familyId: typeof data.familyId === 'string' ? data.familyId : undefined,
                         createdAt: data.createdAt?.toMillis?.() || data.createdAt,
                         updatedAt: data.updatedAt?.toMillis?.() || data.updatedAt,
                         message: data.message,
@@ -124,16 +143,43 @@ class ContactRequestService {
                 });
 
                 // Notify all listeners
-                this.listeners.forEach(cb => cb(this.pendingRequests));
+                // CRITICAL FIX: Spread to array before iterating — a listener callback may
+                // call addListener() or unsubscribe, modifying this.listeners mid-iteration.
+                [...this.listeners].forEach(cb => cb(this.pendingRequests));
 
                 if (this.pendingRequests.length > 0) {
                     logger.info(`📬 ${this.pendingRequests.length} pending contact requests`);
                 }
+            }, (error) => {
+                logger.warn('Contact requests listener error:', error);
+                // CRITICAL FIX: Retry on subscription death (matches SOSAlertListener pattern)
+                this.unsubscribe = null;
+                this.scheduleRetry();
             });
 
         } catch (error) {
             logger.error('Failed to subscribe to requests:', error);
         }
+    }
+
+    /**
+     * Schedule retry for dead subscription with exponential backoff
+     */
+    private scheduleRetry(): void {
+        if (this.retryCount >= ContactRequestService.MAX_RETRIES) {
+            logger.error(`ContactRequestService: exhausted ${ContactRequestService.MAX_RETRIES} retries`);
+            return;
+        }
+        if (this.retryTimer) { clearTimeout(this.retryTimer); }
+        this.retryCount++;
+        const delay = Math.min(3000 * Math.pow(2, this.retryCount - 1), 60000);
+        logger.info(`ContactRequestService: retry ${this.retryCount}/${ContactRequestService.MAX_RETRIES} in ${delay}ms`);
+        this.retryTimer = setTimeout(() => {
+            this.retryTimer = null;
+            if (!this.unsubscribe) {
+                this.subscribeToIncomingRequests().catch(e => logger.error('Retry failed:', e));
+            }
+        }, delay);
     }
 
     /**
@@ -158,8 +204,28 @@ class ContactRequestService {
             const db = await getFirestoreInstanceAsync();
             if (!db) return false;
 
+            let familyId: string | null = null;
+            try {
+                const linkDoc = await getDoc(doc(db, 'users', cloudUid, 'familyMembers', toUserId));
+                const linkData = linkDoc.exists() ? linkDoc.data() : null;
+                familyId = typeof linkData?.familyId === 'string' ? linkData.familyId : null;
+            } catch {
+                // Non-blocking: the invite still works, but acceptance cannot unlock live data
+                // until the family link is synced with a familyId.
+            }
+
             // Create request in recipient's collection
             const requestRef = doc(db, 'users', toUserId, 'contactRequests', cloudUid);
+
+            // Duplicate prevention: do not recreate already pending/accepted requests.
+            const existingRequest = await getDoc(requestRef);
+            if (existingRequest.exists()) {
+                const existingStatus = existingRequest.data()?.status;
+                if (existingStatus === 'pending' || existingStatus === 'accepted') {
+                    logger.info(`Contact request skipped: already ${existingStatus} for ${toUserId}`);
+                    return true;
+                }
+            }
 
             await setDoc(requestRef, {
                 fromUserId: cloudUid,
@@ -168,6 +234,7 @@ class ContactRequestService {
                 fromPhotoURL: myPhoto || null,
                 toUserId,
                 status: 'pending',
+                familyId,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
                 message: message || null,
@@ -201,7 +268,7 @@ class ContactRequestService {
             }, { merge: true });
 
             // 2. Add sender as my contact (if not already)
-            const existingContact = contactService.getContact(request.fromQrId);
+            const existingContact = contactService.getContact(request.fromUserId);
             if (!existingContact) {
                 await contactService.addContact(
                     request.fromUserId,
@@ -215,7 +282,8 @@ class ContactRequestService {
             }
 
             // 3. Update mutual status on both sides
-            await this.updateMutualStatus(request.fromUserId, request.fromQrId, true);
+            await this.updateMutualStatus(request, true);
+            await this.refreshFamilyStoreAfterApproval();
 
             // 4. Create a notification for the sender
             const notifyRef = doc(db, 'users', request.fromUserId, 'notifications', `accept_${cloudUid}`);
@@ -266,7 +334,7 @@ class ContactRequestService {
     /**
      * Update mutual contact status
      */
-    private async updateMutualStatus(otherUserId: string, otherQrId: string, isMutual: boolean): Promise<void> {
+    private async updateMutualStatus(request: ContactRequest, isMutual: boolean): Promise<void> {
         const cloudUid = identityService.getCloudUid();
         if (!cloudUid) return;
 
@@ -274,17 +342,113 @@ class ContactRequestService {
             const db = await getFirestoreInstanceAsync();
             if (!db) return;
 
-            if (!otherQrId) {
-                logger.warn(`Missing fromQrId for user ${otherUserId}, skipping mutual status update`);
-                return;
-            }
-
             // Update my contact
-            const myContactRef = doc(db, 'users', cloudUid, 'contacts', otherQrId);
+            const myContactRef = doc(db, 'users', cloudUid, 'contacts', request.fromUserId);
             await setDoc(myContactRef, { isMutual, updatedAt: serverTimestamp() }, { merge: true });
+
+            if (isMutual) {
+                await this.finalizeFamilyApproval(request);
+            }
 
         } catch (error) {
             logger.error('Failed to update mutual status:', error);
+        }
+    }
+
+    /**
+     * Convert a pending family invitation into a mutual link.
+     * This is the consent boundary that unlocks live location/status reads in Firestore rules.
+     */
+    private async finalizeFamilyApproval(request: ContactRequest): Promise<void> {
+        const cloudUid = identityService.getCloudUid();
+        if (!cloudUid) return;
+
+        const db = await getFirestoreInstanceAsync();
+        if (!db) return;
+
+        const incomingLinkRef = doc(db, 'users', cloudUid, 'familyMembers', request.fromUserId);
+        const incomingLinkDoc = await getDoc(incomingLinkRef);
+        const incomingLink = incomingLinkDoc.exists() ? incomingLinkDoc.data() : null;
+        const familyId = request.familyId || (typeof incomingLink?.familyId === 'string' ? incomingLink.familyId : undefined);
+
+        if (!familyId) {
+            logger.warn(`Accepted request from ${request.fromUserId}, but no familyId was available; live family access remains locked`);
+            return;
+        }
+
+        const myName = identityService.getDisplayName() || 'Aile Üyesi';
+        const acceptedPayload = {
+            familyId,
+            approvalState: 'mutual',
+            relationshipStatus: 'accepted',
+            acceptedBy: cloudUid,
+            acceptedByName: myName,
+            acceptedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        };
+
+        await Promise.all([
+            setDoc(incomingLinkRef, {
+                ...acceptedPayload,
+                adderUid: request.fromUserId,
+                adderName: request.fromName,
+                name: request.fromName,
+            }, { merge: true }),
+            setDoc(doc(db, 'users', request.fromUserId, 'familyMembers', cloudUid), {
+                ...acceptedPayload,
+                name: myName,
+            }, { merge: true }),
+            setDoc(doc(db, 'users', cloudUid, 'familyIds', familyId), {
+                active: true,
+                ownerUid: request.fromUserId,
+                role: 'member',
+                joinedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true }),
+        ]);
+
+        await setDoc(doc(db, 'families', familyId, 'members', cloudUid), {
+            uid: cloudUid,
+            id: cloudUid,
+            name: myName,
+            status: 'unknown',
+            approvalState: 'mutual',
+            joinedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastSeen: 0,
+            latitude: 0,
+            longitude: 0,
+            location: null,
+        }, { merge: true });
+
+        const familyRef = doc(db, 'families', familyId);
+        await updateDoc(familyRef, {
+            members: arrayUnion(cloudUid),
+            updatedAt: serverTimestamp(),
+        }).catch(error => {
+            logger.debug('Family members array update after approval skipped:', error);
+        });
+
+        try {
+            const familyDoc = await getDoc(familyRef);
+            const familyGroupChatId = familyDoc.data()?.familyGroupChatId;
+            if (typeof familyGroupChatId === 'string' && familyGroupChatId.length > 0) {
+                const { groupChatService } = await import('./GroupChatService');
+                const deviceId = identityService.getMeshDeviceId?.() || identityService.getMyId?.() || cloudUid;
+                await groupChatService.addMemberToGroup(familyGroupChatId, cloudUid, myName, deviceId);
+            }
+        } catch (error) {
+            logger.debug('Family group chat join after approval skipped:', error);
+        }
+    }
+
+    private async refreshFamilyStoreAfterApproval(): Promise<void> {
+        try {
+            const { useFamilyStore } = await import('../stores/familyStore');
+            await useFamilyStore.getState().initialize(true);
+        } catch (error) {
+            logger.debug('Family store refresh after approval skipped:', error);
         }
     }
 
@@ -323,6 +487,9 @@ class ContactRequestService {
      * Cleanup on logout
      */
     async cleanup(): Promise<void> {
+        if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+        this.retryCount = 0;
+
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;

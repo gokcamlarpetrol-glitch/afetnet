@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../SafeBlurView';
 import * as FileSystem from 'expo-file-system';
 import { tileCacheService } from '../../../offline/TileCacheService';
 import HapticButton from '../HapticButton';
@@ -42,7 +42,7 @@ export const OfflineMapManager: React.FC<OfflineMapManagerProps> = ({ visible, o
     if (tileCount > 5000) {
       Alert.alert(
         'Büyük Alan Uyarısı',
-        'Bu alan çok geniş (${tileCount} parça). İndirme uzun sürebilir ve çok yer kaplayabilir. Emin misiniz?',
+        `Bu alan çok geniş (${tileCount} parça). İndirme uzun sürebilir ve çok yer kaplayabilir. Emin misiniz?`,
         [
           { text: 'İptal', style: 'cancel' },
           { text: 'İndir', onPress: startDownload },

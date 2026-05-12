@@ -1058,7 +1058,21 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       const svc = getFirebaseDataService();
       if (svc?.markMessageAsDelivered) {
         retryWithBackoffSafe(
-          () => svc.markMessageAsDelivered!(conversationId!, messageId).then(() => undefined),
+          async () => {
+            try {
+              await svc.markMessageAsDelivered!(conversationId!, messageId);
+            } catch (err: unknown) {
+              // CRITICAL FIX (MSG-H5): Short-circuit on terminal Firestore errors.
+              // permission-denied / not-found are PERMANENT — retrying 8 times burns
+              // network for nothing and delays user-visible status updates.
+              const errCode = (err as { code?: string })?.code;
+              if (errCode === 'permission-denied' || errCode === 'not-found') {
+                logger.warn(`markAsDelivered terminal error (${errCode}) — short-circuit`);
+                return; // Treat as success to stop retry loop
+              }
+              throw err;
+            }
+          },
           // FIX: 4 retries (~30s) too low for mobile networks with 30s+ blips.
           // 8 retries with 30s cap gives ~2 minutes coverage for delivery receipts.
           { maxRetries: 8, baseDelayMs: 2000, maxDelayMs: 30000 },

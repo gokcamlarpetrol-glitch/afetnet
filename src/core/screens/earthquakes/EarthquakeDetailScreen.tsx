@@ -14,8 +14,8 @@ import {
   Platform,
   Linking,
   ImageBackground,
-  Dimensions,
   Share,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import { EarthquakeMarker } from '../../components/map/EarthquakeMarker';
 import { earthquakeService } from '../../services/EarthquakeService';
-import { Earthquake } from '../../stores/earthquakeStore';
+import { Earthquake, useEarthquakeStore } from '../../stores/earthquakeStore';
 import * as haptics from '../../utils/haptics';
 import { formatToTurkishDateTime, getTimeDifferenceTurkish } from '../../utils/timeUtils';
 import { createLogger } from '../../utils/logger';
@@ -32,18 +32,98 @@ import { calculateDistance, ISTANBUL_CENTER } from '../../utils/locationUtils';
 import * as Location from 'expo-location';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import type { StackNavigationProp } from '@react-navigation/stack';
+import type { MainStackParamList } from '../../types/navigation';
 
 const logger = createLogger('EarthquakeDetailScreen');
-const { width } = Dimensions.get('window');
+
+function buildLookupCandidates(rawId: string): string[] {
+  const trimmed = rawId.trim();
+  if (!trimmed || trimmed === 'Date.now()') return [];
+
+  const candidates = new Set<string>([trimmed]);
+  const stripped = trimmed
+    .replace(/^afad[-_]/i, '')
+    .replace(/^eq[-_]/i, '')
+    .replace(/^eew[-_]/i, '')
+    .replace(/^earthquake[-_]/i, '')
+    .trim();
+
+  if (stripped && stripped !== trimmed) {
+    candidates.add(stripped);
+  }
+
+  return Array.from(candidates);
+}
+
+function findExistingEarthquake(rawId: string): Earthquake | null {
+  const candidates = buildLookupCandidates(rawId);
+  if (candidates.length === 0) return null;
+
+  const items = useEarthquakeStore.getState().items;
+  if (!Array.isArray(items) || items.length === 0) return null;
+
+  const lowerCandidates = candidates.map(candidate => candidate.toLowerCase());
+
+  return items.find((item) => {
+    const itemId = String(item.id || '').trim();
+    if (!itemId) return false;
+
+    const itemIdLower = itemId.toLowerCase();
+    const normalizedItemId = itemId
+      .replace(/^afad[-_]/i, '')
+      .replace(/^eq[-_]/i, '')
+      .replace(/^eew[-_]/i, '')
+      .replace(/^earthquake[-_]/i, '')
+      .trim()
+      .toLowerCase();
+
+    return lowerCandidates.some(candidate =>
+      itemIdLower === candidate
+      || itemIdLower.includes(candidate)
+      || candidate.includes(itemIdLower)
+      || (normalizedItemId.length > 0 && normalizedItemId === candidate)
+      || (normalizedItemId.length > 0 && normalizedItemId.includes(candidate))
+      || (normalizedItemId.length > 0 && candidate.includes(normalizedItemId)),
+    );
+  }) ?? null;
+}
+
+function deriveAfadEventId(rawId: string, sourceHint?: Earthquake['source'] | null): string | null {
+  const trimmed = rawId.trim();
+  if (!trimmed || trimmed === 'Date.now()') return null;
+
+  const isLikelyAfad =
+    sourceHint === 'AFAD'
+    || /^afad[-_]/i.test(trimmed)
+    || /^eq[-_]/i.test(trimmed)
+    || /^eew[-_]/i.test(trimmed)
+    || /^earthquake[-_]/i.test(trimmed)
+    || /^AFAD_/i.test(trimmed)
+    || /^\d+$/.test(trimmed);
+
+  if (!isLikelyAfad) {
+    return null;
+  }
+
+  const normalized = trimmed
+    .replace(/^afad[-_]/i, '')
+    .replace(/^eq[-_]/i, '')
+    .replace(/^eew[-_]/i, '')
+    .replace(/^earthquake[-_]/i, '')
+    .trim();
+
+  return normalized || null;
+}
 
 // ELITE: Type-safe navigation
-type EarthquakeDetailNavigationProp = StackNavigationProp<Record<string, object>>;
+type EarthquakeDetailNavigationProp = StackNavigationProp<MainStackParamList, 'EarthquakeDetail'>;
 
 interface Props {
   navigation: EarthquakeDetailNavigationProp;
   route?: {
     params?: {
       earthquake?: Earthquake;
+      id?: string;
     };
   };
 }
@@ -51,6 +131,7 @@ interface Props {
 export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const initialEarthquake = route?.params?.earthquake;
+  const notificationEventId = typeof route?.params?.id === 'string' ? route.params.id.trim() : '';
 
   const [earthquake, setEarthquake] = useState<Earthquake | null>(initialEarthquake ?? null);
   const [loading, setLoading] = useState(true);
@@ -58,10 +139,73 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   const [distance, setDistance] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!initialEarthquake) return;
-    fetchEarthquakeDetail();
-    getUserLocation();
-  }, []);
+    let cancelled = false;
+
+    const fetchDetail = async () => {
+      try {
+        if (!cancelled) setLoading(true);
+        const rawEventId =
+          notificationEventId
+          || earthquake?.id
+          || initialEarthquake?.id
+          || '';
+
+        const localMatch = findExistingEarthquake(rawEventId);
+        if (cancelled) return;
+        if (localMatch) {
+          setEarthquake(localMatch);
+        } else if (initialEarthquake) {
+          setEarthquake(initialEarthquake);
+        }
+
+        const afadEventId = deriveAfadEventId(rawEventId, localMatch?.source || initialEarthquake?.source);
+        if (afadEventId) {
+          const detailData = await earthquakeService.fetchEarthquakeDetail(afadEventId);
+          if (!cancelled && detailData) setEarthquake(detailData);
+          return;
+        }
+
+        if (!localMatch && rawEventId) {
+          const cachedDetail = await earthquakeService.fetchEarthquakeDetail(rawEventId);
+          if (!cancelled && cachedDetail) {
+            setEarthquake(cachedDetail);
+          }
+        }
+      } catch (err) {
+        // ELITE: Detail fetch failed - initial data still valid, no action needed
+        logger.debug('Earthquake detail fetch failed, using cached data');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const fetchLocation = async () => {
+      try {
+        // CRITICAL FIX: Apple 5.1.1 — check-only, never prompt on mount
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (cancelled) return;
+        if (status === 'granted') {
+          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          if (!cancelled) {
+            setUserLocation({
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+            });
+          }
+        }
+      } catch (error) {
+        // ELITE: Location permission denied or unavailable - non-critical, use fallback
+        logger.debug('Location unavailable, using fallback distance calculation');
+      }
+    };
+
+    fetchDetail();
+    fetchLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notificationEventId, initialEarthquake?.id]);
 
   useEffect(() => {
     if (!earthquake) return;
@@ -72,48 +216,13 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
     }
   }, [userLocation, earthquake]);
 
-  // FIXED: Early return moved AFTER all hooks to comply with React Rules of Hooks
-  if (!earthquake) return null;
-
-  const getUserLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setUserLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-      }
-    } catch (error) {
-      // ELITE: Location permission denied or unavailable - non-critical, use fallback
-      logger.debug('Location unavailable, using fallback distance calculation');
-    }
-  };
-
-  const fetchEarthquakeDetail = async () => {
-    try {
-      setLoading(true);
-      if (!earthquake?.id) return;
-      const eventID = earthquake.id.split('-')[1];
-      if (eventID && eventID !== 'Date.now()') {
-        const detailData = await earthquakeService.fetchEarthquakeDetail(eventID);
-        if (detailData) setEarthquake(detailData);
-      }
-    } catch (err) {
-      // ELITE: Detail fetch failed - initial data still valid, no action needed
-      logger.debug('Earthquake detail fetch failed, using cached data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleBack = () => {
     haptics.impactLight();
     navigation.goBack();
   };
 
   const handleShare = async () => {
+    if (!earthquake) return;
     haptics.impactLight();
     try {
       await Share.share({
@@ -126,6 +235,7 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
   };
 
   const openMaps = () => {
+    if (!earthquake) return;
     const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
     const latLng = `${earthquake.latitude},${earthquake.longitude}`;
     const label = earthquake.location;
@@ -142,9 +252,43 @@ export default function EarthquakeDetailScreen({ navigation, route }: Props) {
     return "Ciddi sarsıntı riski. Açık alana çıkın. Binalardan, elektrik direklerinden ve ağaçlardan uzak durun. Hasarlı binalara girmeyin.";
   };
 
+  // FIXED: Notification-open flow may arrive with only eventId.
+  // Keep hooks above, then render a deterministic fallback while details load.
+  if (!earthquake) {
+    return (
+      <ImageBackground
+        source={require('../../../../assets/images/premium/sky_soft_clouds_bg.jpg')}
+        style={styles.container}
+        resizeMode="cover"
+      >
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#0f172a" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Deprem Detayı</Text>
+          <View style={styles.iconButton} />
+        </View>
+        <View style={styles.loadingContainer}>
+          {loading ? (
+            <>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.loadingText}>Deprem verisi yükleniyor...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="warning-outline" size={36} color="#B91C1C" />
+              <Text style={styles.loadingText}>Deprem detayı alınamadı.</Text>
+            </>
+          )}
+        </View>
+      </ImageBackground>
+    );
+  }
+
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/sky_soft_clouds_bg.png')}
+      source={require('../../../../assets/images/premium/sky_soft_clouds_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >
@@ -345,6 +489,19 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 50,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 14,
+  },
+  loadingText: {
+    fontSize: 15,
+    color: '#334155',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   mapContainer: {
     borderRadius: 20,

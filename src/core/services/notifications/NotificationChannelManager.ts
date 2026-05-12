@@ -76,6 +76,17 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     importance: 'DEFAULT',
     description: 'Afet haberleri ve güncellemeleri',
   },
+  VOICE_CALLS: {
+    id: 'calls',
+    name: 'Sesli Aramalar',
+    importance: 'MAX',
+    description: 'Gelen sesli arama bildirimleri',
+    sound: 'default',
+    vibrationPattern: [0, 500, 200, 500, 200, 500],
+    bypassDnd: true,
+    enableLights: true,
+    lightColor: '#00FF00',
+  },
   GENERAL: {
     id: 'default',
     name: 'Genel Bildirimler',
@@ -156,7 +167,7 @@ export async function initializeChannels(): Promise<boolean> {
 /**
  * ELITE: Get channel ID for notification type
  */
-export function getChannelForType(type: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'general'): string {
+export function getChannelForType(type: 'earthquake' | 'eew' | 'sos' | 'family' | 'message' | 'news' | 'call' | 'general'): string {
   const channelMap: Record<string, string> = {
     earthquake: NOTIFICATION_CHANNELS.EARTHQUAKE_ALERT.id,
     eew: NOTIFICATION_CHANNELS.EEW_CRITICAL.id,
@@ -164,6 +175,7 @@ export function getChannelForType(type: 'earthquake' | 'eew' | 'sos' | 'family' 
     family: NOTIFICATION_CHANNELS.FAMILY_UPDATES.id,
     message: NOTIFICATION_CHANNELS.MESSAGES.id,
     news: NOTIFICATION_CHANNELS.NEWS_UPDATES.id,
+    call: NOTIFICATION_CHANNELS.VOICE_CALLS.id,
     general: NOTIFICATION_CHANNELS.GENERAL.id,
   };
   return channelMap[type] || NOTIFICATION_CHANNELS.GENERAL.id;

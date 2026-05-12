@@ -87,6 +87,7 @@ class MeshMediaService {
     private myDeviceId = '';
     private activeTransfers: Map<string, MediaTransfer> = new Map();
     private transferListeners: Set<(transfer: MediaTransfer) => void> = new Set();
+    private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
     // ============================================================================
     // INITIALIZATION
@@ -101,8 +102,12 @@ class MeshMediaService {
             // Ensure cache directory exists
             await this.ensureCacheDir();
 
-            // Load pending transfers
+            // Load pending transfers (mark stale ones as failed)
             await this.loadPendingTransfers();
+
+            // FIX: Start periodic cleanup timer for stale/abandoned transfers
+            // Without this, activeTransfers accumulates entries from interrupted BLE sessions
+            this.cleanupTimer = setInterval(() => this.cleanupStaleTransfers(300000), 5 * 60 * 1000);
 
             this.isInitialized = true;
             logger.info('Mesh Media Service initialized');
@@ -204,6 +209,11 @@ class MeshMediaService {
         });
 
         const buffer = Buffer.from(audioData, 'base64');
+
+        // Check size limit (same as image)
+        if (buffer.length > MEDIA_CONFIG.MAX_MEDIA_SIZE) {
+            throw new Error(`Voice too large: ${buffer.length} bytes (max: ${MEDIA_CONFIG.MAX_MEDIA_SIZE})`);
+        }
 
         // Create transfer
         const transfer = await this.createTransfer('voice', recipientId, buffer, {
@@ -455,6 +465,7 @@ class MeshMediaService {
             logger.warn(`Missing chunks: ${transfer.receivedChunks.size}/${transfer.totalChunks}`);
             transfer.status = 'failed';
             this.notifyListeners(transfer);
+            this.activeTransfers.delete(transfer.id); // Cleanup failed transfer
             return;
         }
 
@@ -465,6 +476,7 @@ class MeshMediaService {
             if (!chunk) {
                 transfer.status = 'failed';
                 this.notifyListeners(transfer);
+                this.activeTransfers.delete(transfer.id); // Cleanup failed transfer
                 return;
             }
             chunks.push(chunk);
@@ -478,6 +490,7 @@ class MeshMediaService {
             logger.error('Final checksum mismatch');
             transfer.status = 'failed';
             this.notifyListeners(transfer);
+            this.activeTransfers.delete(transfer.id); // Cleanup failed transfer
             return;
         }
 
@@ -490,6 +503,10 @@ class MeshMediaService {
 
         // Add to mesh store
         this.addMediaMessage(transfer, filePath);
+
+        // ELITE: Auto-cleanup completed transfer from activeTransfers after notify
+        // Prevents memory leak from accumulating finished transfers
+        this.activeTransfers.delete(transfer.id);
 
         logger.info(`Media transfer complete: ${transfer.id}`);
     }
@@ -688,20 +705,17 @@ class MeshMediaService {
                 if (data) {
                     const parsedTransfer = JSON.parse(data);
                     if (parsedTransfer.status === 'transferring') {
-                        // Reconstruct Map from serialized data
+                        // FIX: Mark stale loaded transfers as 'failed' instead of keeping
+                        // them in 'transferring' state forever. They won't be resumed.
                         const transfer: MediaTransfer = {
                             ...parsedTransfer,
+                            status: 'failed' as const,
                             receivedChunks: new Map<number, Buffer>(),
                         };
 
-                        // Convert serialized chunks back to Map
-                        if (parsedTransfer.receivedChunks && typeof parsedTransfer.receivedChunks === 'object') {
-                            Object.entries(parsedTransfer.receivedChunks).forEach(([key, value]) => {
-                                transfer.receivedChunks.set(parseInt(key, 10), Buffer.from(value as string, 'base64'));
-                            });
-                        }
-
-                        this.activeTransfers.set(transfer.id, transfer);
+                        // Remove stale storage entry
+                        DirectStorage.delete(key);
+                        logger.debug(`Cleaned up stale transfer ${transfer.id}`);
                     }
                 }
             }
@@ -742,6 +756,36 @@ class MeshMediaService {
             this.notifyListeners(transfer);
             this.activeTransfers.delete(id);
         }
+    }
+
+    /**
+     * Clean up completed/failed transfers older than maxAge to prevent memory leak.
+     * Call periodically or after transfer completion.
+     */
+    cleanupStaleTransfers(maxAgeMs: number = 300000): void {
+        const now = Date.now();
+        for (const [id, transfer] of this.activeTransfers) {
+            const isTerminal = transfer.status === 'complete' || transfer.status === 'failed';
+            const isStale = (now - transfer.lastActivityTime) > maxAgeMs;
+            if (isTerminal || isStale) {
+                this.activeTransfers.delete(id);
+            }
+        }
+    }
+
+    /**
+     * Full cleanup for shutdown
+     */
+    destroy(): void {
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+        this.activeTransfers.clear();
+        this.transferListeners.clear();
+        // FIX: Reset isInitialized so service can be re-initialized after destroy
+        this.isInitialized = false;
+        logger.info('MeshMediaService destroyed');
     }
 }
 

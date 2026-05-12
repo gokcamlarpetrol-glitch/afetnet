@@ -63,6 +63,10 @@ class UnifiedSOSController {
     private ambientRecordingTimer: NodeJS.Timeout | null = null;
     private isAmbientRecording = false;
 
+    // Sprint Audit FIX A1: ACK timeout tracker for SOS channels
+    private ackTimeoutTimer: NodeJS.Timeout | null = null;
+    private static readonly ACK_TIMEOUT_MS = 60_000;
+
     // ============================================================================
     // INITIALIZATION
     // ============================================================================
@@ -97,18 +101,36 @@ class UnifiedSOSController {
             // and the user can trigger a new SOS manually.
             const store = useSOSStore.getState();
             if (store.isActive && store.currentSignal) {
-                logger.warn('RECOVERING ACTIVE SOS after app restart — resuming beacons and alarm');
-                try {
-                    await Promise.race([
-                        sosChannelRouter.broadcastSOS(store.currentSignal),
-                        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Recovery broadcast timeout')), 8000)),
-                    ]).catch(err => logger.error('SOS recovery broadcast failed/timed out:', err));
-                    sosBeaconService.start();
-                    if (!store.currentSignal.isSilent) {
-                        this.startAlarmAndVibration();
+                // CRITICAL FIX (SOS-M8): Reject stale recovery — if SOS signal is >30 minutes old,
+                // user has likely been rescued or the SOS was forgotten on a charging device.
+                // Resuming an ancient broadcast spams rescue teams with false-positive alerts.
+                const signalAge = Date.now() - (store.currentSignal.timestamp ?? 0);
+                const MAX_RECOVERY_AGE_MS = 30 * 60 * 1000; // 30 minutes
+                if (signalAge > MAX_RECOVERY_AGE_MS) {
+                    logger.warn(`SOS recovery REJECTED — signal ${Math.floor(signalAge / 60000)}min old (max 30min)`);
+                    try {
+                        // Best-effort cancellation broadcast so any in-flight rescuers stand down
+                        await this.broadcastCancellation(store.currentSignal).catch(() => { /* */ });
+                    } catch { /* */ }
+                    store.stopSOS();
+                } else {
+                    logger.warn('RECOVERING ACTIVE SOS after app restart — resuming beacons and alarm');
+                    try {
+                        await Promise.race([
+                            sosChannelRouter.broadcastSOS(store.currentSignal),
+                            new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Recovery broadcast timeout')), 8000)),
+                        ]).catch(err => logger.error('SOS recovery broadcast failed/timed out:', err));
+                        sosBeaconService.start();
+                        if (!store.currentSignal.isSilent) {
+                            this.startAlarmAndVibration();
+                        }
+                        // CRITICAL FIX (SOS-H5): Restart fall detection on recovery path.
+                        // initialize() line 88 only starts on first init; recovery path bypassed it,
+                        // leaving fall detection inactive on resumed SOS. Secondary fall undetected.
+                        fallDetectionService.start();
+                    } catch (err) {
+                        logger.error('SOS recovery broadcast failed:', err);
                     }
-                } catch (err) {
-                    logger.error('SOS recovery broadcast failed:', err);
                 }
             } else if (!store.isActive && store.isCountingDown && store.countdownStartedAt) {
                 // CRITICAL FIX: Resume countdown from crash instead of clearing.
@@ -321,6 +343,14 @@ class UnifiedSOSController {
                 this.locationPrecacheTimer = null;
             }
 
+            // Sprint Audit FIX A1: Stop ACK timeout tracker
+            this.stopAckTimeoutTracker();
+
+            // Sprint Audit FIX A7: Cancel pending channel retries
+            try {
+                sosChannelRouter.cancelChannelRetry();
+            } catch { /* */ }
+
             // ELITE V4: Stop alarm sound + vibration + ambient recording
             this.stopAlarmAndVibration().catch(e => { if (__DEV__) logger.warn('Stop alarm failed:', e); });
             this.stopAmbientRecording().catch(e => { if (__DEV__) logger.warn('Stop recording failed:', e); });
@@ -344,6 +374,15 @@ class UnifiedSOSController {
             try {
                 const { familyTrackingService } = require('../FamilyTrackingService');
                 familyTrackingService.setEmergencyMode(false);
+            } catch { /* non-critical */ }
+
+            // LIFE-SAFETY: Return mesh power manager to normal mode (battery-aware scan)
+            try {
+                const { meshPowerManager } = require('../mesh/MeshPowerManager');
+                if (typeof meshPowerManager.disableEmergencyMode === 'function') {
+                    meshPowerManager.disableEmergencyMode();
+                    logger.info('🔋 Mesh emergency mode disabled (back to battery-aware)');
+                }
             } catch { /* non-critical */ }
 
             store.stopSOS();
@@ -593,6 +632,26 @@ class UnifiedSOSController {
     private async activateSOS(): Promise<void> {
         // Guard against double activation (countdown race condition)
         if (this.isActivating) return;
+
+        // Sprint 18-19: Multi-device gate — only PRIMARY device fires SOS broadcast.
+        // Secondary devices still see countdown and local UX but don't duplicate Firestore writes,
+        // mesh broadcasts, or push notifications. Primary device handles all delivery channels.
+        try {
+            const { multiDeviceService } = await import('../MultiDeviceService');
+            if (!multiDeviceService.isPrimaryDevice()) {
+                logger.warn('SOS activate: SECONDARY device — skipping broadcast (primary device handles it)');
+                // Still mark state locally so user sees consistent UI
+                const store = useSOSStore.getState();
+                if (store.currentSignal) {
+                    store.activateSOS(store.currentSignal);
+                }
+                return;
+            }
+        } catch (e) {
+            // Service not available → continue (single-device user)
+            logger.debug('Multi-device check skipped:', e);
+        }
+
         this.isActivating = true;
 
         try {
@@ -650,6 +709,12 @@ class UnifiedSOSController {
             familyTrackingService.setEmergencyMode(true);
         } catch { /* non-critical */ }
 
+        // SOS ACK TIMEOUT TRACKER (Sprint Audit FIX A1):
+        // After 60s, any channel still 'sent' (no ACK) is downgraded to 'unconfirmed'.
+        // This prevents misleading "all green checkmarks" UI when nobody actually responded.
+        // Life-safety transparency: user knows if rescue team really got the signal.
+        this.startAckTimeoutTracker();
+
         // ELITE V4: Start SOS alarm sound if NOT silent
         if (!signal.isSilent) {
             this.startAlarmAndVibration();
@@ -667,6 +732,18 @@ class UnifiedSOSController {
             await startSOSAckListener(this.deviceId);
         } catch (ackErr) {
             logger.warn('ACK listener start failed (non-critical):', ackErr);
+        }
+
+        // LIFE-SAFETY: Activate mesh emergency mode — aggressive BLE scan + advertising
+        // even on low battery. Without this, BatteryOptimizedScanner may throttle scans
+        // and trapped survivors' devices won't relay packets.
+        // Battery is irrelevant if the user is buried; mesh propagation is the priority.
+        try {
+            const { meshPowerManager } = await import('../mesh/MeshPowerManager');
+            await meshPowerManager.enableEmergencyMode();
+            logger.warn('🚨 Mesh emergency mode ACTIVE (full-power scan + advertise)');
+        } catch (powerErr) {
+            logger.warn('Mesh emergency mode failed (non-critical):', powerErr);
         }
 
         // Track analytics
@@ -780,6 +857,47 @@ class UnifiedSOSController {
             Vibration.vibrate([500, 500, 500, 500], true);
             logger.info('📳 SOS vibration started');
         } catch { /* non-critical */ }
+    }
+
+    /**
+     * Sprint Audit FIX A1: SOS ACK timeout tracker.
+     * After 60s, any channel still in 'sent' state is downgraded to 'unconfirmed'
+     * to communicate that no actual ACK was received from rescue team.
+     * This prevents the misleading UX where 6/6 green checkmarks suggest "all delivered"
+     * when in reality only fire-and-forget transmissions occurred.
+     */
+    private startAckTimeoutTracker(): void {
+        if (this.ackTimeoutTimer) {
+            clearTimeout(this.ackTimeoutTimer);
+            this.ackTimeoutTimer = null;
+        }
+        this.ackTimeoutTimer = setTimeout(() => {
+            try {
+                const store = useSOSStore.getState();
+                const signal = store.currentSignal;
+                if (!signal || !store.isActive) return;
+                const channels = signal.channels;
+                let downgradeCount = 0;
+                for (const channelKey of Object.keys(channels) as Array<keyof typeof channels>) {
+                    if (channels[channelKey] === 'sent') {
+                        store.updateChannelStatus(channelKey, 'unconfirmed');
+                        downgradeCount++;
+                    }
+                }
+                if (downgradeCount > 0) {
+                    logger.warn(`🟡 SOS ACK timeout: ${downgradeCount} channel(s) downgraded 'sent' → 'unconfirmed'`);
+                }
+            } catch (e) {
+                logger.error('ACK timeout tracker error:', e);
+            }
+        }, UnifiedSOSController.ACK_TIMEOUT_MS);
+    }
+
+    private stopAckTimeoutTracker(): void {
+        if (this.ackTimeoutTimer) {
+            clearTimeout(this.ackTimeoutTimer);
+            this.ackTimeoutTimer = null;
+        }
     }
 
     private async stopAlarmAndVibration(): Promise<void> {

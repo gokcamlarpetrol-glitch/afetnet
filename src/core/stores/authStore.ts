@@ -17,6 +17,7 @@ import { getFirebaseAuth } from '../../lib/firebase';
 import { identityService, UserIdentity } from '../services/IdentityService';
 import { AuthService } from '../services/AuthService';
 import { createLogger } from '../utils/logger';
+import { isStorageReady, waitForStorageReady } from '../utils/storage';
 import {
     hasCachedAuthenticatedSession,
     isExplicitSignOutPending,
@@ -68,6 +69,12 @@ interface AuthState {
     isLoading: boolean;
     user: UserIdentity | null;
     firebaseUser: User | null;
+    /**
+     * Set when a password-provider user logs in successfully but has unverified email.
+     * UI should show "doğrulama e-postanızı kontrol edin" banner and offer "Doğrulamayı Yeniden Gönder" button.
+     * Cleared when the user verifies their email and re-signs in, or on explicit logout.
+     */
+    pendingEmailVerification: string | null;
 
     // Actions
     initialize: () => Promise<void>;
@@ -90,9 +97,9 @@ let delayedReAuthTimers: ReturnType<typeof setTimeout>[] = [];
 const SIGN_OUT_GRACE_MS = 3000;
 const INITIAL_RESTORE_GRACE_MS = 8000;
 
-// CRITICAL FIX: Read cached auth state so the app shows Main (not Auth screen)
-// while Firebase restores the session. This prevents the flash-to-login bug.
-const cachedAuth = hasCachedAuthenticatedSession();
+// Read cached auth state only when the boot storage layer is ready.
+// In AsyncStorage fallback mode, reads are not trustworthy until hydration completes.
+const cachedAuth = isStorageReady() ? hasCachedAuthenticatedSession() : false;
 // Log cold start state — this fires at module load time (before any React render)
 logger.info(`Auth boot: COLD_START (cachedAuth=${cachedAuth}, explicitSignOut=${isExplicitSignOutPending()})`);
 
@@ -101,6 +108,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     isLoading: !cachedAuth, // If cached=true, skip loading (show Main immediately)
     user: null,
     firebaseUser: null,
+    pendingEmailVerification: null,
 
     initialize: async () => {
         // Prevent duplicate initialization
@@ -124,10 +132,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 // to Firebase config loading race, expo-constants timing, or initializeApp
                 // error. The user should remain authenticated from cache until an EXPLICIT
                 // sign-out occurs. Only clear auth if there was no cached session.
-                if (!cachedAuth) {
+                if (!hasCachedAuthenticatedSession()) {
                     set({ isLoading: false, isAuthenticated: false });
                 } else {
-                    logger.warn('getFirebaseAuth() returned null but cachedAuth=true — preserving cached auth session');
+                    logger.warn('getFirebaseAuth() returned null but cached auth says authenticated — preserving cached auth session');
                     set({ isLoading: false });
                 }
                 // CRITICAL FIX: Do NOT set authListenerInitialized=true here.
@@ -183,6 +191,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
             unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
                 if (firebaseUser) {
+                    // LIFE-SAFETY / AUTH ROOT-CAUSE FIX:
+                    // Email-password users with unverified email must NOT be treated as
+                    // authenticated. signInWithEmail() previously called signOut() on
+                    // unverified users, which fired onAuthStateChanged(null) and caused
+                    // a logout-loop (auth=true → auth=false in rapid succession).
+                    // Now we gate authentication on emailVerified up-front for the
+                    // password provider. Social providers (Apple, Google) are inherently
+                    // verified by the IdP so we let them through.
+                    const isPasswordProvider = firebaseUser.providerData?.some(
+                        (p) => p?.providerId === 'password',
+                    ) ?? false;
+                    if (isPasswordProvider && firebaseUser.emailVerified === false) {
+                        logger.warn(`User ${firebaseUser.uid} signed in but email unverified — blocking auth state.`);
+                        // Keep app in unauthenticated state. Surface info to UI without crash.
+                        set({
+                            isAuthenticated: false,
+                            isLoading: false,
+                            user: null,
+                            firebaseUser: null,
+                            // Flag for LoginScreen to show "please verify email" banner
+                            pendingEmailVerification: firebaseUser.email ?? null,
+                        });
+                        return;
+                    }
+
                     if (authInitTimeout) {
                         clearTimeout(authInitTimeout);
                         authInitTimeout = null;
@@ -535,10 +568,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             // error (e.g., Firebase config race, module import failure) should NOT force
             // the user to re-authenticate. This was a root cause of the "logout on kill" bug:
             // any transient error during initialize() would override the cached auth state.
-            if (!cachedAuth) {
+            if (!hasCachedAuthenticatedSession()) {
                 set({ isLoading: false, isAuthenticated: false });
             } else {
-                logger.warn('initialize() threw but cachedAuth=true — preserving cached auth session');
+                logger.warn('initialize() threw but cached auth says authenticated — preserving cached auth session');
                 set({ isLoading: false });
             }
         }
@@ -605,6 +638,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     },
 }));
 
+let authCacheGuardInstalled = false;
+
+const ensureCachedAuthGuard = () => {
+    if (authCacheGuardInstalled || !hasCachedAuthenticatedSession()) {
+        return;
+    }
+    authCacheGuardInstalled = true;
+    useAuthStore.subscribe((state) => {
+        if (!state.isAuthenticated && !isExplicitSignOutPending()) {
+            if (hasCachedAuthenticatedSession()) {
+                console.warn('[AuthStore] isAuthenticated was set to false despite cached auth and no explicit sign-out — restoring immediately');
+                useAuthStore.setState({ isAuthenticated: true });
+            }
+        }
+    });
+};
+
+ensureCachedAuthGuard();
+
+waitForStorageReady().then(() => {
+    if (hasCachedAuthenticatedSession() && !isExplicitSignOutPending()) {
+        const state = useAuthStore.getState();
+        if (!state.isAuthenticated) {
+            logger.info('Auth boot: restoring cached auth after storage fallback hydration');
+            useAuthStore.setState({ isAuthenticated: true, isLoading: false });
+        }
+    }
+    ensureCachedAuthGuard();
+}).catch((error) => {
+    logger.warn('Storage readiness wait failed:', error);
+});
+
 // ELITE: Cleanup function for app shutdown
 export const cleanupAuthListener = () => {
     if (unsubscribeAuth) {
@@ -634,29 +699,3 @@ export const cleanupAuthListener = () => {
     // Reset boot state for next session (hot reload, unmount+remount)
     currentBootState = 'COLD_START';
 };
-
-// CRITICAL FIX: Subscribe guard for isAuthenticated — mirrors the onboardingStore pattern.
-// If MMKV auth cache said true at boot (cachedAuth=true), isAuthenticated must NEVER be
-// set to false unless an EXPLICIT sign-out occurred. Without this guard, any code path
-// (Firebase Auth init failure, onAuthStateChanged transient null, race condition) that
-// sets isAuthenticated=false despite the cached session causes the user to see the login
-// screen — the "logout on background kill" bug.
-//
-// The guard checks isExplicitSignOutPending() because:
-//   1. logout() sets explicitSignOutPending=true BEFORE calling signOut()
-//   2. onAuthStateChanged null handler checks isExplicitSignOutPending before clearing
-//   3. If the flag is true, the user intentionally signed out — allow isAuthenticated=false
-//
-// This is the LAST LINE OF DEFENSE. Even if a bug in the auth listener or init code
-// accidentally sets isAuthenticated=false, this guard immediately corrects it.
-if (cachedAuth) {
-    useAuthStore.subscribe((state) => {
-        if (!state.isAuthenticated && !isExplicitSignOutPending()) {
-            // Double-check MMKV is still consistent (not cleared by legitimate logout)
-            if (hasCachedAuthenticatedSession()) {
-                console.warn('[AuthStore] isAuthenticated was set to false despite cachedAuth=true and no explicit sign-out — restoring immediately');
-                useAuthStore.setState({ isAuthenticated: true });
-            }
-        }
-    });
-}

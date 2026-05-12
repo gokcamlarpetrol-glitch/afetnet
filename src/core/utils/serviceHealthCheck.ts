@@ -39,8 +39,8 @@ export async function checkFirebaseHealth(): Promise<ServiceHealthStatus> {
 
     // Check if Firestore is available
     try {
-      const { getFirestore } = await import('firebase/firestore');
-      const db = getFirestore(firebaseApp);
+      const { getFirestoreInstanceAsync } = await import('../services/firebase/FirebaseInstanceManager');
+      const db = await getFirestoreInstanceAsync();
 
       if (!db) {
         return {

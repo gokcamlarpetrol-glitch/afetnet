@@ -26,8 +26,8 @@
 import { Platform } from 'react-native';
 import { getDatabase, ref, push, onValue, serverTimestamp, query, orderByChild, limitToLast, off } from 'firebase/database';
 import { getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
 import { DirectStorage } from '../utils/storage';
+import { getFirebaseAuth } from '../../lib/firebase';
 import * as Location from 'expo-location';
 import { createLogger } from '../utils/logger';
 import { firebaseAnalyticsService } from './FirebaseAnalyticsService';
@@ -92,14 +92,15 @@ interface NetworkConfig {
 // CONSTANTS
 // ============================================================
 
-// PRODUCTION: Balanced for accuracy + speed
-// Higher thresholds = fewer false positives = no notification spam
+// ELITE: Optimized for early detection with small user base
+// Two phones detecting the same event = very strong signal (both pass 5-layer ensemble filter)
+// Cloud Function FCM push still requires 5 phones + 85% — this is just local cluster detection
 const DEFAULT_CONFIG: NetworkConfig = {
-    minReportsForCluster: 3,       // PRODUCTION: Need 3 phones minimum to confirm a cluster
+    minReportsForCluster: 2,       // ELITE: 2 phones = strong signal (both passed ensemble filter)
     maxClusterRadius: 150,         // 150km radius (wider for rural areas)
-    clusterTimeWindow: 30000,      // 30 second window - fast detection
-    minReportConfidence: 0.6,      // PRODUCTION: 60% confidence to include a report
-    minAlertConfidence: 0.8,       // PRODUCTION: 80% cluster confidence to alert users
+    clusterTimeWindow: 45000,      // 45s window — allows for wave propagation across region
+    minReportConfidence: 0.6,      // 60% confidence to include a report
+    minAlertConfidence: 0.75,      // ELITE: 75% cluster confidence to trigger local alert
 };
 
 const STORAGE_KEYS = {
@@ -197,6 +198,22 @@ class CrowdsourcedSeismicNetworkService {
         if (confidence < this.config.minReportConfidence) {
             logger.debug(`Skipping low confidence report: ${(confidence * 100).toFixed(1)}%`);
             return false;
+        }
+
+        // CRITICAL FIX: Skip RTDB write when no authenticated user.
+        // Without Firebase Auth, the RTDB rules reject the write (auth.uid !== userId).
+        // Previously this generated a fake userId that was always rejected, wasting
+        // bandwidth and flooding error logs. The seismic data is still useful locally
+        // for on-device cluster detection.
+        if (!this.userId) {
+            // Re-check auth in case it became available since initialize()
+            const currentUser = getFirebaseAuth()?.currentUser;
+            if (currentUser) {
+                this.userId = currentUser.uid;
+            } else {
+                logger.warn('Skipping seismic report submission: no authenticated user (RTDB rules would reject)');
+                return false;
+            }
         }
 
         // Ensure we have location
@@ -299,8 +316,31 @@ class CrowdsourcedSeismicNetworkService {
 
         logger.warn(`🚨 CROWDSOURCED EARTHQUAKE DETECTED: M${event.estimatedMagnitude.toFixed(1)}`);
 
-        // Mark as alerted
+        // Mark as alerted (cap size to prevent unbounded memory growth)
+        if (this.alertedClusters.size > 500) {
+            // Remove oldest entries (Sets iterate in insertion order)
+            const entriesToDelete = this.alertedClusters.size - 400;
+            let count = 0;
+            for (const key of this.alertedClusters) {
+                if (count >= entriesToDelete) break;
+                this.alertedClusters.delete(key);
+                count++;
+            }
+        }
         this.alertedClusters.add(event.id);
+        // Cap alertedClusters to prevent unbounded growth
+        if (this.alertedClusters.size > 500) {
+            const first = this.alertedClusters.values().next().value;
+            if (first) this.alertedClusters.delete(first);
+        }
+
+        // ELITE: Populate recentClusters (was dead Map — never written to)
+        this.recentClusters.set(event.id, event);
+        // Prune old clusters (keep last 50)
+        if (this.recentClusters.size > 50) {
+            const firstKey = this.recentClusters.keys().next().value;
+            if (firstKey) this.recentClusters.delete(firstKey);
+        }
 
         // Calculate warning time if we have location
         let warningSeconds = 0;
@@ -419,21 +459,21 @@ class CrowdsourcedSeismicNetworkService {
         try {
             // CRITICAL: Use Firebase Auth uid to match RTDB rules
             // Rules require: auth.uid === $userId — random IDs will be rejected
-            const currentUser = getAuth().currentUser;
+            const currentUser = getFirebaseAuth()?.currentUser;
             if (currentUser) {
                 this.userId = currentUser.uid;
                 return;
             }
-            // Fallback: DirectStorage ID (writes will fail with RTDB rules but reads still work)
-            let saved = DirectStorage.getString(STORAGE_KEYS.USER_ID) ?? null;
-            if (!saved) {
-                saved = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-                DirectStorage.setString(STORAGE_KEYS.USER_ID, saved);
-            }
-            this.userId = saved;
-            logger.warn('No auth user, using fallback userId — seismic reports will be rejected by RTDB rules');
+            // No auth available — do NOT generate a fake userId.
+            // Generated UIDs are always rejected by RTDB rules (auth.uid !== generatedId),
+            // wasting bandwidth and creating noise in error logs.
+            // The service can still LISTEN for cluster events without auth.
+            // reportDetection() will check for empty userId and skip RTDB writes.
+            this.userId = '';
+            logger.warn('No auth user — seismic reports will be skipped (reads/listening still active)');
         } catch (e) {
-            this.userId = `temp_${Date.now()}`;
+            this.userId = '';
+            logger.warn('ensureUserId failed — seismic reports will be skipped');
         }
     }
 
@@ -498,7 +538,7 @@ export function useCrowdsourcedSeismicNetwork() {
     useEffect(() => {
         crowdsourcedSeismicNetwork.initialize().then(() => {
             setIsRunning(true);
-        });
+        }).catch(e => { if (__DEV__) console.debug('Crowdsourced network init failed:', e); });
 
         // Update clusters periodically
         const interval = setInterval(() => {

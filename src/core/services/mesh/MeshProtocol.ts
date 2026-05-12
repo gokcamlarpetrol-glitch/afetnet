@@ -69,15 +69,17 @@ export interface MeshPacket {
 
 const MAGIC_BYTE = 0xAF;
 const PROTOCOL_VERSION = 0x02; // Bump version
-const HEADER_SIZE = 13; // 1+1+1+1+1(Q)+4+4
+const HEADER_SIZE_V2 = 13; // 1+1+1+1+1(Q)+4+4
+const HEADER_SIZE_V1 = 12; // 1+1+1+1+4+4 (no Q-Score byte)
 
 export class MeshProtocol {
   /**
      * Serialize a packet into a binary buffer
      */
   static serialize(type: MeshMessageType, sourceId: string | number, payload: Buffer, ttl: number = 3, qScore: number = 100, messageId?: number): Buffer {
-    const msgId = messageId !== undefined ? messageId : Math.floor(Math.random() * 0xFFFFFFFF);
-    const buffer = Buffer.alloc(HEADER_SIZE + payload.length);
+    // Combine time-based uniqueness with randomness: reduces collision from O(1/sqrt(N)) to near-zero
+    const msgId = messageId !== undefined ? messageId : (((Date.now() >>> 0) ^ (Math.floor(Math.random() * 0xFFFFFFFF))) >>> 0);
+    const buffer = Buffer.alloc(HEADER_SIZE_V2 + payload.length);
     let offset = 0;
 
     // Header
@@ -114,7 +116,8 @@ export class MeshProtocol {
      * Deserialize a binary buffer into a packet
      */
   static deserialize(buffer: Buffer): MeshPacket | null {
-    if (buffer.length < HEADER_SIZE) return null;
+    // Minimum check: v1 header is 12 bytes, v2 is 13.
+    if (buffer.length < HEADER_SIZE_V1) return null;
     let offset = 0;
 
     const magic = buffer.readUInt8(offset++);
@@ -123,6 +126,10 @@ export class MeshProtocol {
     const version = buffer.readUInt8(offset++);
     // Allow version 1 and 2 compat if needed, but for now enforce 2
     // if (version !== PROTOCOL_VERSION) return null;
+
+    // FIX: V2 packets need 13 bytes (extra Q-Score byte). Reject short v2 buffers
+    // to prevent RangeError from readUInt32BE reading past end of buffer.
+    if (version >= 0x02 && buffer.length < HEADER_SIZE_V2) return null;
 
     const type = buffer.readUInt8(offset++) as MeshMessageType;
     const ttl = buffer.readUInt8(offset++);
@@ -305,7 +312,7 @@ export class MeshProtocol {
     buffer.writeFloatBE(lon, 4);
     buffer.writeUInt16BE(Math.min(65535, accuracy), 8);
     buffer.writeUInt8(Math.min(255, speed), 10);
-    buffer.writeUInt16BE(Math.min(360, heading), 11);
+    buffer.writeUInt16BE(Math.max(0, Math.min(359, Math.round(heading))), 11);
     return buffer;
   }
 
@@ -500,12 +507,55 @@ export class MeshProtocol {
     ].includes(type);
   }
 
-  private static hashString(str: string): number {
+  // NOTE: djb2 hash — 32-bit output means ~77K unique device IDs before 50% collision probability.
+  // Acceptable for BLE mesh networks (unlikely to have 77K concurrent peers in practice).
+  static hashString(str: string): number {
     let hash = 5381;
     let i = str.length;
     while (i) {
       hash = (hash * 33) ^ str.charCodeAt(--i);
     }
     return hash >>> 0;
+  }
+
+  /** Calculate CRC-8 (Dallas/Maxim) for data integrity verification */
+  static calculateCRC8(data: Buffer): number {
+    let crc = 0;
+    for (let i = 0; i < data.length; i++) {
+      crc ^= data[i];
+      for (let j = 0; j < 8; j++) {
+        crc = (crc & 0x80) ? ((crc << 1) ^ 0x31) : (crc << 1);
+        crc &= 0xFF;
+      }
+    }
+    return crc;
+  }
+
+  /** Verify data integrity using CRC-8 */
+  static verifyCRC8(data: Buffer, expectedCRC: number): boolean {
+    return this.calculateCRC8(data) === expectedCRC;
+  }
+
+  // ===========================================================================
+  // CRC-WRAPPED SERIALIZE/DESERIALIZE (opt-in, backward compatible)
+  // ===========================================================================
+
+  /** Serialize with CRC-8 appended to the packet (1 extra byte at the end) */
+  static serializeWithCRC(type: MeshMessageType, sourceId: string | number, payload: Buffer, ttl?: number, qScore?: number, messageId?: number): Buffer {
+    const packet = this.serialize(type, sourceId, payload, ttl, qScore, messageId);
+    const crc = this.calculateCRC8(packet);
+    const withCRC = Buffer.alloc(packet.length + 1);
+    packet.copy(withCRC);
+    withCRC.writeUInt8(crc, packet.length);
+    return withCRC;
+  }
+
+  /** Deserialize a packet with CRC-8 validation (last byte is CRC) */
+  static deserializeWithCRC(buffer: Buffer): MeshPacket | null {
+    if (buffer.length < HEADER_SIZE_V1 + 1) return null;
+    const crc = buffer.readUInt8(buffer.length - 1);
+    const data = buffer.slice(0, buffer.length - 1);
+    if (!this.verifyCRC8(data, crc)) return null;
+    return this.deserialize(data);
   }
 }

@@ -16,7 +16,6 @@ import {
   StatusBar,
   Linking,
   Platform,
-  BackHandler,
   Modal,
   ImageBackground,
   TextInput,
@@ -32,12 +31,14 @@ import { i18nService } from '../../services/I18nService';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { SettingItem as SettingItemRow } from '../../components/settings/SettingItem';
 import * as haptics from '../../utils/haptics';
+import { FeedbackModal } from '../../components/FeedbackModal';
 import { batterySaverService } from '../../services/BatterySaverService';
 import { createLogger } from '../../utils/logger';
 import { accountDeletionService } from '../../services/AccountDeletionService';
 import { EmailAuthService } from '../../services/EmailAuthService';
 import { getDeviceId } from '../../utils/device';
 import { ActivityIndicator } from 'react-native';
+import { getFirebaseAuth } from '../../../lib/firebase';
 
 const logger = createLogger('SettingsScreen');
 // AI Feature Toggle import kaldırıldı - AI Asistan her zaman aktif
@@ -56,6 +57,7 @@ interface SettingOption {
 import type { ReactElement } from 'react';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase } from '@react-navigation/native';
+import { navigationRef } from '../../navigation/navigationRef';
 
 // ELITE: Properly typed navigation prop for Settings screen
 type SettingsScreenNavigationProp = StackNavigationProp<ParamListBase>;
@@ -86,6 +88,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   // AI Features State - Her zaman aktif
   const [aiFeaturesEnabled] = useState(true);
   const [deviceId, setDeviceId] = useState<string>('...');
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
   const newsEnabled = useSettingsStore((state) => state.newsEnabled);
   const fontScale = useSettingsStore((state) => state.fontScale);
   const highContrastEnabled = useSettingsStore((state) => state.highContrastEnabled);
@@ -128,6 +131,10 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const setProximityAlertsEnabled = useSettingsStore((state) => state.setProximityAlerts);
   const setAiHazardEnabled = useSettingsStore((state) => state.setAiHazard);
 
+  // Apple Guideline 5.1.2(i): AI Data Sharing Consent
+  const aiDataSharingConsented = useSettingsStore((state) => state.aiDataSharingConsented);
+  const setAiDataSharingConsented = useSettingsStore((state) => state.setAiDataSharingConsented);
+
 
   useEffect(() => {
     // AI Asistan her zaman aktif - feature toggle kontrolü kaldırıldı
@@ -155,11 +162,106 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     );
   };
 
+  const handleMeshDiagnostics = async () => {
+    haptics.impactLight();
+
+    try {
+      const [{ default: NetInfo }, { meshNetworkService }, { useMeshStore }, { highPerformanceBle }] = await Promise.all([
+        import('@react-native-community/netinfo'),
+        import('../../services/mesh/MeshNetworkService'),
+        import('../../services/mesh/MeshStore'),
+        import('../../ble/HighPerformanceBle'),
+      ]);
+
+      const netState = await NetInfo.fetch();
+      const meshStoreState = useMeshStore.getState();
+      const meshDiag = meshNetworkService.getDiagnostics();
+      const bleDiag = await highPerformanceBle.getDiagnostics();
+      const lastPeerSeen = bleDiag.lastPeerDiscoveredAt
+        ? `${Math.round((Date.now() - bleDiag.lastPeerDiscoveredAt) / 1000)} sn önce`
+        : 'yok';
+
+      const recommendations: string[] = [];
+      if (!bleDiag.bluetoothPoweredOn) {
+        recommendations.push('Bluetooth kapalı: Uçak modunda Bluetooth’u manuel açın.');
+      }
+      if (!meshDiag.isRunning) {
+        recommendations.push('Mesh servis kapalı: Settings > BLE Mesh Ağı açık olmalı.');
+      }
+      if (meshDiag.isRunning && meshDiag.peerCount === 0) {
+        recommendations.push('Peer yok: İki cihazı aynı anda açık tutup 10-15 sn bekleyin.');
+      }
+      if (meshDiag.queueDepth.critical + meshDiag.queueDepth.high + meshDiag.queueDepth.normal > 0) {
+        recommendations.push('Kuyruk dolu: Paketler gönderim bekliyor (BLE erişimi/peer kontrol edin).');
+      }
+
+      const report = [
+        `Net: connected=${String(netState.isConnected)} type=${netState.type}`,
+        `BLE: state=${bleDiag.bluetoothState} scanning=${bleDiag.isScanning} mode=${bleDiag.scanMode} advertising=${bleDiag.isAdvertising}`,
+        `BLE Modules: manager=${bleDiag.bleManagerAvailable} peripheral=${bleDiag.peripheralModuleAvailable}`,
+        `Mesh: running=${meshDiag.isRunning} realMode=${meshDiag.isRealMode} active=${meshDiag.isActive}`,
+        `Peers: store=${meshDiag.peerCount} bleKnown=${bleDiag.knownPeerCount} lastPeer=${lastPeerSeen}`,
+        `Queues: critical=${meshDiag.queueDepth.critical} high=${meshDiag.queueDepth.high} normal=${meshDiag.queueDepth.normal} relay=${meshDiag.queueDepth.relay}`,
+        `Packets: sent=${meshDiag.stats.packetsSent} recv=${meshDiag.stats.packetsReceived} relay=${meshDiag.stats.packetsRelayed}`,
+        `Device: meshId=${meshDiag.myDeviceId}`,
+        recommendations.length > 0
+          ? `Öneri: ${recommendations.join(' | ')}`
+          : 'Öneri: Kritik sorun görünmüyor.',
+      ].join('\n');
+
+      logger.warn(`MESH_DIAGNOSTIC_REPORT\n${report}`);
+
+      Alert.alert(
+        'Mesh Tanı Raporu',
+        report,
+        [
+          {
+            text: 'Kopyala',
+            onPress: () => {
+              import('expo-clipboard')
+                .then(({ setStringAsync }) => setStringAsync(report))
+                .catch(e => { if (__DEV__) logger.debug('Clipboard copy failed:', e); });
+            },
+          },
+          { text: 'Tamam' },
+        ],
+      );
+    } catch (error) {
+      logger.error('Mesh diagnostics failed:', error);
+      Alert.alert('Mesh Tanı', 'Tanı raporu alınamadı. Bluetooth izinlerini ve mesh ayarını kontrol edin.');
+    }
+  };
+
   // ELITE: Şifre Değiştirme
   const [changePasswordModal, setChangePasswordModal] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [passwordStep, setPasswordStep] = useState<'current' | 'new'>('current');
+
+  const handleLogout = () => {
+    haptics.impactMedium();
+    Alert.alert(
+      'Çıkış Yap',
+      'Hesabınızdan çıkış yapmak istediğinizden emin misiniz?',
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Çıkış Yap',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { useAuthStore } = require('../../stores/authStore');
+              await useAuthStore.getState().logout();
+              // Navigation will be handled by auth state listener in App.tsx
+            } catch (e) {
+              if (__DEV__) logger.error('Logout failed:', e);
+              Alert.alert('Hata', 'Çıkış yapılırken bir hata oluştu. Lütfen tekrar deneyin.');
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleChangePassword = () => {
     haptics.impactMedium();
@@ -239,6 +341,182 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
     }
   };
 
+  /**
+   * Handle re-authentication for account deletion.
+   * Called when Firebase returns auth/requires-recent-login.
+   * All user DATA is already deleted at this point — only the auth account shell remains.
+   * The user must re-authenticate so we can call deleteUser() again.
+   */
+  const handleReauthForDeletion = () => {
+    const auth = getFirebaseAuth();
+    const user = auth?.currentUser;
+
+    // Determine sign-in provider to guide the user
+    const providers = user?.providerData?.map(p => p.providerId) || [];
+    const isGoogle = providers.includes('google.com');
+    const isApple = providers.includes('apple.com');
+    const isEmail = providers.includes('password');
+
+    let providerHint = '';
+    if (isGoogle) providerHint = 'Google hesabınızla';
+    else if (isApple) providerHint = 'Apple hesabınızla';
+    else if (isEmail) providerHint = 'e-posta şifrenizle';
+    else providerHint = 'hesabınızla';
+
+    Alert.alert(
+      'Kimlik Doğrulama Gerekli',
+      `Hesabınızı silmek için güvenlik nedeniyle ${providerHint} tekrar giriş yapmanız gerekiyor.\n\nVerileriniz zaten silindi. Giriş yaptıktan sonra hesap kaydınız da silinecektir.`,
+      [
+        {
+          text: 'Giriş Yap ve Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Re-authenticate based on provider
+              if (isGoogle) {
+                const { AuthService } = await import('../../services/AuthService');
+                await AuthService.signInWithGoogle();
+              } else if (isApple) {
+                const { AuthService } = await import('../../services/AuthService');
+                await AuthService.signInWithApple();
+              } else if (isEmail) {
+                // For email users, prompt for password
+                promptEmailReauthForDeletion();
+                return;
+              } else {
+                // Unknown provider — direct to login screen
+                Alert.alert(
+                  'Bilgi',
+                  'Lütfen tekrar giriş yapın ve Ayarlar > Hesabı Sil bölümünden işlemi tekrarlayın.',
+                  [{ text: 'Tamam' }],
+                );
+                return;
+              }
+
+              // Re-auth succeeded, now retry deletion
+              await performReauthDeletionRetry();
+            } catch (error: unknown) {
+              logger.error('Re-auth for deletion failed:', error);
+              Alert.alert(
+                'Kimlik Doğrulama Başarısız',
+                'Giriş yapılamadı. Lütfen tekrar giriş yapıp Ayarlar > Hesabı Sil bölümünden işlemi tekrarlayın.\n\nNot: Verileriniz zaten silinmiştir.',
+                [{ text: 'Tamam' }],
+              );
+            }
+          },
+        },
+        {
+          text: 'Daha Sonra',
+          style: 'cancel',
+          onPress: () => {
+            Alert.alert(
+              'Bilgi',
+              'Verileriniz silindi ancak hesap kaydınız hala aktif. Hesabı tamamen silmek için tekrar giriş yapıp Ayarlar > Hesabı Sil bölümünden işlemi tekrarlayabilirsiniz.',
+              [{ text: 'Tamam' }],
+            );
+          },
+        },
+      ],
+    );
+  };
+
+  /**
+   * Prompt email user for password to re-authenticate, then retry deletion.
+   * Uses Alert.prompt on iOS, falls back to guidance on Android (Alert.prompt is iOS-only).
+   */
+  const promptEmailReauthForDeletion = () => {
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        'Şifrenizi Girin',
+        'Hesabınızı silmek için şifrenizi girin:',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Onayla',
+            style: 'destructive',
+            onPress: async (password?: string) => {
+              if (!password) {
+                Alert.alert('Hata', 'Şifre gereklidir.');
+                return;
+              }
+              try {
+                const { reauthenticateWithCredential, EmailAuthProvider } = await import('firebase/auth');
+                const auth = getFirebaseAuth();
+                const user = auth?.currentUser;
+                if (!user?.email) throw new Error('Kullanıcı bulunamadı');
+
+                const credential = EmailAuthProvider.credential(user.email, password);
+                await reauthenticateWithCredential(user, credential);
+
+                // Re-auth succeeded, now retry deletion
+                await performReauthDeletionRetry();
+              } catch (error: unknown) {
+                logger.error('Email re-auth for deletion failed:', error);
+                const errMsg = getErrorMessage(error);
+                Alert.alert(
+                  'Kimlik Doğrulama Başarısız',
+                  errMsg || 'Şifre yanlış veya oturum süresi dolmuş olabilir.',
+                  [{ text: 'Tamam' }],
+                );
+              }
+            },
+          },
+        ],
+        'secure-text',
+      );
+    } else {
+      // Android: Alert.prompt is not available.
+      // Guide the user to log out, log back in, then retry deletion.
+      Alert.alert(
+        'Kimlik Doğrulama Gerekli',
+        'Hesabınızı silmek için lütfen çıkış yapın, e-posta ve şifrenizle tekrar giriş yapın, ardından Ayarlar > Hesabı Sil bölümünden işlemi tekrarlayın.\n\nNot: Verileriniz zaten silinmiştir.',
+        [{ text: 'Tamam' }],
+      );
+    }
+  };
+
+  /**
+   * After successful re-authentication, retry auth deletion and finish cleanup.
+   */
+  const performReauthDeletionRetry = async () => {
+    try {
+      setIsDeletingAccount(true);
+      setDeletionProgress({ step: 'Hesap kaydı siliniyor...', progress: 17, total: 18 });
+
+      await accountDeletionService.retryDeleteAuthAccount();
+
+      setIsDeletingAccount(false);
+      setDeletionProgress(null);
+
+      Alert.alert(
+        'Hesap Silindi',
+        'Hesabınız ve tüm verileriniz başarıyla silindi.',
+        [
+          {
+            text: 'Tamam',
+            onPress: () => {
+              if (navigationRef.isReady()) {
+                navigationRef.reset({
+                  index: 0,
+                  routes: [{ name: 'Auth' }],
+                });
+              }
+            },
+          },
+        ],
+      );
+    } catch (error: unknown) {
+      setIsDeletingAccount(false);
+      setDeletionProgress(null);
+      logger.error('Retry auth deletion failed:', error);
+      Alert.alert(
+        'Hesap Silme Hatası',
+        'Hesap kaydı silinemedi. Lütfen tekrar giriş yapıp Ayarlar > Hesabı Sil bölümünden deneyin.\n\nNot: Verileriniz zaten silinmiştir.',
+        [{ text: 'Tamam' }],
+      );
+    }
+  };
+
   const handleDeleteAccount = async () => {
     haptics.impactMedium();
 
@@ -281,6 +559,13 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
                       setIsDeletingAccount(false);
                       setDeletionProgress(null);
 
+                      if (result.reauthRequired) {
+                        // Data is deleted but auth account needs re-authentication.
+                        // Prompt user to re-authenticate, then retry auth deletion.
+                        handleReauthForDeletion();
+                        return;
+                      }
+
                       if (result.success) {
                         Alert.alert(
                           'Hesap Silindi',
@@ -288,13 +573,28 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
                           [
                             {
                               text: 'Tamam',
-                              onPress: () => {
-                                // Exit app (platform specific)
-                                if (Platform.OS === 'ios') {
-                                  // iOS doesn't allow programmatic exit, but we can clear everything
-                                } else {
-                                  // Android
-                                  BackHandler.exitApp();
+                              onPress: async () => {
+                                // ELITE FIX: Properly navigate the user out of the deleted account state
+                                try {
+                                  // Clear any remaining auth sessions actively
+                                  const { signOut } = require('firebase/auth');
+                                  const auth = getFirebaseAuth();
+                                  if (auth) {
+                                    await signOut(auth).catch((e: unknown) => { if (__DEV__) logger.debug('SignOut cleanup failed:', e); });
+                                  }
+                                } catch (e) {
+                                  logger.warn('Cleanup error:', e);
+                                }
+
+                                // Reset navigation stack to completely log out the user from UI
+                                // CRITICAL FIX: 'Auth' is a root-level route, not in MainNavigator.
+                                // navigation.reset targets MainNavigator → silently dropped.
+                                // Use navigationRef to reach the root navigator.
+                                if (navigationRef.isReady()) {
+                                  navigationRef.reset({
+                                    index: 0,
+                                    routes: [{ name: 'Auth' }],
+                                  });
                                 }
                               },
                             },
@@ -450,6 +750,40 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   ];
 
   const aiSettings: SettingOption[] = [
+    // Apple Guideline 5.1.2(i): AI Data Sharing Consent toggle
+    {
+      icon: 'cloud-upload',
+      title: 'AI Veri Paylasimi',
+      subtitle: aiDataSharingConsented
+        ? 'OpenAI ile veri paylasimi onaylandi'
+        : 'Mesajlariniz OpenAI\'ye iletilmeden once onayiniz gerekir',
+      type: 'switch',
+      value: aiDataSharingConsented,
+      onPress: (val) => {
+        haptics.impactLight();
+        const newValue = typeof val === 'boolean' ? val : !aiDataSharingConsented;
+        if (newValue) {
+          Alert.alert(
+            'AI Asistan Veri Kullanimi',
+            'Bu ozellik sorularinizi islemek icin OpenAI yapay zeka servisini kullanir.\n\nMesajlariniz guvenli sunucu proxy\'si uzerinden OpenAI\'ye iletilir. Kisisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model egitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
+            [
+              { text: 'Hayir', style: 'cancel' },
+              {
+                text: 'Kabul Ediyorum',
+                onPress: () => setAiDataSharingConsented(true),
+              },
+            ],
+          );
+        } else {
+          setAiDataSharingConsented(false);
+          Alert.alert(
+            'AI Veri Paylasimi',
+            'OpenAI veri paylasimi kapatildi. AI asistan yalnizca cevrimdisi modda calisacaktir.',
+            [{ text: 'Tamam' }],
+          );
+        }
+      },
+    },
     // AI Asistan toggle kaldırıldı - her zaman aktif
     {
       icon: 'newspaper',
@@ -527,6 +861,13 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
           Alert.alert('BLE Mesh', 'Bluetooth mesh ağı durduruldu.');
         }
       },
+    },
+    {
+      icon: 'bug',
+      title: 'Mesh Tanı Raporu',
+      subtitle: 'Bluetooth, peer, kuyruk ve paket durumunu kontrol et',
+      type: 'arrow',
+      onPress: handleMeshDiagnostics,
     },
     {
       icon: 'chatbubbles',
@@ -848,8 +1189,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       // Karanlık Mod kaldırıldı - uygulama zaten karanlık modda çalışıyor
       {
         icon: 'map',
-        title: 'Çevrimdışı Haritalar',
-        subtitle: 'Harita bölgelerini indir ve yönet',
+        title: 'Harita Ayarları',
+        subtitle: 'Harita önbellek ve çevrimdışı erişim',
         type: 'arrow',
         onPress: () => {
           haptics.impactLight();
@@ -937,6 +1278,16 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   const aboutSettings: SettingOption[] = [
     {
+      icon: 'chatbubble-ellipses',
+      title: 'Geri Bildirim Gönder',
+      subtitle: 'Hata, öneri veya teşekkür mesajınızı bize iletin',
+      type: 'arrow',
+      onPress: () => {
+        haptics.impactLight();
+        setFeedbackVisible(true);
+      },
+    },
+    {
       icon: 'information-circle',
       title: 'Hakkında',
       subtitle: 'Uygulama bilgileri ve özellikler',
@@ -1000,6 +1351,13 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       onPress: handleChangePassword,
     },
     {
+      icon: 'log-out',
+      title: 'Çıkış Yap',
+      subtitle: 'Hesabınızdan güvenli çıkış yapın',
+      type: 'arrow',
+      onPress: handleLogout,
+    },
+    {
       icon: 'trash',
       title: 'Hesabı Sil',
       subtitle: 'Tüm verilerinizi kalıcı olarak silin',
@@ -1010,9 +1368,10 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
+      testID="settings-screen"
     >
       <LinearGradient
         colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
@@ -1023,7 +1382,15 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       <View style={[styles.headerContainer, { paddingTop: insets.top + 16 }]}>
         <Pressable
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            // CRITICAL FIX: SettingsScreen is a tab screen — goBack() is invalid.
+            // Navigate to Home tab instead.
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              (navigation as any).navigate('Home');
+            }
+          }}
         >
           <Ionicons name="chevron-back" size={24} color="#334155" />
         </Pressable>
@@ -1052,6 +1419,13 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         <Text style={styles.versionText}>v{ENV.APP_VERSION}</Text>
         <Text style={styles.userIdText}>ID: {deviceId}</Text>
       </ScrollView>
+
+      {/* Feedback Modal */}
+      <FeedbackModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+        fromScreen="Settings"
+      />
 
       {/* Account Deletion Progress Overlay */}
       {isDeletingAccount && (
@@ -1137,4 +1511,3 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 }
 
 import { styles } from './SettingsScreen.styles';
-

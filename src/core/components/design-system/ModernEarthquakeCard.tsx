@@ -18,6 +18,7 @@ import Animated, {
     withRepeat,
     withSequence,
     withTiming,
+    cancelAnimation,
 } from 'react-native-reanimated';
 import { colors, shadow } from '../../theme';
 
@@ -29,6 +30,7 @@ interface PremiumEarthquakeCardProps {
     location: string;
     depth: number;
     time: string;
+    rawTimestamp?: number;
     latitude: number;
     longitude: number;
     onPress?: () => void;
@@ -145,6 +147,7 @@ export const PremiumEarthquakeCardComponent = ({
     location,
     depth,
     time,
+    rawTimestamp,
     latitude,
     longitude,
     onPress,
@@ -202,33 +205,29 @@ export const PremiumEarthquakeCardComponent = ({
             -1,
             true
         );
-    }, []);
+        return () => {
+            cancelAnimation(pulseScale);
+            cancelAnimation(pulseOpacity);
+        };
+    }, [pulseScale, pulseOpacity]);
 
     const pulseRingStyle = useAnimatedStyle(() => ({
         transform: [{ scale: pulseScale.value }],
         opacity: pulseOpacity.value,
     }));
 
-    // Time calculation
+    // Time calculation — uses rawTimestamp for accuracy across midnight boundary
     const getTimeAgo = (timeStr: string) => {
         try {
-            const now = new Date();
-            const parts = timeStr.split(':');
-            if (parts.length >= 2) {
-                const hours = parseInt(parts[0], 10);
-                const minutes = parseInt(parts[1], 10);
-                const earthquakeTime = new Date();
-                earthquakeTime.setHours(hours, minutes, 0, 0);
-
-                const diffMs = now.getTime() - earthquakeTime.getTime();
+            if (rawTimestamp) {
+                const diffMs = Date.now() - rawTimestamp;
                 const diffMins = Math.floor(diffMs / 60000);
-
-                if (diffMins < 0) return 'az önce';
                 if (diffMins < 1) return 'az önce';
                 if (diffMins < 60) return `${diffMins} dk önce`;
                 const diffHours = Math.floor(diffMins / 60);
                 if (diffHours < 24) return `${diffHours} saat önce`;
-                return timeStr;
+                const diffDays = Math.floor(diffHours / 24);
+                return `${diffDays} gün önce`;
             }
             return timeStr;
         } catch {
@@ -250,11 +249,11 @@ export const PremiumEarthquakeCardComponent = ({
         return 'I';
     };
 
-    // Get formatted date
+    // Get formatted date — uses earthquake's actual date, not today
     const getFormattedDate = () => {
         try {
-            const now = new Date();
-            return now.toLocaleDateString('tr-TR', {
+            const date = rawTimestamp ? new Date(rawTimestamp) : new Date();
+            return date.toLocaleDateString('tr-TR', {
                 day: 'numeric',
                 month: 'short',
                 year: 'numeric',

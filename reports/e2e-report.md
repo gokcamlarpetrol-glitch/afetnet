@@ -2,7 +2,7 @@
 
 ### Runtime
 
-- ✅ Node version v24.6.0
+- ✅ Node version v25.8.0
 
 ### Static checks
 
@@ -27,8 +27,8 @@
 
 ### GitHub Pages
 
-- ⚠️ privacy-policy.html HTTP 0
-- ⚠️ terms-of-service.html HTTP 0
+- ✅ privacy-policy.html 200 (0.17s)
+- ✅ terms-of-service.html 200 (0.17s)
 
 ### Backend health
 

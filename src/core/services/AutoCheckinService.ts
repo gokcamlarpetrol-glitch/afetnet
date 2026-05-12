@@ -13,6 +13,7 @@ import { MeshMessageType } from './mesh/MeshProtocol';
 
 class AutoCheckinService {
   private checkInTimer: NodeJS.Timeout | null = null;
+  private promptTimeoutTimer: NodeJS.Timeout | null = null;
   private isActive: boolean = false;
 
   /**
@@ -68,7 +69,7 @@ class AutoCheckinService {
     );
 
     // Auto-timeout after 1 minute
-    setTimeout(() => {
+    this.promptTimeoutTimer = setTimeout(() => {
       this.reportNoResponse();
     }, 60000);
   }
@@ -198,6 +199,10 @@ class AutoCheckinService {
     if (this.checkInTimer) {
       clearTimeout(this.checkInTimer);
       this.checkInTimer = null;
+    }
+    if (this.promptTimeoutTimer) {
+      clearTimeout(this.promptTimeoutTimer);
+      this.promptTimeoutTimer = null;
     }
 
     this.isActive = false;

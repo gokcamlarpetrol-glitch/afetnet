@@ -10,9 +10,10 @@ import { eliteStorage } from '../../utils/storage';
 
 // O(1) dedup lookup — hydrated from persisted seenMessageIds array
 const seenSet = new Set<string>();
-const MAX_MESSAGES = 500;
-const MAX_SEEN_IDS = 1000;
-const MAX_FAILED_QUEUE = 50;
+const MAX_MESSAGES = 2000;
+const MAX_SEEN_IDS = 5000;
+const MAX_OUTGOING_QUEUE = 500;
+const MAX_FAILED_QUEUE = 200;
 
 export interface MeshNode {
   id: string;
@@ -216,7 +217,20 @@ export const useMeshStore = create<MeshState>()(
 
       addMessage: (msg) => set((state) => {
         // O(1) dedup check
-        if (seenSet.has(msg.id)) return state;
+        if (seenSet.has(msg.id)) {
+          // Status advancement: if same ID arrives with higher status, update existing
+          // FIX: 'failed' is terminal in addMessage — retryMessage handles resurrection.
+          // Without this guard, a duplicate arriving as 'pending' would resurrect a failed message.
+          // Uses shared state machine guard for consistency.
+          const { isStatusTransitionAllowed } = require('../messaging/constants');
+          const existing = state.messages.find(m => m.id === msg.id);
+          if (existing && isStatusTransitionAllowed(existing.status, msg.status) && msg.status !== existing.status) {
+            return {
+              messages: state.messages.map(m => m.id === msg.id ? { ...m, status: msg.status } : m),
+            };
+          }
+          return state;
+        }
         seenSet.add(msg.id);
 
         // Trim seenSet if over capacity
@@ -239,28 +253,52 @@ export const useMeshStore = create<MeshState>()(
         };
       }),
 
+      // FIX: Status regression guard — don't downgrade 'read' to 'delivered'
       markAsDelivered: (msgId, peerId) => set((state) => ({
         messages: state.messages.map(m => {
           if (m.id === msgId) {
             const newAcks = m.acks.includes(peerId) ? m.acks : [...m.acks, peerId];
-            return { ...m, status: 'delivered', acks: newAcks };
+            // Don't regress from 'read' to 'delivered'
+            const newStatus = m.status === 'read' ? 'read' : 'delivered';
+            return { ...m, status: newStatus, acks: newAcks, delivered: true };
           }
           return m;
         }),
       })),
 
       // ELITE: Update any message field
+      // FIX: Status regression guard — prevent higher status from being downgraded
+      // (e.g., read → delivered). Without this, ConversationScreen effects can
+      // regress status when markAsDelivered fires after markAsRead for the same message.
       updateMessage: (msgId, data) => set((state) => ({
-        messages: state.messages.map(m => m.id === msgId ? { ...m, ...data } : m),
+        messages: state.messages.map(m => {
+          if (m.id !== msgId) return m;
+          if (data.status && m.status) {
+            const { isStatusTransitionAllowed } = require('../messaging/constants');
+            if (!isStatusTransitionAllowed(m.status, data.status)) {
+              // Don't regress status — apply other fields but keep current status
+              const { status: _ignored, ...rest } = data;
+              return Object.keys(rest).length > 0 ? { ...m, ...rest } : m;
+            }
+          }
+          return { ...m, ...data };
+        }),
       })),
 
       // ELITE: Quick status update for ACK system
+      // FIX: Status regression guard — prevent higher status from being downgraded
       updateMessageStatus: (msgId, status) => set((state) => ({
-        messages: state.messages.map(m => m.id === msgId ? { ...m, status } : m),
+        messages: state.messages.map(m => {
+          if (m.id !== msgId) return m;
+          const { isStatusTransitionAllowed, MESSAGE_STATUS_PRIORITY } = require('../messaging/constants');
+          if (!isStatusTransitionAllowed(m.status, status)) return m;
+          const newRank = MESSAGE_STATUS_PRIORITY[status] ?? 0;
+          return { ...m, status, delivered: m.delivered || newRank >= 3 };
+        }),
       })),
 
       markAsRead: (msgId) => set((state) => ({
-        messages: state.messages.map(m => m.id === msgId ? { ...m, status: 'read' as const } : m),
+        messages: state.messages.map(m => m.id === msgId ? { ...m, status: 'read' as const, delivered: true } : m),
       })),
 
       // ELITE: Mark as permanently failed
@@ -268,7 +306,14 @@ export const useMeshStore = create<MeshState>()(
         messages: state.messages.map(m => m.id === msgId ? { ...m, status: 'failed' as const } : m),
       })),
 
-      clearMessages: () => set({ messages: [], outgoingQueue: [], failedQueue: [] }),
+      clearMessages: () => {
+        seenSet.clear(); // CRITICAL: Clear dedup set on logout to prevent stale dedup after re-login
+        set({ messages: [], outgoingQueue: [], failedQueue: [], seenMessageIds: [] });
+        // Also clear persisted mesh store to prevent rehydration of old user data on account switch
+        try {
+          eliteStorage.removeItem('mesh-storage-v2');
+        } catch { /* best-effort */ }
+      },
 
       // ELITE: Typing Indicators
       setTyping: (conversationId, userId, userName) => set((state) => ({
@@ -307,9 +352,27 @@ export const useMeshStore = create<MeshState>()(
         }),
       })),
 
-      addToQueue: (msg) => set((state) => ({
-        outgoingQueue: [...state.outgoingQueue, msg],
-      })),
+      addToQueue: (msg) => set((state) => {
+        const newQueue = [...state.outgoingQueue, msg];
+        // Cap outgoing queue — drop oldest non-critical messages if over limit
+        if (newQueue.length > MAX_OUTGOING_QUEUE) {
+          // Keep critical/high priority, drop oldest low/normal first
+          const excess = newQueue.length - MAX_OUTGOING_QUEUE;
+          let dropped = 0;
+          for (let i = 0; i < newQueue.length && dropped < excess; i++) {
+            if (newQueue[i].priority === 'low' || newQueue[i].priority === 'normal') {
+              newQueue.splice(i, 1);
+              dropped++;
+              i--; // Adjust index after splice
+            }
+          }
+          // If still over limit, drop oldest regardless of priority
+          if (newQueue.length > MAX_OUTGOING_QUEUE) {
+            newQueue.splice(0, newQueue.length - MAX_OUTGOING_QUEUE);
+          }
+        }
+        return { outgoingQueue: newQueue };
+      }),
 
       removeFromQueue: (msgId) => set((state) => ({
         outgoingQueue: state.outgoingQueue.filter(m => m.id !== msgId),
@@ -364,11 +427,16 @@ export const useMeshStore = create<MeshState>()(
       partialize: (state) => ({
         messages: state.messages,
         outgoingQueue: state.outgoingQueue,
+        failedQueue: state.failedQueue, // FIX: Persist failed messages so retry survives app restart
         stats: state.stats,
         myDeviceId: state.myDeviceId,
         seenMessageIds: state.seenMessageIds,
       }),
       onRehydrateStorage: () => (state) => {
+        // FIX: Clear seenSet before repopulating. Without this, on account switch
+        // where clearMessages() was skipped (e.g., app kill), the module-level seenSet
+        // retains old user's message IDs — new user's messages with colliding IDs are dropped.
+        seenSet.clear();
         // Hydrate seenSet from persisted seenMessageIds (includes pruned message IDs)
         if (state?.seenMessageIds) {
           state.seenMessageIds.forEach(id => seenSet.add(id));

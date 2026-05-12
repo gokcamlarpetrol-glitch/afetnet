@@ -31,7 +31,10 @@ export enum EmergencyReason {
 
 export type SOSStatus = 'idle' | 'countdown' | 'broadcasting' | 'acknowledged' | 'cancelled';
 
-export type ChannelStatus = 'idle' | 'pending' | 'sending' | 'sent' | 'failed' | 'acked';
+// 'unconfirmed' = sent but no ACK received within timeout window.
+// Distinguishes "fire-and-forget sent" from "rescue team actually acknowledged".
+// Critical for life-safety transparency: user must know if SOS truly reached someone.
+export type ChannelStatus = 'idle' | 'pending' | 'sending' | 'sent' | 'unconfirmed' | 'failed' | 'acked';
 
 export interface SOSLocation {
     latitude: number;
@@ -73,6 +76,7 @@ export interface SOSSignal {
     reason: EmergencyReason;
     message: string;
     trapped: boolean;
+    isSilent: boolean;
     device: DeviceStatus;
     channels: ChannelState;
     acks: SOSAck[];
@@ -116,6 +120,7 @@ interface SOSState {
     // Countdown
     countdownSeconds: number;
     isCountingDown: boolean;
+    countdownStartedAt: number | null; // FIX 18: absolute timestamp for background-safe countdown
 
     // History
     signalHistory: SOSSignal[];
@@ -131,9 +136,11 @@ interface SOSState {
     };
 
     // Actions
-    startCountdown: (reason: EmergencyReason, userId: string, message?: string) => void;
+    startCountdown: (reason: EmergencyReason, userId: string, message?: string, isSilent?: boolean) => void;
     cancelCountdown: () => void;
+    setSilentMode: (isSilent: boolean) => void;
     decrementCountdown: () => number;
+    recalculateCountdown: () => number; // FIX 18: recalculate from absolute timestamp
     activateSOS: (signal: SOSSignal) => void;
     updateLocation: (location: SOSLocation) => void;
     updateChannelStatus: (channel: keyof ChannelState, status: ChannelStatus) => void;
@@ -156,9 +163,10 @@ const DEFAULT_COUNTDOWN = 3;
 const createEmptySignal = (
     userId: string,
     reason: EmergencyReason,
-    message: string
+    message: string,
+    isSilent: boolean = false
 ): SOSSignal => ({
-    id: `sos_${Date.now()}_${userId}`,
+    id: `sos_${Date.now()}_${userId}_${Math.random().toString(36).substring(2, 10)}`,
     userId,
     timestamp: Date.now(),
     location: null,
@@ -166,6 +174,7 @@ const createEmptySignal = (
     reason,
     message,
     trapped: reason === EmergencyReason.TRAPPED_DETECTED || reason === EmergencyReason.IMPACT_DETECTED,
+    isSilent,
     device: {
         batteryLevel: 100,
         networkStatus: 'offline',
@@ -195,6 +204,7 @@ export const useSOSStore = create<SOSState>()(
             isActive: false,
             countdownSeconds: DEFAULT_COUNTDOWN,
             isCountingDown: false,
+            countdownStartedAt: null,
             signalHistory: [],
             incomingSOSAlerts: [],
             stats: {
@@ -204,13 +214,14 @@ export const useSOSStore = create<SOSState>()(
             },
 
             // Start Countdown
-            startCountdown: (reason, userId, message = 'Acil yardım gerekiyor!') => {
-                const signal = createEmptySignal(userId, reason, message);
+            startCountdown: (reason, userId, message = 'Acil yardım gerekiyor!', isSilent = false) => {
+                const signal = createEmptySignal(userId, reason, message, isSilent);
 
                 set({
                     currentSignal: signal,
                     isCountingDown: true,
                     countdownSeconds: DEFAULT_COUNTDOWN,
+                    countdownStartedAt: Date.now(), // FIX 18: store absolute start time
                 });
 
                 logger.info(`🆘 SOS countdown started: ${reason}`);
@@ -220,20 +231,52 @@ export const useSOSStore = create<SOSState>()(
             cancelCountdown: () => {
                 const { currentSignal } = get();
                 if (currentSignal && currentSignal.status === 'countdown') {
+                    // CRITICAL FIX: Null out currentSignal to prevent stale cancelled
+                    // signal from being persisted to MMKV via partialize().
+                    // Previously kept { status: 'cancelled' } which persisted forever.
                     set({
-                        currentSignal: { ...currentSignal, status: 'cancelled' },
+                        currentSignal: null,
                         isCountingDown: false,
                         countdownSeconds: DEFAULT_COUNTDOWN,
+                        countdownStartedAt: null,
                     });
 
                     logger.info('SOS countdown cancelled');
                 }
             },
 
-            // Decrement Countdown
+            // Set Silent Mode
+            setSilentMode: (isSilent) => {
+                const { currentSignal } = get();
+                if (currentSignal && currentSignal.status === 'countdown') {
+                    set({
+                        currentSignal: { ...currentSignal, isSilent },
+                    });
+                }
+            },
+
+            // Decrement Countdown — FIX 18: Use absolute timestamp for background-safe accuracy
             decrementCountdown: () => {
+                const { countdownStartedAt } = get();
+                if (countdownStartedAt && typeof countdownStartedAt === 'number' && countdownStartedAt > 0 && countdownStartedAt <= Date.now()) {
+                    const elapsed = Math.floor((Date.now() - countdownStartedAt) / 1000);
+                    const newCount = Math.max(0, DEFAULT_COUNTDOWN - elapsed);
+                    set({ countdownSeconds: newCount });
+                    return newCount;
+                }
+                // Fallback: relative decrement if no timestamp (shouldn't happen)
                 const { countdownSeconds } = get();
-                const newCount = countdownSeconds - 1;
+                const newCount = Math.max(0, countdownSeconds - 1);
+                set({ countdownSeconds: newCount });
+                return newCount;
+            },
+
+            // FIX 18: Recalculate countdown from absolute timestamp (called on AppState 'active')
+            recalculateCountdown: () => {
+                const { countdownStartedAt, isCountingDown } = get();
+                if (!isCountingDown || !countdownStartedAt) return get().countdownSeconds;
+                const elapsed = Math.floor((Date.now() - countdownStartedAt) / 1000);
+                const newCount = Math.max(0, DEFAULT_COUNTDOWN - elapsed);
                 set({ countdownSeconds: newCount });
                 return newCount;
             },
@@ -244,6 +287,7 @@ export const useSOSStore = create<SOSState>()(
                     currentSignal: { ...signal, status: 'broadcasting' },
                     isActive: true,
                     isCountingDown: false,
+                    countdownStartedAt: null,
                     stats: {
                         ...state.stats,
                         totalSignals: state.stats.totalSignals + 1,
@@ -264,18 +308,22 @@ export const useSOSStore = create<SOSState>()(
             },
 
             // Update Channel Status
+            // CRITICAL FIX (SOS-C1): Functional update prevents last-write-wins race.
+            // SOSChannelRouter calls updateChannelStatus in parallel from 6 channels.
+            // Previously, each call read currentSignal at queue time and spread it,
+            // so the second call's spread could overwrite the first's channel update.
+            // set(state => ...) reads the latest state inside Zustand's internal lock.
             updateChannelStatus: (channel, status) => {
-                const { currentSignal } = get();
-                if (currentSignal) {
-                    set({
+                set((state) => {
+                    if (!state.currentSignal) return state;
+                    return {
                         currentSignal: {
-                            ...currentSignal,
-                            channels: { ...currentSignal.channels, [channel]: status },
+                            ...state.currentSignal,
+                            channels: { ...state.currentSignal.channels, [channel]: status },
                         },
-                    });
-
-                    logger.debug(`Channel ${channel}: ${status}`);
-                }
+                    };
+                });
+                logger.debug(`Channel ${channel}: ${status}`);
             },
 
             // Update Device Status
@@ -333,16 +381,26 @@ export const useSOSStore = create<SOSState>()(
                 }
             },
 
-            // Add incoming SOS alert from another user
+            // Add or update incoming SOS alert from another user
             addIncomingSOSAlert: (alert) => {
                 const { incomingSOSAlerts } = get();
-                // Skip duplicate
-                if (incomingSOSAlerts.some(a => a.id === alert.id)) return;
+                // Check if we already have this alert (by signalId or id)
+                const existingIdx = incomingSOSAlerts.findIndex(
+                    a => a.signalId === alert.signalId || a.id === alert.id
+                );
+                if (existingIdx >= 0) {
+                    // UPDATE existing alert with new data (location, battery, status)
+                    // This ensures rescuers see the latest info
+                    const updated = [...incomingSOSAlerts];
+                    updated[existingIdx] = { ...updated[existingIdx], ...alert };
+                    set({ incomingSOSAlerts: updated });
+                    return;
+                }
                 // Keep max 50, newest first
                 set({
                     incomingSOSAlerts: [alert, ...incomingSOSAlerts].slice(0, 50),
                 });
-                logger.info(`🆘 Incoming SOS alert added: ${alert.senderName}`);
+                logger.info(`Incoming SOS alert added: ${alert.senderName}`);
             },
 
             // Remove a single incoming SOS alert by signalId (used when SOS is cancelled)
@@ -372,6 +430,7 @@ export const useSOSStore = create<SOSState>()(
                         isActive: false,
                         isCountingDown: false,
                         countdownSeconds: DEFAULT_COUNTDOWN,
+                        countdownStartedAt: null,
                         signalHistory: [finalSignal, ...signalHistory].slice(0, 50),
                     });
 
@@ -381,12 +440,32 @@ export const useSOSStore = create<SOSState>()(
 
             // Reset
             reset: () => {
+                // HATA 2 FIX: Complete reset including history + incoming alerts for logout/account-switch.
+                // Without this, User A's SOS history persists in MMKV under shared key,
+                // User B sees old user's SOS events on first login → privacy breach.
                 set({
                     currentSignal: null,
                     isActive: false,
                     isCountingDown: false,
                     countdownSeconds: DEFAULT_COUNTDOWN,
+                    countdownStartedAt: null,
+                    signalHistory: [],
+                    incomingSOSAlerts: [],
+                    stats: {
+                        totalSignals: 0,
+                        totalAcks: 0,
+                        avgResponseTime: 0,
+                    },
                 });
+                // Also clear the MMKV persistence backing store entirely.
+                try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { eliteStorage } = require('../../utils/storage');
+                    if (eliteStorage && typeof eliteStorage.removeItem === 'function') {
+                        eliteStorage.removeItem('afetnet-sos-store');
+                    }
+                } catch { /* best-effort */ }
+                logger.info('SOS store fully reset (history + incoming + stats cleared)');
             },
         }),
         {
@@ -395,6 +474,17 @@ export const useSOSStore = create<SOSState>()(
             partialize: (state) => ({
                 signalHistory: state.signalHistory,
                 stats: state.stats,
+                // CRITICAL: Persist active SOS so it survives app crash
+                currentSignal: state.currentSignal,
+                isActive: state.isActive,
+                // CRITICAL FIX: Persist countdown state so it survives app crash/kill.
+                // Without these, a crash during countdown loses the countdown entirely
+                // and the user never gets SOS activated.
+                countdownStartedAt: state.countdownStartedAt,
+                isCountingDown: state.isCountingDown,
+                countdownSeconds: state.countdownSeconds,
+                // Persist incoming SOS alerts so rescuers don't lose map markers on restart
+                incomingSOSAlerts: state.incomingSOSAlerts,
             }),
         }
     )

@@ -5,6 +5,7 @@ import Animated, {
   useAnimatedStyle,
   withRepeat,
   withTiming,
+  cancelAnimation,
   Easing,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -32,11 +33,17 @@ export const EarthquakeMarker = memo(function EarthquakeMarker({ magnitude, sele
         true,
       );
     } else {
+      cancelAnimation(pulse);
       pulse.value = 1; // Reset if not pulsing
     }
 
     // Scale animation when selected
     scale.value = withTiming(selected ? 1.2 : 1, { duration: 200 });
+
+    return () => {
+      cancelAnimation(pulse);
+      cancelAnimation(scale);
+    };
   }, [selected, magnitude]);
 
   const animatedStyle = useAnimatedStyle(() => ({

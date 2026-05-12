@@ -11,6 +11,9 @@
       "ignore": [
         "node_modules",
         ".git",
+        "android",
+        "ios",
+        ".expo",
         "firebase-debug.log",
         "firebase-debug.*.log"
       ],
@@ -24,7 +27,7 @@
   },
   "storage": [
     {
-      "bucket": "afetnet-4a6b6.appspot.com",
+      "bucket": "afetnet-4a6b6.firebasestorage.app",
       "rules": "storage.rules"
     }
   ],

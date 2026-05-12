@@ -70,7 +70,7 @@ class BatterySaverService {
    */
   private async getBrightness(): Promise<number> {
     try {
-      const { status } = await Brightness.requestPermissionsAsync();
+      const { status } = await Brightness.getPermissionsAsync();
       if (status === 'granted') {
         return await Brightness.getBrightnessAsync();
       }
@@ -85,7 +85,7 @@ class BatterySaverService {
    */
   private async setBrightness(level: number) {
     try {
-      const { status } = await Brightness.requestPermissionsAsync();
+      const { status } = await Brightness.getPermissionsAsync();
       if (status === 'granted') {
         await Brightness.setBrightnessAsync(level);
       }

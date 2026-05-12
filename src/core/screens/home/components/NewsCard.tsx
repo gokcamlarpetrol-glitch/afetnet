@@ -4,8 +4,8 @@
  * Every element crafted for maximum visual impact
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Dimensions } from 'react-native';
+import React, { useEffect, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, useWindowDimensions } from 'react-native';
 import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/core';
@@ -18,14 +18,15 @@ import { createLogger } from '../../../utils/logger';
 import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurface';
 
 const logger = createLogger('NewsCard');
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = width - 32;
 const SPACING = 12;
 
 export default function NewsCard() {
   const navigation = useNavigation();
   const { articles, loading } = useNewsStore();
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  // ELITE: iPad-safe — recompute on rotation / Split View resize
+  const { width: screenWidth } = useWindowDimensions();
+  const CARD_WIDTH = useMemo(() => Math.min(screenWidth - 32, 600), [screenWidth]);
 
   useEffect(() => {
     newsAggregatorService.fetchLatestNews().then(news => {
@@ -99,7 +100,7 @@ export default function NewsCard() {
             key={article.id || index}
             activeOpacity={0.92}
             onPress={() => handleArticlePress(article)}
-            style={styles.cardContainer}
+            style={[styles.cardContainer, { width: CARD_WIDTH }]}
           >
             <PremiumMaterialSurface variant="B" style={styles.cardBackground}>
               {/* ELITE: Top gradient removed for cleaner design */}
@@ -117,7 +118,7 @@ export default function NewsCard() {
                 <View style={styles.timeContainer}>
                   <Ionicons name="time-outline" size={10} color="#94A3B8" />
                   <Text style={styles.timeText}>
-                    {new Date(article.publishedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(article.publishedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
                   </Text>
                 </View>
               </View>
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
     gap: SPACING,
   },
   cardContainer: {
-    width: CARD_WIDTH,
+    // width set dynamically via useWindowDimensions for iPad/rotation support
     height: 170,
   },
   cardBackground: {

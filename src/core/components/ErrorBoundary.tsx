@@ -55,6 +55,7 @@ const createErrorFingerprint = (error: Error, componentStack?: string): string =
 
 export default class ErrorBoundary extends Component<Props, State> {
   private retryCount = 0;
+  private lastErrorFingerprint = '';
   private readonly MAX_RETRIES = 3;
 
   constructor(props: Props) {
@@ -85,6 +86,12 @@ export default class ErrorBoundary extends Component<Props, State> {
     const fingerprint = createErrorFingerprint(error, errorInfo.componentStack);
     const enrichedErrorId = `err_${Date.now()}_${fingerprint}`;
     const routeName = getCurrentRouteName();
+
+    // Reset retry count when a different error is caught (so user can retry new errors)
+    if (fingerprint !== this.lastErrorFingerprint) {
+      this.retryCount = 0;
+      this.lastErrorFingerprint = fingerprint;
+    }
 
     // ELITE: Unicorn-level error handling - comprehensive logging without console
     // Log to production logger (automatically handles DEV vs PROD)
@@ -291,6 +298,8 @@ Timestamp: ${new Date().toISOString()}
                       pressed && styles.buttonPressed,
                     ]}
                     onPress={this.handleReset}
+                    accessibilityRole="button"
+                    accessibilityLabel="Tekrar dene"
                   >
                     <Ionicons name="refresh" size={20} color={colors.text.primary} />
                     <Text style={styles.buttonText}>Tekrar Dene</Text>
@@ -304,6 +313,8 @@ Timestamp: ${new Date().toISOString()}
                     pressed && styles.buttonPressed,
                   ]}
                   onPress={this.handleReload}
+                  accessibilityRole="button"
+                  accessibilityLabel="Uygulamayı yeniden başlat"
                 >
                   <Ionicons name="reload" size={20} color={colors.text.primary} />
                   <Text style={styles.buttonText}>Yeniden Başlat</Text>
@@ -316,6 +327,8 @@ Timestamp: ${new Date().toISOString()}
                     pressed && styles.buttonPressed,
                   ]}
                   onPress={this.handleReportError}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hata bildir"
                 >
                   <Ionicons name="mail" size={20} color={colors.text.primary} />
                   <Text style={styles.buttonText}>Hata Bildir</Text>

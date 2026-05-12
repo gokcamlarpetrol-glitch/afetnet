@@ -11,6 +11,7 @@ const mockMessageStoreAddMessage = jest.fn();
 const mockMessageStoreAddConversation = jest.fn();
 const mockMessageStoreUpdateStatus = jest.fn();
 const mockMessageStoreConversations: Array<{ userId: string }> = [];
+let mockMeshPeers: Array<{ id: string }> = [];
 
 jest.mock('../../../lib/device', () => ({
   getDeviceId: jest.fn().mockResolvedValue('AFN-TEST0001'),
@@ -38,7 +39,7 @@ jest.mock('../mesh/MeshStore', () => ({
       addMessage: mockMeshStoreAddMessage,
       isConnected: false,
       messages: [],
-      peers: [],
+      peers: mockMeshPeers,
     }),
   },
 }));
@@ -79,6 +80,7 @@ describe('Messaging reliability hardening', () => {
     mockMessageStoreAddConversation.mockClear();
     mockMessageStoreUpdateStatus.mockClear();
     mockMessageStoreConversations.splice(0, mockMessageStoreConversations.length);
+    mockMeshPeers = [];
   });
 
   it('maps hybrid message types to cloud-safe types', () => {
@@ -138,5 +140,91 @@ describe('Messaging reliability hardening', () => {
     const mirrored = mockMessageStoreAddMessage.mock.calls[0][0];
     expect(mirrored.from).toBe('me');
     expect(mirrored.to).toBe('uid-peer-2');
+  });
+
+  it('builds mesh recipient aliases from requested and resolved IDs', () => {
+    const aliases = hybrid.buildMeshRecipientAliases('AFN-ABCD1234', 'uid-peer-2');
+    expect(aliases).toEqual(expect.arrayContaining(['AFN-ABCD1234', 'uid-peer-2']));
+  });
+
+  it('merges injected recipient aliases and filters non-routable values', () => {
+    const aliases = hybrid.buildMeshRecipientAliases(
+      'uid-peer-2',
+      'uid-peer-2',
+      ['AFN-ABCD1234', 'broadcast', 'me', 'uid-peer-2'],
+    );
+    expect(aliases).toEqual(expect.arrayContaining(['uid-peer-2', 'AFN-ABCD1234']));
+    expect(aliases).not.toEqual(expect.arrayContaining(['broadcast', 'me']));
+  });
+
+  it('treats directed mesh send as untrusted when no peers are visible', () => {
+    expect(hybrid.canTreatMeshSendAsDelivery({ recipientId: 'uid-peer-2' })).toBe(false);
+    mockMeshPeers = [{ id: 'peer-1' }];
+    expect(hybrid.canTreatMeshSendAsDelivery({ recipientId: 'uid-peer-2' })).toBe(false);
+    mockMeshPeers = [{ id: 'uid-peer-2' }];
+    expect(hybrid.canTreatMeshSendAsDelivery({ recipientId: 'uid-peer-2' })).toBe(true);
+  });
+
+  it('trusts visible mesh peer aliases for directed delivery', () => {
+    mockMeshPeers = [{ id: 'afn-abcd1234' }];
+    expect(hybrid.canTreatMeshSendAsDelivery({
+      recipientId: 'uid-peer-2',
+      recipientAliases: ['AFN-ABCD1234'],
+    })).toBe(true);
+  });
+
+  it('keeps retrying direct offline messages after max attempts', () => {
+    expect(hybrid.shouldKeepRetryingAfterMaxAttempts({
+      type: 'CHAT',
+      recipientId: 'uid-peer-2',
+      recipientAliases: ['AFN-ABCD1234'],
+    }, false)).toBe(true);
+
+    expect(hybrid.shouldKeepRetryingAfterMaxAttempts({
+      type: 'CHAT',
+      recipientId: 'uid-peer-2',
+    }, true)).toBe(false);
+  });
+
+  it('derives outgoing delivery and read state from Firestore receipt maps', () => {
+    const selfIds = hybrid.getSelfIdentityIds();
+    expect(hybrid.resolveCloudDeliveryState({
+      status: 'sent',
+      deliveredTo: { 'uid-peer-2': Date.now() },
+    }, { isFromMe: true, selfIds })).toEqual({
+      status: 'delivered',
+      delivered: true,
+      read: false,
+    });
+
+    expect(hybrid.resolveCloudDeliveryState({
+      status: 'sent',
+      readBy: { 'uid-peer-2': Date.now() },
+    }, { isFromMe: true, selfIds })).toEqual({
+      status: 'read',
+      delivered: true,
+      read: true,
+    });
+  });
+
+  it('derives incoming read state from self readBy map without forcing unread messages to read', () => {
+    const selfIds = hybrid.getSelfIdentityIds();
+    expect(hybrid.resolveCloudDeliveryState({
+      status: 'sent',
+      deliveredTo: { 'uid-test-1': Date.now() },
+    }, { isFromMe: false, selfIds })).toEqual({
+      status: 'delivered',
+      delivered: true,
+      read: false,
+    });
+
+    expect(hybrid.resolveCloudDeliveryState({
+      status: 'sent',
+      readBy: { 'uid-test-1': Date.now() },
+    }, { isFromMe: false, selfIds })).toEqual({
+      status: 'read',
+      delivered: true,
+      read: true,
+    });
   });
 });

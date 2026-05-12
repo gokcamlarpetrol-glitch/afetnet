@@ -87,6 +87,18 @@ function processSOSAlert(alertId: string, alertData: any): void {
 
     // Handle cancellation signals — show "SOS cancelled" notification and remove from store
     if (alertData.status === 'cancelled') {
+        // CRITICAL FIX (SOS-H6): Stricter age filter for cancellations.
+        // onSnapshot initial load returns ALL cancelled docs from history.
+        // Without tight filter, every app launch shows "SOS cancelled" notifications
+        // for stale events. Cancellations are time-sensitive — 5 minute window only.
+        const cancelTs = normalizeTimestampMs((alertData as { cancelledAt?: number }).cancelledAt) ??
+                         normalizedTimestamp;
+        const cancelAge = Date.now() - cancelTs;
+        if (cancelAge > 5 * 60 * 1000) {
+            logger.debug(`SOS cancellation skipped — ${Math.floor(cancelAge / 60000)}min old (max 5min)`);
+            return;
+        }
+
         logger.info(`✅ SOS CANCELLED by ${alertData.senderName || alertData.senderDeviceId}`);
         showSOSCancelledNotification(alertData).catch((err) => {
             logger.error('Failed to show SOS cancellation notification:', err);

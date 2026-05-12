@@ -55,6 +55,7 @@ class RealTimeEEWConnectionService {
     private processedEvents = new Set<string>();
     private onEventCallback: ((event: ActiveEvent) => void) | null = null;
     private heartbeatInterval: NodeJS.Timeout | null = null;
+    private reconnectTimer: NodeJS.Timeout | null = null;
     private isRunning = false;
 
     private constructor() { }
@@ -123,6 +124,11 @@ class RealTimeEEWConnectionService {
      * Stop real-time connection
      */
     stop(): void {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
@@ -240,7 +246,8 @@ class RealTimeEEWConnectionService {
 
         logger.debug(`Reconnect attempt ${this.connectionStatus.reconnectAttempts} in ${delay}ms`);
 
-        setTimeout(async () => {
+        this.reconnectTimer = setTimeout(async () => {
+            this.reconnectTimer = null;
             if (!this.isRunning) return;
 
             // Try to reconnect

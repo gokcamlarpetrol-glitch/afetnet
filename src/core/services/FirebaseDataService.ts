@@ -29,6 +29,7 @@ import type {
 // V3 operations
 import {
   findOrCreateDMConversation,
+  getConversation,
   saveMessage as saveMessageV3,
   loadMessages as loadMessagesV3,
   subscribeToMessages as subscribeToMessagesV3,
@@ -37,6 +38,9 @@ import {
   markConversationRead,
   deleteConversationFromInbox,
   saveMessageLegacy,
+  markMessageAsDelivered as markMessageAsDeliveredOp,
+  markMessageAsRead as markMessageAsReadOp,
+  subscribeToLegacyDeviceMessages,
 } from './firebase/FirebaseMessageOperations';
 import {
   saveLocationUpdate as saveLocationUpdateV3,
@@ -78,6 +82,9 @@ import {
   saveFeltEarthquakeReport as saveFeltEarthquakeReportOp,
   getIntensityData as getIntensityDataOp,
 } from './firebase/FirebaseEarthquakeOperations';
+import { isLikelyFirebaseUid } from '../utils/messaging/identityUtils';
+import { readCachedAuthUid } from '../utils/authSessionCache';
+import type { MessageSendOutcome, SaveMessageResult } from './messaging/types';
 
 const logger = createLogger('FirebaseDataService');
 
@@ -89,27 +96,63 @@ class FirebaseDataService {
   private _isInitialized = false;
   private _authRetryUnsubscribe: (() => void) | null = null;
   private _initPromise: Promise<void> | null = null;
+  private _recipientUidCache = new Map<string, { uid: string | null; expiresAt: number }>();
+  private readonly RECIPIENT_UID_CACHE_TTL_MS = 10 * 60 * 1000;
+  private readonly RECIPIENT_UID_NEGATIVE_CACHE_TTL_MS = 45 * 1000;
 
   private isLikelyUid(value: string): boolean {
-    return /^[A-Za-z0-9]{20,40}$/.test(value);
+    return isLikelyFirebaseUid(value);
+  }
+
+  private getCachedRecipientUid(candidate: string): string | null | undefined {
+    const key = candidate.trim();
+    if (!key) return undefined;
+
+    const cached = this._recipientUidCache.get(key);
+    if (!cached) return undefined;
+    if (cached.expiresAt <= Date.now()) {
+      this._recipientUidCache.delete(key);
+      return undefined;
+    }
+    return cached.uid;
+  }
+
+  private setCachedRecipientUid(candidate: string, uid: string | null): void {
+    const key = candidate.trim();
+    if (!key) return;
+
+    this._recipientUidCache.set(key, {
+      uid,
+      expiresAt: Date.now() + (uid ? this.RECIPIENT_UID_CACHE_TTL_MS : this.RECIPIENT_UID_NEGATIVE_CACHE_TTL_MS),
+    });
   }
 
   /**
-   * Resolve a recipient identifier (uid/public code/deviceId) to Firebase UID.
+   * Resolve a recipient identifier (uid/public code/deviceId) to Firebase Auth UID.
    * Unlike resolveUidForUserPath(), this resolver MUST NOT default to current user.
+   *
+   * CANONICAL: The return value is ALWAYS a Firebase Auth UID or null.
+   * Never returns a deviceId, installationId, or other non-UID alias.
    */
   private async resolveRecipientUidInternal(candidate: string): Promise<string | null> {
     const trimmed = (candidate || '').trim();
     if (!trimmed || trimmed === 'broadcast') return null;
 
     if (this.isLikelyUid(trimmed)) {
+      this.setCachedRecipientUid(trimmed, trimmed);
       return trimmed;
+    }
+
+    const cachedUid = this.getCachedRecipientUid(trimmed);
+    if (cachedUid !== undefined) {
+      return cachedUid;
     }
 
     try {
       const { contactService } = await import('./ContactService');
       const cloudUid = contactService.resolveCloudUid(trimmed);
       if (cloudUid && this.isLikelyUid(cloudUid)) {
+        this.setCachedRecipientUid(trimmed, cloudUid);
         return cloudUid;
       }
     } catch {
@@ -122,6 +165,7 @@ class FirebaseDataService {
         m.uid === trimmed || m.deviceId === trimmed,
       );
       if (member?.uid && this.isLikelyUid(member.uid)) {
+        this.setCachedRecipientUid(trimmed, member.uid);
         return member.uid;
       }
     } catch {
@@ -133,14 +177,22 @@ class FirebaseDataService {
     try {
       const db = await getFirestoreInstanceAsync();
       if (db) {
-        const { doc, getDoc, collection, getDocs, limit, query, where } = await import('firebase/firestore');
+        const { doc, getDoc: firestoreGetDoc, collection, getDocs: firestoreGetDocs, limit, query, where } = await import('firebase/firestore');
+
+        const withTimeout = <T>(promise: Promise<T>, ms: number = 3000): Promise<T> => {
+          return Promise.race([
+            promise,
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Firestore operation timed out')), ms))
+          ]);
+        };
 
         // 1. Direct doc lookup: devices/{trimmed}
-        const deviceDoc = await getDoc(doc(db, 'devices', trimmed));
+        const deviceDoc = await withTimeout(firestoreGetDoc(doc(db, 'devices', trimmed)));
         if (deviceDoc.exists()) {
           const ownerUid = deviceDoc.data()?.ownerUid;
           if (typeof ownerUid === 'string' && ownerUid.trim().length > 0 && this.isLikelyUid(ownerUid.trim())) {
             logger.info(`🔗 resolveRecipientUid: device doc lookup "${trimmed}" → ownerUid ${ownerUid.trim()}`);
+            this.setCachedRecipientUid(trimmed, ownerUid.trim());
             return ownerUid.trim();
           }
         }
@@ -148,41 +200,61 @@ class FirebaseDataService {
         // 2. Query by deviceId field: handles BLE mesh IDs (e.g. "me-a3f2") stored as field values
         const devicesRef = collection(db, 'devices');
         const byDeviceId = query(devicesRef, where('deviceId', '==', trimmed), limit(1));
-        const deviceQuerySnap = await getDocs(byDeviceId);
+        const deviceQuerySnap = await withTimeout(firestoreGetDocs(byDeviceId));
         if (!deviceQuerySnap.empty) {
           const ownerUid = deviceQuerySnap.docs[0].data()?.ownerUid;
           if (typeof ownerUid === 'string' && ownerUid.trim().length > 0 && this.isLikelyUid(ownerUid.trim())) {
             logger.info(`🔗 resolveRecipientUid: device query lookup "${trimmed}" → ownerUid ${ownerUid.trim()}`);
+            this.setCachedRecipientUid(trimmed, ownerUid.trim());
             return ownerUid.trim();
           }
         }
       }
     } catch {
-      // best effort — device doc may not exist
+      // best effort — device doc may not exist or timed out
     }
 
     // Last-resort lookup for users indexed by publicUserCode / qrId.
     try {
       const db = await getFirestoreInstanceAsync();
       if (db) {
-        const { collection, getDocs, limit, query, where } = await import('firebase/firestore');
+        const { collection, getDocs: firestoreGetDocs, limit, query, where } = await import('firebase/firestore');
         const usersRef = collection(db, 'users');
         const candidateCodes = new Set<string>([trimmed]);
         if (/^afn-/i.test(trimmed)) {
           candidateCodes.add(trimmed.toUpperCase());
         }
 
+        const withTimeout = <T>(promise: Promise<T>, ms: number = 3000): Promise<T> => {
+          return Promise.race([
+            promise,
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Firestore operation timed out')), ms))
+          ]);
+        };
+
         for (const code of candidateCodes) {
           const byPublicCode = query(usersRef, where('publicUserCode', '==', code), limit(1));
-          const publicCodeSnap = await getDocs(byPublicCode);
+          const publicCodeSnap = await withTimeout(firestoreGetDocs(byPublicCode));
           if (!publicCodeSnap.empty) {
-            return publicCodeSnap.docs[0].id;
+            const resolvedUid = publicCodeSnap.docs[0].id;
+            // CANONICAL: Validate that Firestore doc ID is a Firebase Auth UID
+            if (this.isLikelyUid(resolvedUid)) {
+              this.setCachedRecipientUid(trimmed, resolvedUid);
+              return resolvedUid;
+            }
+            logger.warn(`resolveRecipientUid: publicUserCode lookup returned non-UID doc ID "${resolvedUid}" for "${code}" — skipping`);
           }
 
           const byQrId = query(usersRef, where('qrId', '==', code), limit(1));
-          const qrIdSnap = await getDocs(byQrId);
+          const qrIdSnap = await withTimeout(firestoreGetDocs(byQrId));
           if (!qrIdSnap.empty) {
-            return qrIdSnap.docs[0].id;
+            const resolvedUid = qrIdSnap.docs[0].id;
+            // CANONICAL: Validate that Firestore doc ID is a Firebase Auth UID
+            if (this.isLikelyUid(resolvedUid)) {
+              this.setCachedRecipientUid(trimmed, resolvedUid);
+              return resolvedUid;
+            }
+            logger.warn(`resolveRecipientUid: qrId lookup returned non-UID doc ID "${resolvedUid}" for "${code}" — skipping`);
           }
         }
       }
@@ -190,12 +262,15 @@ class FirebaseDataService {
       logger.debug(`resolveRecipientUid lookup failed for "${trimmed}"`, error);
     }
 
+    this.setCachedRecipientUid(trimmed, null);
     return null;
   }
 
   /**
    * Public recipient resolver used by messaging screens/services to canonicalize
    * AFN/public-code/device aliases into Firebase UIDs before opening threads.
+   *
+   * CANONICAL: Returns a Firebase Auth UID or null. Never returns deviceId/installationId.
    */
   async resolveRecipientUid(candidate: string): Promise<string | null> {
     if (!this._isInitialized) return null;
@@ -204,16 +279,17 @@ class FirebaseDataService {
 
   /**
    * Backward-compatible resolver:
-   * - Prefer authenticated UID
-   * - Accept direct UID input
+   * - Prefer explicit candidate UID when provided
    * - Legacy fallback: resolve ownerUid from devices/{deviceId}
+   * - Final fallback: current authenticated UID
    */
-  private async resolveUidForUserPath(candidate: string): Promise<string | null> {
+  private async resolveUidForUserPath(
+    candidate: string,
+    options?: { allowCurrentUserFallback?: boolean },
+  ): Promise<string | null> {
+    const allowCurrentUserFallback = options?.allowCurrentUserFallback ?? true;
     const trimmed = (candidate || '').trim();
     if (!trimmed) return null;
-
-    const currentUid = await this.getCurrentUid();
-    if (currentUid) return currentUid;
 
     if (this.isLikelyUid(trimmed)) {
       return trimmed;
@@ -233,12 +309,17 @@ class FirebaseDataService {
       logger.debug(`resolveUidForUserPath fallback lookup failed for "${trimmed}"`, error);
     }
 
-    try {
-      const { identityService } = await import('./IdentityService');
-      const identityUid = identityService.getUid();
-      if (identityUid) return identityUid;
-    } catch {
-      // best effort
+    if (allowCurrentUserFallback) {
+      try {
+        const { identityService } = await import('./IdentityService');
+        const identityUid = identityService.getUid();
+        if (identityUid) return identityUid;
+      } catch {
+        // best effort
+      }
+
+      const currentUid = await this.getCurrentUid();
+      if (currentUid) return currentUid;
     }
 
     return null;
@@ -272,32 +353,37 @@ class FirebaseDataService {
 
         const initPromise = getFirebaseAppAsync();
         const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 20000),
+          setTimeout(() => resolve(null), 5000),
         );
 
         const firebaseApp = await Promise.race([initPromise, timeoutPromise]);
 
         if (!firebaseApp) {
-          logger.warn('⚠️ Firebase app not initialized after 20s — Firestore disabled');
+          logger.warn('⚠️ Firebase app not initialized after 5s — Firestore disabled');
           return;
         }
 
         const dbPromise = getFirestoreInstanceAsync();
         const dbTimeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 15000),
+          setTimeout(() => resolve(null), 5000),
         );
 
         const db = await Promise.race([dbPromise, dbTimeoutPromise]);
 
         if (!db) {
-          logger.warn('⚠️ Firestore not available after 15s — messaging will not work');
+          logger.warn('⚠️ Firestore not available after 5s — messaging will not work');
           return;
         }
 
         // Verify authentication
         try {
-          const { getAuth, onAuthStateChanged } = await import('firebase/auth');
-          const auth = getAuth();
+          const { onAuthStateChanged } = await import('firebase/auth');
+          const { getFirebaseAuth } = await import('../../lib/firebase');
+          const auth = getFirebaseAuth();
+          if (!auth) {
+            logger.warn('⚠️ Firebase Auth not available — messaging will not work');
+            return;
+          }
           if (!auth.currentUser) {
             const user = await new Promise<import('firebase/auth').User | null>((resolve) => {
               let settled = false;
@@ -324,11 +410,11 @@ class FirebaseDataService {
                 }
               });
 
-              timeout = setTimeout(() => finish(null), 15000);
+              timeout = setTimeout(() => finish(null), 3000);
             });
 
             if (!user) {
-              logger.warn('⚠️ FirebaseDataService: auth not available after 15s — initializing anyway');
+              logger.warn('⚠️ FirebaseDataService: auth not available after 3s — initializing anyway');
               if (!this._authRetryUnsubscribe) {
                 this._authRetryUnsubscribe = onAuthStateChanged(auth, async (u) => {
                   if (u && this._isInitialized) {
@@ -370,8 +456,21 @@ class FirebaseDataService {
   // ── Helper: Get current UID ──────────────────────────────────
   private async getCurrentUid(): Promise<string | null> {
     try {
-      const { getAuth } = await import('firebase/auth');
-      return getAuth().currentUser?.uid || null;
+      const { identityService } = await import('./IdentityService');
+      const identityUid = identityService.getUid();
+      if (identityUid) return identityUid;
+    } catch {
+      // best effort
+    }
+
+    const cachedUid = readCachedAuthUid();
+    if (cachedUid) {
+      return cachedUid;
+    }
+
+    try {
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      return getFirebaseAuth()?.currentUser?.uid || null;
     } catch {
       return null;
     }
@@ -389,8 +488,8 @@ class FirebaseDataService {
     }
 
     try {
-      const { getAuth } = await import('firebase/auth');
-      const authName = getAuth().currentUser?.displayName;
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      const authName = getFirebaseAuth()?.currentUser?.displayName;
       if (authName && authName.trim().length > 0) {
         return authName.trim();
       }
@@ -427,7 +526,7 @@ class FirebaseDataService {
   async saveLocationUpdate(uid: string, location: any): Promise<boolean> {
     if (!this._isInitialized) return false;
     try {
-      const targetUid = await this.resolveUidForUserPath(uid);
+      const targetUid = await this.resolveUidForUserPath(uid, { allowCurrentUserFallback: false });
       if (!targetUid) {
         logger.warn(`saveLocationUpdate skipped: unable to resolve UID from "${uid}"`);
         return false;
@@ -449,7 +548,7 @@ class FirebaseDataService {
     onError?: (error: any) => void,
   ): Promise<() => void> {
     if (!this._isInitialized) return () => { };
-    const targetUid = await this.resolveUidForUserPath(uid);
+    const targetUid = await this.resolveUidForUserPath(uid, { allowCurrentUserFallback: false });
     if (!targetUid) {
       logger.warn(`subscribeToUserLocation skipped: unable to resolve UID from "${uid}"`);
       return () => { };
@@ -469,8 +568,9 @@ class FirebaseDataService {
       if (!ownerUid) return false;
       const myDisplayName = await this.getCurrentDisplayName();
       const familyId = await getOrCreateDefaultFamily(ownerUid, myDisplayName);
-      await saveFamilyMemberV3(familyId, member, ownerUid);
-      return true;
+      if (!familyId) return false;
+      const result = await saveFamilyMemberV3(familyId, member, ownerUid);
+      return result !== false;
     } catch (error) {
       logger.warn('saveFamilyMember V3 failed:', error);
       return false;
@@ -487,6 +587,7 @@ class FirebaseDataService {
       if (!ownerUid) return [];
       const myDisplayName = await this.getCurrentDisplayName();
       const familyId = await getOrCreateDefaultFamily(ownerUid, myDisplayName);
+      if (!familyId) return [];
       const members = await loadFamilyMembersV3(familyId);
       if (members.length > 0) return members;
       // Fallback: try legacy model
@@ -507,6 +608,7 @@ class FirebaseDataService {
       if (!ownerUid) return false;
       const myDisplayName = await this.getCurrentDisplayName();
       const familyId = await getOrCreateDefaultFamily(ownerUid, myDisplayName);
+      if (!familyId) return false;
       await deleteFamilyMemberV3(familyId, memberUid, ownerUid);
       return true;
     } catch (error) {
@@ -529,6 +631,7 @@ class FirebaseDataService {
       if (!ownerUid) return () => { };
       const myDisplayName = await this.getCurrentDisplayName();
       const familyId = await getOrCreateDefaultFamily(ownerUid, myDisplayName);
+      if (!familyId) return () => { };
       return subscribeToFamilyMembersV3(familyId, callback);
     } catch (error) {
       logger.warn('subscribeToFamilyMembers V3 failed:', error);
@@ -542,7 +645,33 @@ class FirebaseDataService {
    * Creates or finds DM conversation, saves message, updates inbox.
    * Also does legacy dual-write for backward compat.
    */
-  async saveMessage(uid: string, message: MessageData): Promise<boolean> {
+  async saveMessage(uid: string, message: MessageData): Promise<SaveMessageResult> {
+    const retryableFailure = (error?: string, conversationId?: string): SaveMessageResult => ({
+      success: false,
+      conversationId,
+      outcome: { status: 'retryable_failure', messagePersisted: false, inboxDelivered: false, error },
+    });
+    const permanentFailure = (error: string): SaveMessageResult => ({
+      success: false,
+      outcome: { status: 'permanent_failure', messagePersisted: false, inboxDelivered: false, error },
+    });
+
+    // CRITICAL FIX: Short-circuit when offline. Firestore on React Native has NO persistent
+    // cache (memory-only). Offline getDocs/setDoc calls either block for 10-30s on timeouts
+    // or "succeed" into volatile memory cache. Either way the result is useless:
+    // - Timeout blocking holds the queueMutex, stalling ALL other message sends
+    // - Memory cache "success" evaporates on app kill, permanently losing the message
+    // The caller (HybridMessageService.attemptSend) already handles { success: false }
+    // correctly by keeping the message in the MMKV retry queue for later.
+    try {
+      const { connectionManager } = await import('./ConnectionManager');
+      if (!connectionManager.isOnline) {
+        return retryableFailure('Device offline');
+      }
+    } catch {
+      // ConnectionManager unavailable — proceed with Firestore attempt
+    }
+
     // CRITICAL FIX: Lazy re-initialization — if init failed silently during startup
     // (timeout, slow network, etc.), retry here instead of permanently breaking messaging
     if (!this._isInitialized) {
@@ -550,7 +679,7 @@ class FirebaseDataService {
       await this.initialize();
       if (!this._isInitialized) {
         logger.error('saveMessage: lazy re-init FAILED — message will not be sent');
-        return false;
+        return retryableFailure('FirebaseDataService not initialized');
       }
     }
     try {
@@ -569,11 +698,15 @@ class FirebaseDataService {
           senderUid = messageSenderUid;
         } else {
           logger.error('🚨 saveMessage: NO authenticated user AND no valid senderUid in message — cannot send');
-          return false;
+          return permanentFailure('No authenticated user and no valid senderUid');
         }
       }
 
-      let v3Success = false;
+      let v3Outcome: MessageSendOutcome | null = null;
+      const requestedConversationId = typeof message.conversationId === 'string'
+        ? message.conversationId.trim()
+        : '';
+      let resolvedConversationId: string | undefined;
 
       // Determine recipient UID from any supported identity form
       const rawRecipientId = typeof message.toDeviceId === 'string' ? message.toDeviceId.trim() : '';
@@ -593,19 +726,46 @@ class FirebaseDataService {
       // Determine effective recipient UID for V3 path.
       // CRITICAL: Only use resolved UIDs — never use raw identifiers as participants.
       // Non-UID participants break security rules (receiver can't read the conversation).
-      const effectiveRecipientUid = recipientUid && this.isLikelyUid(recipientUid) ? recipientUid : null;
+      let effectiveRecipientUid = recipientUid && this.isLikelyUid(recipientUid) ? recipientUid : null;
+
+      if (requestedConversationId) {
+        try {
+          const existingConversation = await getConversation(requestedConversationId);
+          const participants = Array.isArray(existingConversation?.participants)
+            ? existingConversation.participants.filter((participant): participant is string =>
+              typeof participant === 'string' && this.isLikelyUid(participant),
+            )
+            : [];
+          if (existingConversation?.id && participants.includes(senderUid)) {
+            const peerUidFromConversation = participants.find((participant) => participant !== senderUid) || null;
+            if (peerUidFromConversation) {
+              effectiveRecipientUid = effectiveRecipientUid || peerUidFromConversation;
+              resolvedConversationId = existingConversation.id;
+              logger.info(`📨 saveMessage: reusing existing conversation ${existingConversation.id} for sender ${senderUid}`);
+            }
+          }
+        } catch (conversationError) {
+          logger.warn(`saveMessage: failed to inspect requested conversation ${requestedConversationId}`, conversationError);
+        }
+      }
 
       if (!effectiveRecipientUid && rawRecipientId && rawRecipientId !== 'broadcast') {
-        logger.error(`🚨 saveMessage: UID resolution failed for "${rawRecipientId}" — V3 path skipped. Message may NOT be delivered! Attempting legacy fallback.`);
+        // CANONICAL: UID resolution failed for a directed message. Do NOT fall back to
+        // legacy device-based write path with a non-UID key — that creates orphan documents
+        // in Firestore that no receiver subscribes to. Return retryable failure so the
+        // caller (HybridMessageService) keeps the message in its retry queue.
+        logger.error(`🚨 saveMessage: UID resolution failed for "${rawRecipientId}" — returning retryable failure (no legacy fallback for non-UID keys)`);
+        return retryableFailure(`Recipient UID not resolved from "${rawRecipientId}"`);
       }
 
       if (effectiveRecipientUid) {
-        // DM: Find or create conversation
-        const conversation = await findOrCreateDMConversation(
-          senderUid,
-          effectiveRecipientUid,
-          message.metadata?.senderName as string || '',
-        );
+        const conversation = resolvedConversationId
+          ? { id: resolvedConversationId }
+          : await findOrCreateDMConversation(
+            senderUid,
+            effectiveRecipientUid,
+            message.metadata?.senderName as string || '',
+          );
 
         if (conversation) {
           // Build V3 message
@@ -613,48 +773,137 @@ class FirebaseDataService {
             ...message,
             senderUid: senderUid,
             senderName: message.metadata?.senderName as string || (message as any).fromName || message.senderName || '',
+            // CRITICAL FIX: Mark as V3 so legacy onNewMessage CF skips it.
+            // Without schemaVersion: 3, the legacy CF fires on devices/{id}/messages
+            // and sends a DUPLICATE push or no push at all when V3 path is used.
+            schemaVersion: 3,
           };
 
-          v3Success = await saveMessageV3(conversation.id, v3Message, [senderUid, effectiveRecipientUid]);
-          if (v3Success) {
-            logger.info(`✅ V3 message saved to conversation ${conversation.id}`);
+          resolvedConversationId = conversation.id;
+          v3Outcome = await saveMessageV3(resolvedConversationId, v3Message, [senderUid, effectiveRecipientUid]);
+
+          if (v3Outcome.messagePersisted) {
+            logger.info(`✅ V3 message saved to conversation ${resolvedConversationId} (outcome: ${v3Outcome.status})`);
+            if (!v3Outcome.inboxDelivered) {
+              logger.warn(`⚠️ V3 message ${message.id}: inbox write failed — CF syncConversationInboxV3 will deliver server-side`);
+            }
+            // CRITICAL FIX: Propagate conversationId back to messageStore.
+            // Without this, the sent message has no conversationId and is INVISIBLE
+            // in ConversationScreen which filters primarily by conversationId.
+            try {
+              const { useMessageStore } = require('../stores/messageStore');
+              const existingMsg = useMessageStore.getState().messages.find((m: any) => m.id === message.id);
+              if (existingMsg && !existingMsg.conversationId) {
+                useMessageStore.getState().addMessage({
+                  ...existingMsg,
+                  conversationId: resolvedConversationId,
+                });
+                logger.info(`📨 Backfilled conversationId=${resolvedConversationId} onto sent message ${message.id}`);
+              }
+            } catch (backfillError) {
+              logger.debug('conversationId backfill failed (non-critical):', backfillError);
+            }
           } else {
-            logger.warn(`❌ V3 message save FAILED for conversation ${conversation.id}`);
+            logger.warn(`❌ V3 message save FAILED for conversation ${resolvedConversationId} (outcome: ${v3Outcome.status})`);
           }
         } else {
           logger.warn('saveMessage: conversation could not be created/resolved');
         }
       }
 
+      // Derive v3Success from outcome for legacy path decision
+      const v3Success = v3Outcome?.messagePersisted === true;
+
       // DUPLICATE-NOTIFICATION FIX: Legacy write is now SKIPPED when V3 succeeds.
       // The legacy path (devices/{id}/messages/{id}) triggers the old onNewMessage
       // Cloud Function which sends a SECOND FCM push to the recipient → duplicate notification.
       // V3 onNewConversationMessageV3 CF already handles push for the V3 path.
-      // Only fall back to legacy if V3 failed AND there is no effective recipient UID
-      // (broadcast/unknown target where V3 has no conversation to write to).
+      // CANONICAL: Legacy write is ONLY used for broadcast (no specific recipient).
+      // For directed messages (rawRecipientId != broadcast), the early return above
+      // already rejects unresolved UIDs. Legacy device-based write paths with non-UID
+      // keys create orphan documents that no receiver subscribes to.
       let legacySuccess = false;
       if (!v3Success) {
-        try {
-          const legacyTargetDeviceId = rawRecipientId && rawRecipientId !== 'broadcast' ? rawRecipientId : uid;
-          if (legacyTargetDeviceId) {
-            legacySuccess = await saveMessageLegacy(legacyTargetDeviceId, message);
+        // Only allow legacy write for broadcast/self-addressed messages (not directed non-UID)
+        const isBroadcastOrSelf = !rawRecipientId || rawRecipientId === 'broadcast';
+        if (isBroadcastOrSelf) {
+          try {
+            const legacyTargetDeviceId = uid;
+            if (legacyTargetDeviceId) {
+              legacySuccess = await saveMessageLegacy(legacyTargetDeviceId, message);
+            }
+          } catch {
+            // Legacy write failure is non-blocking
           }
-        } catch {
-          // Legacy write failure is non-blocking
+        } else {
+          // Directed message where V3 failed — return retryable failure
+          logger.warn(`⚠️ saveMessage: V3 path failed for directed message to "${rawRecipientId}" — skipping legacy write, returning retryable failure`);
+          return retryableFailure(
+            v3Outcome?.error || 'V3 path failed for directed message',
+            resolvedConversationId,
+          );
         }
       }
 
-      // CRITICAL: V3 path is the ONLY path receivers subscribe to.
-      // If V3 failed but legacy succeeded, the message WON'T be delivered.
-      // Return false so the caller retries (and potentially resolves UID on retry).
-      if (!v3Success && legacySuccess && rawRecipientId && rawRecipientId !== 'broadcast') {
-        logger.warn(`⚠️ saveMessage: ONLY legacy path succeeded for "${rawRecipientId}" — returning false to trigger retry (V3 conversation needed for delivery)`);
-        return false;
+      // Build the final result with structured outcome
+      const overallSuccess = v3Success || legacySuccess;
+
+      if (v3Outcome && v3Success) {
+        // V3 path succeeded — propagate the structured outcome directly
+        return {
+          success: true,
+          conversationId: resolvedConversationId || v3Outcome.conversationId,
+          outcome: { ...v3Outcome, conversationId: resolvedConversationId || v3Outcome.conversationId },
+        };
       }
 
-      return v3Success || legacySuccess;
+      if (legacySuccess) {
+        // Only legacy succeeded (no V3 path taken — e.g., broadcast)
+        return {
+          success: true,
+          conversationId: resolvedConversationId,
+          outcome: {
+            status: 'full_success',
+            messagePersisted: true,
+            inboxDelivered: true,
+            conversationId: resolvedConversationId,
+          },
+        };
+      }
+
+      // Both paths failed
+      return retryableFailure(
+        v3Outcome?.error || 'V3 and legacy paths both failed',
+        resolvedConversationId,
+      );
     } catch (error) {
       logger.warn('saveMessage V3 failed:', error);
+      return retryableFailure(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * Mark message as delivered for Double-tick (WhatsApp style)
+   */
+  async markMessageAsDelivered(conversationId: string, messageId: string): Promise<boolean> {
+    if (!this._isInitialized) return false;
+    try {
+      return await markMessageAsDeliveredOp(conversationId, messageId);
+    } catch (error) {
+      logger.warn('markMessageAsDelivered failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Mark message as read (Blue ticks)
+   */
+  async markMessageAsRead(conversationId: string, messageId: string): Promise<boolean> {
+    if (!this._isInitialized) return false;
+    try {
+      return await markMessageAsReadOp(conversationId, messageId);
+    } catch (error) {
+      logger.warn('markMessageAsRead failed:', error);
       return false;
     }
   }
@@ -769,9 +1018,40 @@ class FirebaseDataService {
       }
     }
     try {
-      return subscribeToMessagesV3(conversationId, callback);
+      // CRITICAL FIX: Pass onError through so the caller (subscribeToConversation in
+      // HybridMessageService) can detect when the underlying Firestore listener dies
+      // and remove the dead entry from conversationUnsubscribers for re-subscription.
+      return subscribeToMessagesV3(conversationId, callback, onError);
     } catch (error) {
       logger.warn('subscribeToConversationMessages V3 failed:', error);
+      onError?.(error as Error);
+      return null;
+    }
+  }
+
+  /**
+   * Subscribe to real-time legacy message updates for a specific device.
+   * Path: devices/{deviceId}/messages/
+   * @param deviceId The legacy device ID
+   */
+  async subscribeToLegacyDeviceMessages(
+    deviceId: string,
+    callback: (messages: MessageData[]) => void,
+    onError?: (error: Error) => void,
+  ): Promise<(() => void) | null> {
+    // CRITICAL FIX: Lazy re-initialization for subscriptions too
+    if (!this._isInitialized) {
+      logger.warn('subscribeToLegacyDeviceMessages: not initialized — attempting lazy re-init');
+      await this.initialize();
+      if (!this._isInitialized) {
+        logger.error('subscribeToLegacyDeviceMessages: lazy re-init FAILED — no real-time messages');
+        return null;
+      }
+    }
+    try {
+      return subscribeToLegacyDeviceMessages(deviceId, callback, onError);
+    } catch (error) {
+      logger.warn('subscribeToLegacyDeviceMessages failed:', error);
       return null;
     }
   }

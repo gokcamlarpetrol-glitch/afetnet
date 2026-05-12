@@ -1135,6 +1135,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  predictionDisclaimer: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.7)',
+    lineHeight: 15,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.15)',
+  },
   recommendedActionContainer: {
     padding: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',

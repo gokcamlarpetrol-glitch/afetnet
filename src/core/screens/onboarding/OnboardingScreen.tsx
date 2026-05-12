@@ -1,104 +1,76 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, StatusBar, Image, PermissionsAndroid } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, StatusBar, Image, PermissionsAndroid, BackHandler } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import { Camera } from 'expo-camera';
-import * as Contacts from 'expo-contacts';
 import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { hasCompletedOnboarding, setOnboardingCompleted } from '../../utils/onboardingStorage';
+import { setOnboardingCompleted } from '../../utils/onboardingStorage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('OnboardingScreen');
 
 // ELITE: Premium onboarding images for each slide (High-Quality PNG)
 const IMAGE_ASSETS = {
-  seismic: require('../../../../assets/images/onboarding/seismic.png'),
-  location: require('../../../../assets/images/onboarding/location.png'),
-  verification: require('../../../../assets/images/onboarding/verification.png'),
+  seismic: require('../../../../assets/images/onboarding/seismic.jpg'),
+  location: require('../../../../assets/images/onboarding/location.jpg'),
+  verification: require('../../../../assets/images/onboarding/verification.jpg'),
   aiAssistant: require('../../../../assets/images/onboarding/ai_assistant_brain.png'),
-  meshNetwork: require('../../../../assets/images/onboarding/mesh_network.png'),
-  familySafety: require('../../../../assets/images/onboarding/family_safety.png'),
-  sos: require('../../../../assets/images/onboarding/sos.png'),
-  toolkit: require('../../../../assets/images/onboarding/toolkit.png'),
-  settingsControl: require('../../../../assets/images/onboarding/settings_control.png'),
+  meshNetwork: require('../../../../assets/images/onboarding/mesh_network.jpg'),
+  familySafety: require('../../../../assets/images/onboarding/family_safety.jpg'),
+  sos: require('../../../../assets/images/onboarding/sos.jpg'),
+  toolkit: require('../../../../assets/images/onboarding/toolkit.jpg'),
+  settingsControl: require('../../../../assets/images/onboarding/settings_control.jpg'),
 };
 
+// SPRINT 1B: 9 slayt → 4 slayt sadeleştirme.
+// Sadece izin-isteyen ve özet-bilgi veren slaytlar kaldı. Diğer detaylı tanıtım
+// içerikleri uygulama içinde "Tour" + AI Asistan ile keşfedilebilir.
+// Kullanıcı zorunlu izin akışını HIZLI geçer (Apple 5.1.1 + Android best practice).
 const SLIDE_DATA = [
   {
     id: '1',
-    title: "P-Dalga\nİstihbaratı",
-    desc: "Deprem algılama motoru ve resmi kaynak takibi ile erken uyarı üretir. Uyarı süresi deprem tipi, uzaklık ve cihaz koşullarına göre değişir. AFAD verisi öncelikli kullanılır; desteklenen kaynaklarda çapraz kontrol yapılır.",
+    title: "Deprem\nErken Uyarısı",
+    // HATA 9 FIX: Yakın deprem fiziği — kullanıcıya gerçeği söyle.
+    // Lead time UZAK depremler için işe yarar; yakın merkezli depremde fiziksel olarak gecikir.
+    desc: "AFAD, USGS, EMSC ve Kandilli verilerini birleştirir. P-dalgası algılanır algılanmaz cihazınıza bildirim gönderir.\n\nUzak deprem (50km+): saniyeler önce uyarırız.\nYakın deprem: uyarı sarsıntı ile birlikte veya hemen sonra gelir (fizik kuralı).",
     image: IMAGE_ASSETS.seismic,
     action: 'notification',
-    buttonText: 'Hayat Kurtaran Bildirimleri Aç',
+    buttonText: 'Bildirimleri Aç',
     badge: 'ERKEN UYARI',
   },
   {
     id: '2',
-    title: "Hassas Konum +\nPDR Teknolojisi",
-    desc: "Acil durumlarda konum servisleri ve cihaz sensörleriyle son bilinen konumunuzu paylaşmanıza yardımcı olur. Konum doğruluğu çevresel koşullara ve izin durumuna göre değişebilir.",
+    title: "Konum +\nAile SOS",
+    desc: "Acil durumda konumunuz aile üyelerinize ve seçilen kurtarma kanallarına iletilir. Konum izni olmadan SOS sinyaliniz tam etkili olamaz. Veriler şifrelenmiş ve sadece sizin onayınızla paylaşılır.",
     image: IMAGE_ASSETS.location,
     action: 'location',
-    buttonText: 'Konum Erişimi Ver',
-    badge: 'GPS+PDR',
+    buttonText: 'Konumu Etkinleştir',
+    badge: 'GPS+SOS',
   },
   {
     id: '3',
-    title: "Yapay Zeka\nDoğrulama & Tehlike",
-    desc: "Afet anında resmi kaynaklardan gelen verileri karşılaştırır, özetler ve risk değerlendirmesi sunar. Uygulama, karar desteği sağlar; nihai teyit için resmi kurum duyurularını takip edin.",
-    image: IMAGE_ASSETS.verification,
-    action: null,
-    buttonText: 'Anladım, Devam Et',
-    badge: 'AI TEHLİKE HARİTASI',
+    title: "Offline Mesh\nİletişim",
+    // HATA 10 FIX: Gerçekçi mesh range — "kilometrelerce" abartı, gerçek BLE 10-30m, hop ile ~500m-1km.
+    desc: "GSM çöktüğünde AfetNet çalışır. Bluetooth Low Energy ile yakındaki AfetNet kullanıcılarına mesaj/SOS iletirsiniz.\n\nMesafe: 10-30m doğrudan; hop'lar ile yoğun yerleşimde 500m-1km. App açık iken en iyi çalışır.",
+    image: IMAGE_ASSETS.meshNetwork,
+    // iOS: BLE permission is OS-triggered on first use (cannot prompt programmatically).
+    // Android: request BLUETOOTH_SCAN/CONNECT/ADVERTISE now.
+    action: Platform.OS === 'ios' ? null : 'bluetooth',
+    buttonText: Platform.OS === 'ios' ? 'Anladım' : 'Bluetooth\'u Etkinleştir',
+    badge: 'OFFLİNE',
   },
   {
     id: '4',
-    title: "Kişisel Afet\nRehberiniz",
-    desc: "24/7 yanınızda olan yapay zeka asistanınız: Evinizin deprem risk skorunu hesaplar, kişisel acil durum çantası önerir, en yakın toplanma alanını gösterir ve ailenize özel tahliye rotası oluşturur. Panik anında sakin kalmanızı sağlayan nefes egzersizleri, ilk yardım rehberleri ve enkaz altı hayatta kalma taktikleri. 🧠 Türkçe doğal dil anlama.",
-    image: IMAGE_ASSETS.aiAssistant,
-    action: null,
-    buttonText: 'Rehberimi Tanıyorum',
-    badge: 'TÜRKÇE AI',
-  },
-  {
-    id: '5',
-    title: "Mesh Network +\nYakınlık Uyarıları",
-    desc: "GSM çöktüğünde AfetNet çalışır! Bluetooth mesh ile yakındaki kullanıcılar arasında mesajlar kilometrelerce taşınır. 🆕 Yakınlık Uyarıları: Sizin algılamadığınız bir tehlike yakınınızdaki kullanıcı tarafından bildirildiğinde anında uyarılırsınız. Store & Forward + otomatik relay ile hiçbir mesaj kaybolmaz.",
-    image: IMAGE_ASSETS.meshNetwork,
-    action: 'bluetooth',
-    buttonText: 'Mesh Ağını Aktifleştir',
-    badge: '🆕 YAKINLIK UYARILARI',
-  },
-  {
-    id: '6',
-    title: "Aile Güvenlik\nÇemberi",
-    desc: "Deprem anında aile üyelerinizin durumunu ve paylaşılan konumunu takip edin. Tek tuşla 'Güvendeyim' veya 'Yardıma İhtiyacım Var' durumu bildirin. Firebase bulut senkronizasyonu ile verileriniz hesap bazlı korunur.",
+    title: "Hazır mısınız?",
+    desc: "AfetNet hayat kurtaran bir araçtır ancak resmi acil durum yanıt sistemi değildir. Acil durumda DAİMA önce 112'yi arayın. Diğer özellikleri — aile çemberi, sağlık profili, ilk yardım — uygulama içinde keşfedebilirsiniz.",
     image: IMAGE_ASSETS.familySafety,
-    action: 'camera_contacts',
-    buttonText: 'Ailemi Ekle',
-    badge: 'BULUT SENKRONİZASYON',
-  },
-  {
-    id: '7',
-    title: "Akıllı SOS +\nHızlı Erişim",
-    desc: "Acil durumda uygulama içinden ve desteklenen hızlı erişim yollarından SOS gönderebilirsiniz. Konum, sağlık bilgisi ve ICE kişileriniz seçtiğiniz paylaşım kanallarına iletilir. Özellik kullanılabilirliği cihaz, izin ve bağlantı durumuna göre değişebilir.",
-    image: IMAGE_ASSETS.sos,
     action: null,
-    buttonText: 'Hayatımı Koruyorum',
-    badge: 'HIZLI SOS',
-  },
-  {
-    id: '8',
-    title: "Dijital Hayatta\nKalma Seti",
-    desc: "Telefonunuz hayatta kalma aracınız: LED fener (SOS mors kodu), yüksek sesli düdük, çevrimdışı haritalar, pusula, ilk yardım rehberi, acil durum radyo frekansları ve enkaz altı hayatta kalma rehberi. Hepsi tek uygulamada, internet olmadan da kullanılabilir.",
-    image: IMAGE_ASSETS.toolkit,
-    action: null,
-    buttonText: 'Araçları Keşfet',
-    badge: 'OFFLİNE ÇALIŞIR',
+    buttonText: 'AfetNet\'e Başla',
+    badge: 'BAŞLA',
   },
 ];
 
@@ -128,12 +100,21 @@ export const OnboardingScreen = () => {
     Haptics.selectionAsync();
   };
 
+  // Apple 5.1.1 / Android: Block hardware back button on permission slides.
+  // User must interact with the permission dialog — back button cannot bypass it.
   useEffect(() => {
-    const checkOnboardingStatus = async () => {
-      await hasCompletedOnboarding();
+    if (Platform.OS !== 'android') return;
+    const onBackPress = () => {
+      const slide = SLIDE_DATA[currentPage];
+      if (slide.action) {
+        // Consume back press — user must grant/deny the permission dialog
+        return true;
+      }
+      return false;
     };
-    checkOnboardingStatus();
-  }, []);
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [currentPage]);
 
   const handlePermissionRequest = async (type: string | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -149,6 +130,27 @@ export const OnboardingScreen = () => {
         });
         if (status === 'granted') {
           Alert.alert('Teşekkürler', 'Acil durum bildirimleri aktif.');
+          // CRITICAL: Register push token NOW that permission is granted.
+          // FCMTokenService.initialize() called during init.ts Phase E returns null
+          // if permission wasn't granted yet. Without this re-trigger, the token
+          // is never registered until the next app restart — meaning NO push
+          // notifications (messages, SOS, earthquakes) are delivered.
+          try {
+            const { fcmTokenService } = await import('../../services/FCMTokenService');
+            fcmTokenService.initialize().catch(e => { if (__DEV__) console.debug('FCM init after onboarding failed:', e); });
+          } catch { /* non-blocking */ }
+        } else {
+          // HATA 7 FIX: Reddedilirse kullanici hayat-guvenligi sonucunu bilmeli.
+          // Sessiz devam etmek yerine acik uyari ver. Settings'ten sonradan acabilir.
+          Alert.alert(
+            'Uyarı — Bildirimler Reddedildi',
+            'AfetNet kritik özelliklerin yarısı bildirim gerektirir:\n\n' +
+            '• Deprem Erken Uyarı (EEW) — bildirim olmadan uyarı duymazsınız\n' +
+            '• Aile SOS sinyalleri — yardım çağrılarını kaçırırsınız\n' +
+            '• Toplanma alanı güncellemeleri\n\n' +
+            'İstediğiniz zaman Ayarlardan açabilirsiniz.',
+            [{ text: 'Anladım', style: 'default' }],
+          );
         }
       } else if (type === 'location') {
         // Request foreground location during onboarding.
@@ -157,48 +159,40 @@ export const OnboardingScreen = () => {
         if (status === 'granted') {
           Alert.alert('Teşekkürler', 'Konum servisleri aktif.');
         }
-      } else if (type === 'camera_contacts') {
-        // ELITE: Request camera and contacts for family safety features
+      } else if (type === 'camera') {
+        // Request camera permission (QR scanning, chat photos, reports, flashlight)
         const cam = await Camera.requestCameraPermissionsAsync();
-        const con = await Contacts.requestPermissionsAsync();
-        if (cam.status === 'granted' && con.status === 'granted') {
-          Alert.alert('Teşekkürler', 'Aile güvenliği izinleri aktif.');
+
+        if (cam.status === 'granted') {
+          Alert.alert('Teşekkürler', 'Kamera izni aktif.');
         } else {
-          Alert.alert('Bilgi', 'Bazı izinler verilmedi. Ayarlardan değiştirebilirsiniz.');
+          Alert.alert('Bilgi', 'Kamera izni verilmedi. Ayarlardan değiştirebilirsiniz.');
         }
       } else if (type === 'bluetooth') {
-        if (Platform.OS === 'ios') {
-          Alert.alert(
-            'Mesh Ağı',
-            'Bluetooth izni, Mesh ağı ilk kez kullanıldığında iOS tarafından istenir. İzin vererek offline iletişimi aktif tutabilirsiniz.',
-            [{ text: 'Tamam' }],
+        // Android only: BLE runtime permissions (iOS triggers at first use, handled as info slide)
+        const sdkVersion = Number(Platform.Version || 0);
+        const permissions: string[] = [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+
+        if (sdkVersion >= 31) {
+          permissions.push(
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
           );
+        }
+
+        const results = await PermissionsAndroid.requestMultiple(permissions as any);
+        const allGranted = permissions.every(
+          (permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED,
+        );
+
+        if (allGranted) {
+          Alert.alert('Teşekkürler', 'Mesh ağ bağlantısı için gerekli Bluetooth izinleri aktif.');
         } else {
-          // Android BLE runtime permissions
-          const sdkVersion = Number(Platform.Version || 0);
-          const permissions: string[] = [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
-
-          if (sdkVersion >= 31) {
-            permissions.push(
-              PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-              PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-              PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-            );
-          }
-
-          const results = await PermissionsAndroid.requestMultiple(permissions as any);
-          const allGranted = permissions.every(
-            (permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED,
+          Alert.alert(
+            'Bluetooth İzni Eksik',
+            'Offline mesh iletişimi için Bluetooth tarama/bağlantı izinleri zorunludur. İzinleri Ayarlar > Uygulamalar > AfetNet bölümünden açabilirsiniz.',
           );
-
-          if (allGranted) {
-            Alert.alert('Teşekkürler', 'Mesh ağ bağlantısı için gerekli Bluetooth izinleri aktif.');
-          } else {
-            Alert.alert(
-              'Bluetooth İzni Eksik',
-              'Offline mesh iletişimi için Bluetooth tarama/bağlantı izinleri zorunludur. İzinleri Ayarlar > Uygulamalar > AfetNet bölümünden açabilirsiniz.',
-            );
-          }
         }
       }
       handleNext();
@@ -219,6 +213,9 @@ export const OnboardingScreen = () => {
         initialPage={0}
         ref={pagerRef}
         onPageSelected={handlePageSelected}
+        // Apple 5.1.1 hardening:
+        // Prevent swipe-bypass of permission slides.
+        scrollEnabled={false}
       >
         {SLIDE_DATA.map((slide, index) => (
           <View key={slide.id} style={styles.slideContainer}>
@@ -263,35 +260,64 @@ export const OnboardingScreen = () => {
                 style={styles.buttonWrapper}
               >
                 {slide.action ? (
-                  <TouchableOpacity
-                    style={styles.button}
-                    onPress={() => handlePermissionRequest(slide.action)}
-                    activeOpacity={0.9}
-                  >
-                    <View style={styles.buttonGradient}>
-                      <Text style={styles.buttonText}>{slide.buttonText}</Text>
-                    </View>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      style={styles.button}
+                      onPress={() => handlePermissionRequest(slide.action)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.buttonGradient}>
+                        <Text style={styles.buttonText}>{slide.buttonText}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    {/* Apple 5.1.1: İzin slaytlarında "Atla" butonu YOKTUR.
+                        Kullanıcı sistem izin diyaloğunu görmek zorundadır.
+                        Sisteme "Reddet" diyebilir ama diyaloğu bypass edemez. */}
+                    {/* Apple 5.1.5: Konum izni öncesinde EULA erişimi sağlanmalı.
+                        Konum paylaşımının 112 ile ENTEGRE OLMADIĞI ve GPS
+                        doğruluk sınırlamaları EULA'da (Bölüm 12) açıklanmıştır. */}
+                    {slide.action === 'location' && (
+                      <TouchableOpacity
+                        onPress={() => navigation.navigate('TermsOfService')}
+                        style={styles.tosLink}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.tosText}>
+                          Konumunuzun nasıl kullanıldığını öğrenmek için{' '}
+                          <Text style={styles.tosLinkText}>Kullanım Koşulları</Text>
+                          {'\'nı okuyun (Bölüm 12).'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
                 ) : (
-                  <TouchableOpacity
-                    style={styles.button}
-                    onPress={handleNext}
-                    activeOpacity={0.9}
-                  >
-                    <View style={styles.secondaryButtonInner}>
-                      <Text style={styles.secondaryButtonText}>{slide.buttonText}</Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
+                  <>
+                    <TouchableOpacity
+                      style={styles.button}
+                      onPress={handleNext}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.secondaryButtonInner}>
+                        <Text style={styles.secondaryButtonText}>{slide.buttonText}</Text>
+                      </View>
+                    </TouchableOpacity>
 
-                {/* ELITE: Skip Option */}
-                <TouchableOpacity
-                  onPress={handleNext}
-                  style={styles.skipButton}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.skipText}>Atla</Text>
-                </TouchableOpacity>
+                    {/* Son slayta: ToS kabul metni + link. */}
+                    {index === TOTAL_SLIDES - 1 ? (
+                      <TouchableOpacity
+                        onPress={() => navigation.navigate('TermsOfService')}
+                        style={styles.tosLink}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.tosText}>
+                          Devam ederek{' '}
+                          <Text style={styles.tosLinkText}>Kullanım Koşulları</Text>
+                          {'\'nı kabul etmiş olursunuz.'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </>
+                )}
               </Animated.View>
             </View>
           </View>
@@ -341,11 +367,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     width: '100%',
-  },
-  loginWrapper: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 0,
+    maxWidth: 600, // iPad: constrain content width for readability
+    alignSelf: 'center',
   },
   // ELITE: Premium Text Container
   textWrapper: {
@@ -453,17 +476,6 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: 'transparent',
   },
-  // ELITE: Skip Button - Minimal & Elegant
-  skipButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-  },
-  skipText: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 13,
-    fontWeight: '400',
-    letterSpacing: 1.5,
-  },
   // ELITE: Premium Pagination - Refined dots
   pagination: {
     position: 'absolute',
@@ -487,13 +499,20 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
   },
-  // Legacy styles (kept for compatibility)
-  iconContainer: {
-    marginBottom: 32,
+  // Apple 5.1.5: Terms of Service kabul linki (son slayt)
+  tosLink: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
   },
-  imageContainer: {
-    marginBottom: 24,
-    width: '100%',
-    alignItems: 'center',
+  tosText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  tosLinkText: {
+    color: 'rgba(212, 175, 55, 0.85)',
+    textDecorationLine: 'underline',
+    fontWeight: '600',
   },
 });

@@ -247,6 +247,10 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     const retryDelays = [500, 1000, 2000, 4000];
     const timers: NodeJS.Timeout[] = [];
     let resolved = !!identity?.uid;
+    // CRITICAL FIX (MSG-H6): Cancel ALL remaining retries on first success.
+    // Without this, all 4 timers fire sequentially even after the first set the UID;
+    // hızlı conversation switch'te eski ekrandan birikip yeni ekranı bozar.
+    const cancelAll = () => timers.forEach(t => clearTimeout(t));
     for (const delay of retryDelays) {
       if (resolved) break;
       const timer = setTimeout(() => {
@@ -254,11 +258,12 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         if (id?.uid) {
           resolved = true;
           setIdentityId(id.uid);
+          cancelAll(); // Cancel remaining timers — UID resolved
         }
       }, delay);
       timers.push(timer);
     }
-    return () => timers.forEach(t => clearTimeout(t));
+    return cancelAll;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selfIds = useMemo(() => {
@@ -1429,7 +1434,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

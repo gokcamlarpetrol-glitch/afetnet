@@ -98,18 +98,33 @@ function isDuplicate(key: string, windowMs: number = DEDUP_WINDOW_MS): boolean {
 
 /**
  * Cross-system earthquake dedup (exported for MagnitudeBased & UltraFast).
- * Fingerprint = location:magnitude_bucket:time_window
+ * ELITE: Coordinate-based fingerprint when lat/lon available — prevents duplicates from
+ * different sources using different location strings ("ISTANBUL" vs "Istanbul" vs "İstanbul-Marmara").
+ * Uses earthquake timestamp (not wall clock) to avoid bucket-boundary misses.
  */
 export function shouldDeliverNotification(
   magnitude: number,
   location: string,
   timestamp?: number,
   source: string = 'unknown',
+  latitude?: number,
+  longitude?: number,
 ): boolean {
-  const now = timestamp || Date.now();
-  const locKey = location.trim().substring(0, 30).toLowerCase().replace(/\s+/g, '_');
+  const effectiveTime = timestamp || Date.now();
   const magBucket = (Math.round(magnitude * 2) / 2).toFixed(1);
-  const timeBucket = Math.floor(now / (10 * 60 * 1000));
+  const timeBucket = Math.floor(effectiveTime / (10 * 60 * 1000));
+
+  // ELITE: Coordinate-based location key when available — 0.1° grid ≈ 11km
+  // This ensures "ISTANBUL", "Istanbul", "İstanbul" all map to the same bucket
+  let locKey: string;
+  if (latitude != null && longitude != null && !isNaN(latitude) && !isNaN(longitude)) {
+    const latBucket = Math.round(latitude * 10) / 10;
+    const lonBucket = Math.round(longitude * 10) / 10;
+    locKey = `${latBucket}_${lonBucket}`;
+  } else {
+    locKey = location.trim().substring(0, 30).toLowerCase().replace(/\s+/g, '_');
+  }
+
   const fingerprint = `eq:${locKey}:M${magBucket}:T${timeBucket}`;
 
   if (isDuplicate(fingerprint, 10 * 60 * 1000)) {
@@ -131,6 +146,7 @@ export { getNotificationsAsync };
 class NotificationService {
   private isInitialized = false;
   private isInitializing = false;
+  private initPromise: Promise<void> | null = null;
 
   // ==================== SETTINGS ====================
 
@@ -188,7 +204,7 @@ class NotificationService {
 
     if (!settings.notificationsEnabled) return { allowed: false, settings };
     if (opts.requiresPush !== false && !settings.notificationPush) return { allowed: false, settings };
-    if (settings.notificationMode === 'silent') return { allowed: false, settings };
+    if (settings.notificationMode === 'silent' && priority !== 'critical') return { allowed: false, settings };
     if (settings.notificationMode === 'critical-only' && priority !== 'critical') return { allowed: false, settings };
     if (this.isQuietHoursActive(settings) && settings.quietHoursCriticalOnly && priority !== 'critical') {
       return { allowed: false, settings };
@@ -232,21 +248,24 @@ class NotificationService {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
-    if (this.isInitializing) {
-      // Wait for concurrent init, but never wait forever.
-      const startedAt = Date.now();
-      const MAX_WAIT_MS = 7000;
-      while (this.isInitializing) {
-        if (Date.now() - startedAt > MAX_WAIT_MS) {
-          logger.warn('NotificationService init wait timeout; skipping duplicate initialize call');
-          return;
-        }
-        await new Promise(r => setTimeout(r, 100));
-      }
+
+    // CRITICAL FIX: Replace busy-wait spin loop with proper promise-based dedup.
+    // The old approach polled every 100ms wasting CPU; this awaits the existing promise.
+    if (this.isInitializing && this.initPromise) {
+      await this.initPromise;
       return;
     }
 
     this.isInitializing = true;
+    this.initPromise = this._doInitialize();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async _doInitialize(): Promise<void> {
     try {
       const Notifications = await getNotificationsAsync();
       if (!Notifications) {
@@ -260,20 +279,16 @@ class NotificationService {
       // Android channels
       await initializeChannels();
 
-      // CRITICAL: Dismiss all previously delivered notifications on app open
-      // This prevents the "95+ notification flood" when opening the app
+      // Clear old non-critical notifications on app open.
+      // CRITICAL FIX: Do NOT use dismissAllNotificationsAsync — it removes
+      // SOS and EEW life-safety notifications from the tray. NotificationCenter
+      // handles selective dismissal. Only reset badge count here.
       try {
-        if (typeof Notifications.dismissAllNotificationsAsync === 'function') {
-          await Notifications.dismissAllNotificationsAsync();
-        }
-        if (typeof Notifications.cancelAllScheduledNotificationsAsync === 'function') {
-          await Notifications.cancelAllScheduledNotificationsAsync();
-        }
         if (typeof Notifications.setBadgeCountAsync === 'function') {
           await Notifications.setBadgeCountAsync(0);
         }
       } catch (e) {
-        logger.debug('Failed to clear old notifications:', e);
+        logger.debug('Failed to clear badge count:', e);
       }
 
       this.isInitialized = true;

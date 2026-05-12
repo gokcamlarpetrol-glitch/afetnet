@@ -37,6 +37,7 @@ import * as Clipboard from 'expo-clipboard';
 import { createLogger } from '../../utils/logger';
 import { safeLowerCase, safeIncludes } from '../../utils/safeString';
 import { groupChatService, type GroupConversation } from '../../services/GroupChatService';
+import { hybridMessageService } from '../../services/HybridMessageService';
 
 const logger = createLogger('MessagesScreen');
 // Stable separator component — avoids re-creating on every render
@@ -116,7 +117,8 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
   // ── Store selectors — only subscribe to what is needed ───────────────────
   const conversations = useMessageStore((state) => state.conversations);
-  const typingUsers = useMessageStore((state) => state.typingUsers);
+  // NOTE: typingUsers subscription removed — was causing unnecessary full re-renders
+  // on every typing event. renderConversation reads imperatively via getState().
   const isInitializing = useMessageStore((state) => state.isInitializing);
   const getConversationMessages = useMessageStore((state) => state.getConversationMessages);
 
@@ -149,8 +151,20 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
     const groupAsConversations: Conversation[] = groupConversations.map((group) => ({
       userId: `group:${group.id}`,
       userName: group.name,
-      lastMessage: (group.lastMessage?.content || '').substring(0, 80),
-      lastMessageTime: group.lastMessage?.timestamp || group.updatedAt || group.createdAt,
+      // CRITICAL FIX: lastMessage may be a string (new format from sendGroupMessage)
+      // or an object { content, from, fromName, timestamp } (old format). Handle both.
+      lastMessage: (
+        typeof group.lastMessage === 'string'
+          ? group.lastMessage
+          : (typeof group.lastMessage === 'object' && group.lastMessage !== null
+            ? ((group.lastMessage as any).content || '')
+            : '')
+      ).substring(0, 80),
+      lastMessageTime: group.lastMessageAt
+        || (typeof group.lastMessage === 'object' && group.lastMessage !== null
+          ? ((group.lastMessage as any).timestamp || 0)
+          : 0)
+        || group.updatedAt || group.createdAt,
       unreadCount: group.unreadCount ?? 0,
     }));
 
@@ -248,7 +262,25 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await useMessageStore.getState().initialize();
+      // Re-establish cloud subscriptions (primary fix: handles dead Firestore listeners)
+      // Run all refreshes in parallel for faster pull-to-refresh
+      await Promise.allSettled([
+        hybridMessageService.refreshCloudSubscriptions(),
+        // Also re-initialize messageStore to pick up any MMKV changes
+        useMessageStore.getState().initialize(),
+        // FIX: Re-initialize GroupChatService to refresh group conversations.
+        // Previously, pull-to-refresh only refreshed DM subscriptions — dead group
+        // subscriptions (from network blips, auth token refresh) stayed dead until
+        // full app restart. Now group subscriptions are also refreshed.
+        (async () => {
+          try {
+            groupChatService.destroy();
+            groupChatService.initialize();
+          } catch (e) {
+            logger.debug('Group refresh failed (non-critical):', e);
+          }
+        })(),
+      ]);
     } catch (error) {
       logger.error('Refresh error:', error);
     } finally {
@@ -427,8 +459,15 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        // Reload from MMKV to pick up any messages delivered while in background
-        useMessageStore.getState().initialize().catch(() => {});
+        // Incremental foreground refresh (no full store re-init).
+        const store = useMessageStore.getState();
+        store.syncFromStorageIncremental().catch(e => { if (__DEV__) logger.debug('syncFromStorageIncremental failed:', e); });
+        store.updateConversations();
+
+        // Keep cloud listeners healthy without recreating the whole message stack.
+        import('../../services/HybridMessageService')
+          .then(({ hybridMessageService }) => hybridMessageService.refreshCloudSubscriptions())
+          .catch(e => { if (__DEV__) logger.debug('refreshCloudSubscriptions failed:', e); });
       }
     });
     return () => subscription.remove();
@@ -437,7 +476,10 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
   const renderConversation = useCallback(({ item, index }: { item: Conversation; index: number }) => {
     try {
       const isGroup = item.userId.startsWith('group:');
-      const typingActive = Boolean(typingUsers[item.userId]);
+      // Read typingUsers at call time (not from closure) to avoid
+      // re-creating renderConversation on every typing state change across ALL conversations
+      const currentTypingUsers = useMessageStore.getState().typingUsers;
+      const typingActive = Boolean(currentTypingUsers[item.userId]);
       return (
         <SwipeableConversationCard
           item={item}
@@ -494,7 +536,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
       logger.error('Error rendering conversation:', error);
       return null;
     }
-  }, [navigation, handleDeleteConversation, typingUsers, myUserId]);
+  }, [navigation, handleDeleteConversation, myUserId]);
 
   // Fix: ListHeaderComponent returns JSX element directly (not a factory function)
   const ListHeaderComponent = useMemo(() => (
@@ -514,9 +556,10 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
+      testID="messages-screen"
     >
       <LinearGradient
         colors={['rgba(255, 255, 255, 0.4)', 'rgba(255, 255, 255, 0.7)']}
@@ -667,7 +710,7 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             <View style={styles.suggestionsContainer}>
               {searchSuggestions.map((suggestion, index) => (
                 <Pressable
-                  key={`suggestion-${index}`}
+                  key={`suggestion-${suggestion}`}
                   style={styles.suggestionItem}
                   onPress={() => {
                     setSearchQuery(suggestion);
@@ -700,7 +743,16 @@ export default function MessagesScreen({ navigation }: MessagesScreenProps) {
             renderItem={renderConversation}
             keyExtractor={(item) => item.userId}
             ListHeaderComponent={ListHeaderComponent}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              // Sprint 8: iPad — wider list with max width
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../../utils/responsive').getResponsiveInfo().isTablet && {
+                alignSelf: 'center',
+                width: '85%',
+                maxWidth: 900,
+              },
+            ]}
             ItemSeparatorComponent={ConversationSeparator}
             showsVerticalScrollIndicator={true}
             keyboardShouldPersistTaps="always"

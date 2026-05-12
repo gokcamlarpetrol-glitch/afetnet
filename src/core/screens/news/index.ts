@@ -13,5 +13,3 @@ export * from './components/NewsDetailComponents';
 // Styles
 export { styles as newsDetailStyles, CREAM_BACKGROUND } from './styles/newsDetailStyles';
 
-// Utils
-export * from './utils/newsDetailUtils';

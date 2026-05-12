@@ -4,7 +4,7 @@
  */
 
 import { doc, setDoc, getDoc, getDocs, query, collection, where, runTransaction } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { createLogger } from '../../utils/logger';
 import { getFirestoreInstanceAsync } from './FirebaseInstanceManager';
 
@@ -83,7 +83,7 @@ export async function saveNewsSummary(
 
     // CRITICAL: Use articleId as document ID (not deviceId) - shared across all users
     // ELITE: createdBy alanı ile Firestore ownership kuralını karşıla
-    const currentUid = getAuth().currentUser?.uid;
+    const currentUid = getFirebaseAuth()?.currentUser?.uid;
     if (!currentUid) {
       logger.warn('News summary save skipped: no authenticated user');
       return false;
@@ -195,7 +195,7 @@ export async function claimNewsSummaryJob(
       return { acquired: false, reason: 'firestore_unavailable' };
     }
 
-    const currentUid = getAuth().currentUser?.uid;
+    const currentUid = getFirebaseAuth()?.currentUser?.uid;
     if (!currentUid) {
       logger.warn('Cannot claim news summary job: user not authenticated');
       return { acquired: false, reason: 'no_auth' };

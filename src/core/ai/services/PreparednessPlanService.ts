@@ -216,8 +216,8 @@ export class PreparednessPlanService {
       const sanitizedParams = deepSanitize(params);
 
       // SECURITY: Get current user for ownerUid enforcement
-      const { getAuth } = await import('firebase/auth');
-      const currentUser = getAuth()?.currentUser;
+      const { getFirebaseAuth } = await import('../../../lib/firebase');
+      const currentUser = getFirebaseAuth()?.currentUser;
       if (!currentUser) {
         logger.debug('Skipping Firestore save: no authenticated user');
         return;

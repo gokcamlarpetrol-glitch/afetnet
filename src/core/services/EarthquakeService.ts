@@ -23,19 +23,22 @@ const getErrorMessage = (e: unknown): string => e instanceof Error ? e.message :
 const getErrorName = (e: unknown): string => e instanceof Error ? e.name : 'UnknownError';
 const getErrorStack = (e: unknown): string | undefined => e instanceof Error ? e.stack : undefined;
 
-// ELITE: 60 seconds polling - optimal balance between freshness and resource efficiency
-// 5-second polling caused memory exhaustion (heap out of memory)
-// 60-second interval still provides near-real-time data while preventing:
-// - Memory leaks from overlapping fetch requests
+// ELITE: 30 seconds polling — optimized for fastest earthquake detection
+// 5-second polling caused memory exhaustion (heap out of memory) due to overlapping fetches
+// 30-second interval provides near-real-time data while preventing:
+// - Memory leaks from overlapping fetch requests (mutex guard prevents concurrent fetches)
 // - Network saturation and timeouts
 // - Battery drain on mobile devices
-const POLL_INTERVAL = 60000; // 60 seconds
+// NOTE: MultiSourceEEWService handles ultra-fast polling (AFAD 5s, Kandilli 8s) for
+// instant detection. This service provides comprehensive data with AI validation.
+const POLL_INTERVAL = 30000; // 30 seconds
 const LAST_CHECKED_KEY = 'last_checked_earthquake';
 
 class EarthquakeService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
   private isFetching = false; // Mutex to prevent concurrent fetches
+  private isFirstFetch = true; // First fetch after startup — relaxed stale threshold
 
   async start() {
     if (this.isRunning) return;
@@ -92,6 +95,7 @@ class EarthquakeService {
       this.intervalId = null;
     }
     this.isRunning = false;
+    this.isFetching = false; // CRITICAL: Release mutex — prevents permanent lock if fetch was in-flight
   }
 
   /**
@@ -164,6 +168,8 @@ class EarthquakeService {
         logger.info(`   ├─ AFAD HTML: ${fetchResult.sources.afadHTML ? '✅' : '❌'}`);
         logger.info(`   ├─ AFAD API: ${fetchResult.sources.afadAPI ? '✅' : '❌'}`);
         logger.info(`   ├─ Kandilli: ${fetchResult.sources.kandilliAPI ? '✅' : '❌'}`);
+        logger.info(`   ├─ USGS: ${fetchResult.sources.usgsAPI ? '✅' : '❌'}`);
+        logger.info(`   ├─ EMSC: ${fetchResult.sources.emscAPI ? '✅' : '❌'}`);
         logger.info(`   └─ Unified fallback: ${fetchResult.sources.unified ? '✅' : '❌'}`);
       }
 
@@ -345,6 +351,8 @@ class EarthquakeService {
       if (uniqueEarthquakes.length > 0) {
         try {
           const { processEarthquakeNotifications } = await import('./earthquake/EarthquakeNotificationHandler');
+          const startupFlag = this.isFirstFetch;
+          if (this.isFirstFetch) this.isFirstFetch = false;
           await processEarthquakeNotifications(uniqueEarthquakes, {
             minMagnitudeForNotification: settings.minMagnitudeForNotification,
             maxDistanceForNotification: settings.maxDistanceForNotification,
@@ -357,7 +365,7 @@ class EarthquakeService {
             priorityMedium: settings.priorityMedium,
             priorityLow: settings.priorityLow,
             notificationPush: settings.notificationPush,
-          });
+          }, { isStartup: startupFlag });
         } catch (notificationError) {
           logger.error('Failed to process earthquake notifications:', notificationError);
         }
@@ -475,14 +483,24 @@ class EarthquakeService {
       }
 
       // Parse AFAD detail response
+      const parsedLat = parseFloat(data.geojson?.coordinates?.[1] || data.latitude || data.lat || '');
+      const parsedLng = parseFloat(data.geojson?.coordinates?.[0] || data.longitude || data.lng || '');
+
+      // Reject earthquakes with invalid/missing coordinates
+      if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng) ||
+          parsedLat < -90 || parsedLat > 90 || parsedLng < -180 || parsedLng > 180) {
+        logger.warn(`Invalid coordinates for earthquake ${eventID}: lat=${parsedLat}, lng=${parsedLng}`);
+        return null;
+      }
+
       const earthquake: Earthquake = {
         id: `afad-${data.eventID || data.eventId || eventID}`,
         magnitude: parseFloat(data.mag || data.magnitude || data.ml || '0'),
         location: data.location || data.title || data.place || 'Türkiye',
         depth: parseFloat(data.depth || data.derinlik || '10'),
         time: data.eventDate ? parseAFADDate(data.eventDate) : Date.now(),
-        latitude: parseFloat(data.geojson?.coordinates?.[1] || data.latitude || data.lat || '0'),
-        longitude: parseFloat(data.geojson?.coordinates?.[0] || data.longitude || data.lng || '0'),
+        latitude: parsedLat,
+        longitude: parsedLng,
         source: 'AFAD' as const,
       };
 

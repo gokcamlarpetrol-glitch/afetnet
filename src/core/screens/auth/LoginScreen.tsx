@@ -1,5 +1,5 @@
 import { getErrorMessage } from '../../utils/errorUtils';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,9 @@ import * as Haptics from 'expo-haptics';
 
 const logger = createLogger('LoginScreen');
 
+// Basic email format check to avoid unnecessary network requests
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const LoginScreen = () => {
   const [isAppleAuthAvailable, setIsAppleAuthAvailable] = useState(false);
   const [isGoogleAuthAvailable, setIsGoogleAuthAvailable] = useState(false);
@@ -30,7 +33,13 @@ export const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
   const navigation = useNavigation<any>();
+
+  // ELITE: Double-tap prevention + input refs for keyboard chaining
+  const isSubmittingRef = useRef(false);
+  const passwordRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const checkAuthAvailability = async () => {
@@ -48,8 +57,18 @@ export const LoginScreen = () => {
   }, []);
 
   const handleEmailLogin = async () => {
+    // ELITE: Double-tap prevention
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     if (!email || !password) {
       Alert.alert('Uyarı', 'Lütfen e-posta ve şifrenizi girin.');
+      isSubmittingRef.current = false;
+      return;
+    }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      Alert.alert('Uyarı', 'Lütfen geçerli bir e-posta adresi girin.');
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -62,30 +81,48 @@ export const LoginScreen = () => {
       Alert.alert('Giriş Hatası', error.message);
     } finally {
       setIsLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
+  const isSocialLoading = isGoogleLoading || isAppleLoading;
+
   const handleGoogleLogin = async () => {
+    if (isSocialLoading) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (!isGoogleAuthAvailable) {
       Alert.alert('Google Giriş Kullanılamıyor', 'Google kimlik doğrulama şu anda yapılandırılmamış.');
       return;
     }
 
+    setIsGoogleLoading(true);
     try {
       await AuthService.signInWithGoogle();
     } catch (error: unknown) {
-      Alert.alert('Google Giriş Hatası', getErrorMessage(error) || 'Google ile giriş başarısız oldu.');
+      // ELITE: Suppress alert if user cancelled the Google sign-in flow
+      const errorCode = (error as any)?.code;
+      const errorMessage = getErrorMessage(error) || '';
+      const isCancelled = errorCode === 'ERR_REQUEST_CANCELED'
+        || errorCode === 'SIGN_IN_CANCELLED'
+        || errorCode === '12501'
+        || errorMessage.toLowerCase().includes('cancel');
+      if (!isCancelled) {
+        Alert.alert('Google Giriş Hatası', errorMessage || 'Google ile giriş başarısız oldu.');
+      }
+    } finally {
+      setIsGoogleLoading(false);
     }
   };
 
   const handleAppleLogin = async () => {
+    if (isSocialLoading) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (!isAppleAuthAvailable) {
       Alert.alert('Apple Giriş Kullanılamıyor', 'Bu cihazda Apple ile giriş kullanılamıyor.');
       return;
     }
 
+    setIsAppleLoading(true);
     try {
       await AuthService.signInWithApple();
     } catch (error: unknown) {
@@ -93,6 +130,8 @@ export const LoginScreen = () => {
       if (errorCode !== 'ERR_REQUEST_CANCELED') {
         Alert.alert('Giriş Hatası', getErrorMessage(error) || 'Apple ile giriş başarısız oldu.');
       }
+    } finally {
+      setIsAppleLoading(false);
     }
   };
 
@@ -157,6 +196,9 @@ export const LoginScreen = () => {
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="email"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              accessibilityLabel="E-posta adresi"
             />
           </View>
 
@@ -164,6 +206,7 @@ export const LoginScreen = () => {
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={18} color="rgba(255,255,255,0.5)" style={styles.inputIcon} />
             <TextInput
+              ref={passwordRef}
               style={styles.input}
               placeholder="Şifre"
               placeholderTextColor="rgba(255,255,255,0.35)"
@@ -172,6 +215,9 @@ export const LoginScreen = () => {
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="password"
+              returnKeyType="go"
+              onSubmitEditing={handleEmailLogin}
+              accessibilityLabel="Şifre"
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
@@ -225,14 +271,21 @@ export const LoginScreen = () => {
           {/* Google Button */}
           {isGoogleAuthAvailable && (
             <TouchableOpacity
-              style={styles.socialButton}
+              style={[styles.socialButton, isSocialLoading && styles.buttonDisabled]}
               onPress={handleGoogleLogin}
+              disabled={isSocialLoading}
               activeOpacity={0.85}
             >
-              <View style={styles.socialIconWrapper}>
-                <Text style={styles.googleIcon}>G</Text>
-              </View>
-              <Text style={styles.socialButtonText}>Google</Text>
+              {isGoogleLoading ? (
+                <ActivityIndicator color="rgba(255,255,255,0.85)" size="small" />
+              ) : (
+                <>
+                  <View style={styles.socialIconWrapper}>
+                    <Text style={styles.googleIcon}>G</Text>
+                  </View>
+                  <Text style={styles.socialButtonText}>Google</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
@@ -242,7 +295,7 @@ export const LoginScreen = () => {
               buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
               buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
               cornerRadius={10}
-              style={styles.appleSignInButton}
+              style={[styles.appleSignInButton, isSocialLoading && styles.buttonDisabled]}
               onPress={handleAppleLogin}
             />
           )}
@@ -292,6 +345,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     justifyContent: 'center',
     paddingVertical: 60,
+    maxWidth: 500,
+    width: '100%',
+    alignSelf: 'center',
   },
   header: {
     marginBottom: 28,

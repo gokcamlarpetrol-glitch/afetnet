@@ -190,8 +190,15 @@ class FirebaseCrashlyticsService {
         logger.error('❌ Crashlytics error recorded:', error, context);
       }
 
-      // In production, send to backend or Firebase
-      // For now, store locally and flush periodically
+      // ELITE: Also send to Sentry for remote aggregation (no-op if SDK not installed)
+      try {
+        // Lazy import to avoid circular deps and keep initial bundle clean
+        void import('./SentryService').then(({ sentryService }) => {
+          sentryService.captureException(error, context);
+        });
+      } catch {
+        /* no-op — Sentry forwarding never blocks local crash flow */
+      }
     } catch (crashError) {
       logger.error('Crashlytics recordError failed:', crashError);
       // Don't throw - crashlytics failures shouldn't break the app
@@ -284,21 +291,23 @@ class FirebaseCrashlyticsService {
   }
 
   /**
-   * ELITE: Flush stored crashes (upload to backend or Firebase)
+   * Flush stored crashes - crash reports are kept locally for diagnostic purposes.
+   * No remote upload endpoint is configured; reports accumulate in local storage
+   * and are trimmed to MAX_STORED_CRASHES to avoid unbounded growth.
    */
   private async flushStoredCrashes() {
     if (this.crashQueue.length === 0) return;
 
     try {
-      // In production, upload to backend crash reporting endpoint
-      // For now, log them (can be extended to upload to custom backend)
-      if (__DEV__) {
-        logger.info(`Flushing ${this.crashQueue.length} stored crash reports`);
+      // Reports stored locally only. Trim to limit and persist.
+      if (this.crashQueue.length > MAX_STORED_CRASHES) {
+        this.crashQueue = this.crashQueue.slice(-MAX_STORED_CRASHES);
       }
+      await this.saveStoredCrashes();
 
-      // Clear queue after flush
-      this.crashQueue = [];
-      DirectStorage.delete(CRASH_STORAGE_KEY);
+      if (__DEV__) {
+        logger.info(`Crashlytics: ${this.crashQueue.length} reports stored locally`);
+      }
     } catch (error) {
       logger.error('Failed to flush stored crashes:', error);
     }
@@ -357,6 +366,19 @@ class FirebaseCrashlyticsService {
    */
   async flush() {
     await this.flushStoredCrashes();
+  }
+
+  /**
+   * Cleanup: flush pending crashes and clear storage key.
+   * Call on logout/shutdown to prevent cross-account crash data leak.
+   */
+  async cleanup() {
+    await this.flushStoredCrashes();
+    this.crashQueue = [];
+    this.errorCount = 0;
+    this.lastErrorTime = 0;
+    DirectStorage.delete(CRASH_STORAGE_KEY);
+    this.isInitialized = false;
   }
 
   /**

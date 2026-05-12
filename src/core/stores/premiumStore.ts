@@ -130,47 +130,7 @@ export const usePremiumStore = create<PremiumState & PremiumActions>((set, get) 
         return isPremium;
       }
 
-      // CRITICAL: Check if subscription expired
-      if (isPremium && expiresAt > 0 && now > expiresAt) {
-        // Subscription expired - check if trial is still active
-        // ELITE: Dynamic require prevents circular dependency between premiumStore and trialStore
-        // This is the only safe way to access trialStore from premiumStore without causing import loops
-        try {
-           
-          const trialStoreModule = require('./trialStore') as { useTrialStore: { getState: () => { isTrialActive: boolean } } };
-          // CRITICAL: Read state directly WITHOUT calling checkTrialStatus to avoid circular dependency
-          // checkTrialStatus() triggers syncPremiumAccess() which calls back here → infinite loop
-          const { isTrialActive } = trialStoreModule.useTrialStore.getState();
-
-          if (isTrialActive) {
-            // Trial still active - keep premium access
-            logger.info('Subscription expired but trial active - keeping premium access');
-            return true;
-          } else {
-            // No trial, subscription expired - revoke premium
-            logger.info('Subscription expired and no trial - revoking premium');
-            set({
-              isPremium: false,
-              subscriptionType: null,
-              expiresAt: null,
-              isLifetime: false,
-              lastChecked: now,
-            });
-            return false;
-          }
-        } catch (trialError) {
-          logger.error('Trial check error during expiration:', trialError);
-          // ELITE: Fail-safe - if trial check fails, revoke premium
-          set({
-            isPremium: false,
-            subscriptionType: null,
-            expiresAt: null,
-            isLifetime: false,
-            lastChecked: now,
-          });
-          return false;
-        }
-      }
+      // App is free — all users are lifetime premium. No expiration check needed.
 
       // ELITE: Update lastChecked timestamp
       if (now - lastChecked >= 60000) {

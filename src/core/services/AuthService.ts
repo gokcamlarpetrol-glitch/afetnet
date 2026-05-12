@@ -26,6 +26,7 @@ try {
 }
 
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { DirectStorage } from '../utils/storage';
 import { Platform } from 'react-native';
 import {
@@ -242,14 +243,33 @@ export const AuthService = {
 
   /**
    * Sign in with Apple
+   *
+   * SECURITY: Uses cryptographic nonce to prevent replay attacks.
+   * - Raw nonce: cryptographically random 32 bytes (hex-encoded)
+   * - Hashed nonce (SHA-256): sent to Apple in signInAsync
+   * - Raw nonce: sent to Firebase via OAuthProvider.credential() so Firebase
+   *   can verify hash(rawNonce) === nonce embedded in Apple's identityToken.
+   * Required by Firebase Apple Sign-In best practices since Firebase JS SDK v9+.
    */
   signInWithApple: async (): Promise<User | null> => {
     try {
+      // Generate cryptographically secure random nonce (32 bytes → 64 hex chars)
+      const rawNonceBytes = await Crypto.getRandomBytesAsync(32);
+      const rawNonce = Array.from(rawNonceBytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce,
+        { encoding: Crypto.CryptoEncoding.HEX },
+      );
+
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce, // SHA-256 of rawNonce — Apple embeds this in JWT
       });
 
       const { identityToken, fullName } = credential;
@@ -258,6 +278,7 @@ export const AuthService = {
       const provider = new OAuthProvider('apple.com');
       const authCredential = provider.credential({
         idToken: identityToken,
+        rawNonce, // Firebase verifies: sha256(rawNonce) === nonce claim in idToken
       });
 
       const auth = getFirebaseAuth();
@@ -383,7 +404,13 @@ export const AuthService = {
 
       const refreshedUser = auth.currentUser ?? userCredential.user;
       if (!refreshedUser.emailVerified) {
-        await firebaseSignOut(auth);
+        // ROOT CAUSE FIX (Sprint 2): Do NOT call firebaseSignOut here. The previous
+        // implementation caused a logout-loop: signOut → onAuthStateChanged(null) →
+        // authStore.shutdownApp() races with the throw → app state corruption.
+        //
+        // authStore.onAuthStateChanged now gates `isAuthenticated` on emailVerified
+        // for password-provider users, so the unverified user is never "logged in"
+        // at the app level. We simply throw the user-facing error here.
         throw new Error('E-posta adresiniz henüz doğrulanmamış. Lütfen doğruladıktan sonra giriş yapın.');
       }
 
@@ -519,6 +546,9 @@ export const AuthService = {
       // CRITICAL: Firebase sign-out FIRST, then local cleanup.
       // If local cleanup runs first and Firebase sign-out fails,
       // the user is still authenticated remotely but local session is destroyed.
+      // NOTE: Apple Sign-In revocation is NOT called on plain signOut —
+      // only on full account deletion (AccountDeletionService). signOut is a session
+      // end, not a permanent revocation; user can sign back in with same Apple ID.
       await firebaseSignOut(auth);
 
       try {

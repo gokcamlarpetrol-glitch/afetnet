@@ -15,9 +15,7 @@
  */
 
 import { DirectStorage } from '../utils/storage';
-import { getAuth } from 'firebase/auth';
 import {
-    getFirestore,
     collection,
     doc,
     getDocs,
@@ -27,12 +25,14 @@ import {
     orderBy,
     Timestamp,
 } from 'firebase/firestore';
-import { initializeFirebase } from '../../lib/firebase';
+import { getFirebaseAuth } from '../../lib/firebase';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { createLogger } from '../utils/logger';
 import { identityService, QRPayload } from './IdentityService';
+import { readCachedAuthUid } from '../utils/authSessionCache';
 
 const logger = createLogger('ContactService');
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const UID_REGEX = /^[A-Za-z0-9_.\-+:]{1,128}$/;
 
 // Lazy import to avoid circular dependency
 let contactRequestService: any = null;
@@ -108,13 +108,14 @@ class ContactService {
         if (uid && uid.length > 0) return `${STORAGE_USER_PREFIX}${uid}`;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return STORAGE_GUEST_SCOPE;
-            const authUid = getAuth(app).currentUser?.uid?.trim();
-            return authUid ? `${STORAGE_USER_PREFIX}${authUid}` : STORAGE_GUEST_SCOPE;
+            const authUid = getFirebaseAuth()?.currentUser?.uid?.trim();
+            if (authUid) return `${STORAGE_USER_PREFIX}${authUid}`;
         } catch {
-            return STORAGE_GUEST_SCOPE;
+            // best effort fallback below
         }
+
+        const cachedUid = readCachedAuthUid();
+        return cachedUid ? `${STORAGE_USER_PREFIX}${cachedUid}` : STORAGE_GUEST_SCOPE;
     }
 
     private getScopedKey(base: string, scope: string = this.activeScope): string {
@@ -242,10 +243,8 @@ class ContactService {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
 
             // Contacts
             const contactsRef = collection(db, 'users', myUid, 'contacts');
@@ -308,10 +307,9 @@ class ContactService {
         const myUid = identityService.getUid();
         if (!myUid) throw new Error('Not authenticated');
 
-        const app = initializeFirebase();
-        if (!app) throw new Error('Firebase not initialized');
+        const db = await getFirestoreInstanceAsync();
+        if (!db) throw new Error('Firestore not initialized');
 
-        const db = getFirestore(app);
         const contactRef = doc(db, 'users', myUid, 'contacts', contact.uid);
 
         await setDoc(contactRef, {
@@ -349,9 +347,8 @@ class ContactService {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
             await deleteDoc(doc(db, 'users', myUid, 'contacts', contactUid));
             logger.info(`🗑️ Contact deleted from Firebase: ${contactUid}`);
         } catch (error) {
@@ -571,9 +568,8 @@ class ContactService {
         }
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
             await setDoc(doc(db, 'users', myUid, 'blocked', blocked.uid), {
                 ...blocked,
                 blockedAt: Timestamp.fromMillis(blocked.blockedAt),
@@ -588,9 +584,8 @@ class ContactService {
         if (!myUid) return;
 
         try {
-            const app = initializeFirebase();
-            if (!app) return;
-            const db = getFirestore(app);
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
             await deleteDoc(doc(db, 'users', myUid, 'blocked', blockedUid));
         } catch (error) {
             logger.error('Failed to delete blocked from Firebase:', error);
@@ -696,6 +691,26 @@ class ContactService {
 
     getSyncStatus(): { pending: number; lastSync: number | null } {
         return { pending: this.pendingSync.length, lastSync: null };
+    }
+
+    /**
+     * Cleanup on logout — resets in-memory state and initialization flags.
+     * CRITICAL: Must be called on logout/shutdown to prevent cross-account
+     * data leak (old user's contacts visible to new user after account switch).
+     */
+    async cleanup(): Promise<void> {
+        this.resetInMemoryState();
+        this.isInitialized = false;
+        this.initPromise = null;
+        this.activeScope = STORAGE_GUEST_SCOPE;
+        logger.info('ContactService cleaned up');
+    }
+
+    /**
+     * Destroy — alias for cleanup, used by shutdownApp() for consistent interface.
+     */
+    async destroy(): Promise<void> {
+        await this.cleanup();
     }
 }
 

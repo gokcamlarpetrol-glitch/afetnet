@@ -1,0 +1,7 @@
+{
+  "name": "afetnet-ble-peripheral",
+  "version": "1.0.0",
+  "description": "AfetNet BLE Peripheral (GATT Server) native module for offline mesh networking",
+  "main": "index.ts",
+  "private": true
+}

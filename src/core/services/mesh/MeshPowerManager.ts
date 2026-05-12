@@ -41,6 +41,7 @@ class MeshPowerManager {
     private currentMode: PowerMode = 'balanced';
     private powerListeners: Set<(state: PowerState) => void> = new Set();
     private batterySubscription: Battery.Subscription | null = null;
+    private profileChangeUnsubscribe: (() => void) | null = null; // FIX: Store unsubscribe for onProfileChange
 
     // ============================================================================
     // INITIALIZATION
@@ -55,7 +56,8 @@ class MeshPowerManager {
             await backgroundMeshService.initialize();
 
             // Subscribe to profile changes
-            batteryOptimizedScanner.onProfileChange((profile) => {
+            // FIX: Store unsubscribe so destroy() can clean up the callback
+            this.profileChangeUnsubscribe = batteryOptimizedScanner.onProfileChange((profile) => {
                 this.updateModeFromProfile(profile);
                 this.notifyListeners();
             });
@@ -80,6 +82,15 @@ class MeshPowerManager {
             this.batterySubscription.remove();
             this.batterySubscription = null;
         }
+
+        // FIX: Unsubscribe from profile changes to prevent leaked callback
+        if (this.profileChangeUnsubscribe) {
+            this.profileChangeUnsubscribe();
+            this.profileChangeUnsubscribe = null;
+        }
+
+        // FIX: Clear power state listeners to prevent stale references
+        this.powerListeners.clear();
 
         batteryOptimizedScanner.destroy();
         backgroundMeshService.destroy();
@@ -279,7 +290,7 @@ class MeshPowerManager {
 
     private async notifyListeners(): Promise<void> {
         const state = await this.getState();
-        this.powerListeners.forEach(cb => cb(state));
+        [...this.powerListeners].forEach(cb => cb(state));
     }
 
     // ============================================================================

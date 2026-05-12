@@ -88,6 +88,14 @@ function getDevice() {
   return Device;
 }
 
+async function getNotificationCenterModule() {
+  try {
+    return require('./notifications/NotificationCenter');
+  } catch {
+    return import('./notifications/NotificationCenter');
+  }
+}
+
 class FirebaseService {
   private isInitialized = false;
   private pushToken: string | null = null;
@@ -225,7 +233,7 @@ class FirebaseService {
             // CRITICAL FIX: Route through MagnitudeBasedNotificationService directly.
             // Using notificationService.showEarthquakeNotification adds unnecessary
             // indirection (it calls MBN internally anyway) and lacks lat/lng passing.
-            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            const { notificationCenter } = await getNotificationCenterModule();
             await notificationCenter.notify('earthquake', {
               magnitude,
               location,
@@ -251,7 +259,7 @@ class FirebaseService {
           const userId = String(data.userId || '').trim();
 
           if (senderName.length > 0 && messageContent.length > 0) {
-            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            const { notificationCenter } = await getNotificationCenterModule();
             await notificationCenter.notify('message', {
               senderName,
               from: senderName,
@@ -260,7 +268,7 @@ class FirebaseService {
               senderId: userId,
               senderUid: String(data.senderUid || userId || '').trim() || undefined,
               userId,
-              conversationId: String(data.conversationId || userId || '').trim() || undefined,
+              conversationId: String(data.conversationId || '').trim() || undefined,
               isGroup: data.isGroup === 'true' || data.chatType === 'group' || data.conversationType === 'group',
             }, 'FirebaseService');
           } else {
@@ -277,12 +285,17 @@ class FirebaseService {
           const source = String(data.source || 'Haber').trim();
 
           if (title.length > 0 && summary.length > 0) {
-            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            const { notificationCenter } = await getNotificationCenterModule();
             await notificationCenter.notify('news', {
               title,
               summary,
               source,
               url: data.url && typeof data.url === 'string' ? data.url.trim() : undefined,
+              newsUrl: data.newsUrl && typeof data.newsUrl === 'string' ? data.newsUrl.trim() : undefined,
+              articleId: data.articleId && typeof data.articleId === 'string' ? data.articleId.trim() : undefined,
+              imageUrl: data.imageUrl && typeof data.imageUrl === 'string'
+                ? data.imageUrl.trim()
+                : (notification.imageUrl && typeof notification.imageUrl === 'string' ? notification.imageUrl.trim() : undefined),
             }, 'FirebaseService');
           } else {
             if (__DEV__) {
@@ -292,16 +305,21 @@ class FirebaseService {
           break;
         }
 
-        case 'sos': {
+        case 'sos':
+        case 'sos_family':
+        case 'family_sos':
+        case 'sos_proximity':
+        case 'nearby_sos': {
           const from = String(data.from || data.senderName || 'Bilinmeyen').trim();
 
           if (from.length > 0) {
-            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            const { notificationCenter } = await getNotificationCenterModule();
             await notificationCenter.notify('sos_received', {
               from,
               senderName: from,
-              senderId: String(data.userId || data.senderId || '').trim() || undefined,
+              senderId: String(data.userId || data.senderId || data.senderUid || '').trim() || undefined,
               signalId: String(data.signalId || data.id || '').trim() || undefined,
+              message: String(data.message || '').trim() || undefined,
               timestamp: Date.now(),
               location: data.latitude && data.longitude ? {
                 latitude: parseFloat(data.latitude),
@@ -316,13 +334,35 @@ class FirebaseService {
           break;
         }
 
+        case 'family':
+        case 'family_status_update':
+        case 'family_location_update':
+        case 'family_location': {
+          const memberName = String(data.memberName || data.senderName || data.from || 'Aile Üyesi').trim();
+          const status = String(data.status || '').trim();
+          const latitude = data.latitude ? parseFloat(data.latitude) : NaN;
+          const longitude = data.longitude ? parseFloat(data.longitude) : NaN;
+
+          const { notificationCenter } = await getNotificationCenterModule();
+          await notificationCenter.notify('family', {
+            memberName,
+            userId: String(data.senderUid || data.userId || data.senderId || '').trim() || undefined,
+            type: notificationType,
+            status,
+            location: Number.isFinite(latitude) && Number.isFinite(longitude)
+              ? { latitude, longitude }
+              : undefined,
+          }, 'FirebaseService');
+          break;
+        }
+
         default: {
           // ELITE: Show generic notification for unknown types via NotificationCenter
           const genericTitle = String(notification.title || 'AfetNet').trim();
           const genericBody = String(notification.body || data.message || '').trim();
 
           if (genericTitle.length > 0 || genericBody.length > 0) {
-            const { notificationCenter } = await import('./notifications/NotificationCenter');
+            const { notificationCenter } = await getNotificationCenterModule();
             await notificationCenter.notify('system', {
               subtype: 'generic',
               title: genericTitle || 'AfetNet',

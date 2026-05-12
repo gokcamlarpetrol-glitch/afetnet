@@ -50,7 +50,14 @@
     </table>
 
     <div class="important">
-        <p><strong>⚠️ Önemli:</strong> AfetNet hiçbir finansal bilgi, sağlık verisi, telefon rehberi içeriği veya fotoğraf/video içeriğini sunucularına <strong>yüklemez</strong>. Kamera yalnızca QR kod okuma, fotoğraf kütüphanesi yalnızca yerel görüntüleme için kullanılır.</p>
+        <p><strong>⚠️ Önemli:</strong> AfetNet hiçbir finansal bilgi veya telefon rehberi içeriğini sunucularına yüklemez. Kamera yalnızca QR kod okuma için kullanılır.</p>
+        <p><strong>Sağlık verisi (KVKK Madde 6 — Özel Nitelikli Kişisel Veri):</strong> Kan grubu, alerji, kronik hastalık, ilaç ve acil iletişim bilgileri <strong>varsayılan olarak yalnızca cihazınızda</strong> şifrelenmiş olarak saklanır. Bu veriler ancak siz <strong>açıkça onay verirseniz</strong> şu amaçlarla sunucuya aktarılır:</p>
+        <ul>
+            <li><strong>Bulut Yedekleme onayı:</strong> Cihaz değişikliği veya kayıpta veri kurtarma için Firebase Firestore'a yedeklenir.</li>
+            <li><strong>Kurtarma Ekibi Paylaşım onayı:</strong> Acil durumda 112/AFAD kurtarma ekiplerinin sizi tedavi edebilmesi için AfetNet kurtarma backend'ine iletilir.</li>
+        </ul>
+        <p>Her iki onay da ayrı ayrı verilir, ayrı ayrı geri çekilebilir. Onay vermezseniz veriniz <strong>yalnızca cihazınızdadır</strong> ve internet olmadığında bile BLE Mesh üzerinden yakındaki kurtarma ekibine paylaşılabilir (yalnızca SOS aktifken, sadece baş harfleriniz + kritik tıbbi bilgi, isim/telefon paylaşılmaz).</p>
+        <p>Fotoğraf/video içerikleri yalnızca aile mesajlaşmasında kullanıcının manuel paylaşım kararı ile Firebase Storage'a yüklenir; ürün otomatik olarak yüklemez.</p>
     </div>
 
     <h2>3. Konum Verisi Kullanımı</h2>
@@ -65,10 +72,10 @@
     <h2>4. Bluetooth ve Mesh Ağı</h2>
     <p>AfetNet, şebeke bağlantısı olmadığında bile iletişim kurabilmeniz için Bluetooth Low Energy (BLE) mesh ağı teknolojisini kullanır:</p>
     <ul>
-        <li>Yakındaki AfetNet kullanıcılarıyla <strong>anonim</strong> olarak bağlantı kurulur</li>
-        <li>SOS mesajları ve güvenlik durumu bilgileri iletilir</li>
-        <li>Bluetooth üzerinden <strong>hiçbir kişisel tanımlayıcı bilgi</strong> paylaşılmaz</li>
-        <li>Tüm mesh iletişimi uçtan uca şifrelenir</li>
+        <li>Yakındaki AfetNet kullanıcılarıyla bağlantı kurmak için yalnızca anonim cihaz tanıtıcısı (ephemeral peer ID) paylaşılır</li>
+        <li>SOS sinyalleri ve güvenlik durumu bilgileri yakındaki cihazlara iletilir (deprem sonrası şebeke çökse bile)</li>
+        <li>Bluetooth üzerinden isim, telefon, e-posta veya tam konum gibi <strong>kişisel tanımlayıcı bilgiler paylaşılmaz</strong></li>
+        <li><strong>Mesh paket şifrelemesi (şeffaflık):</strong> Aile içi birebir mesajlar, taraflar arasında paylaşılan oturum anahtarı ile şifrelenir. Geniş yayın (broadcast) SOS sinyalleri tüm yakın cihazların alabilmesi için <strong>imzalı ama şifrelenmemiş</strong> gönderilir — bu, hayat kurtarma amacıyla bilinçli bir tasarım kararıdır. Tam uçtan uca şifreleme (Signal Protocol — X3DH + Double Ratchet) ilerleyen sürümlerde tüm DM kanallarına genişletilecektir; yol haritamızda yer almaktadır.</li>
     </ul>
 
     <h2>5. Yapay Zeka (AI) Kullanımı</h2>

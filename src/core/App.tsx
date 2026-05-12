@@ -18,21 +18,22 @@ import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
 import SOSFullScreenAlert from './components/SOSFullScreenAlert';
 import IncomingCallOverlay from './components/IncomingCallOverlay';
+import EEWCountdownAlert from './components/EEWCountdownAlert';
+import SOSFailureBanner from './components/SOSFailureBanner';
+import ClockSkewBanner from './components/ClockSkewBanner';
+import BiometricLockOverlay from './components/BiometricLockOverlay';
+import NotificationRePromptModal from './components/NotificationRePromptModal';
+import NotificationDisabledBanner from './components/NotificationDisabledBanner';
 import { EULAModal } from './components/compliance/EULAModal';
 import { useOnboardingStore } from './stores/onboardingStore';
 import { useAuthStore, cleanupAuthListener } from './stores/authStore';
 import { hasCachedAuthenticatedSession } from './utils/authSessionCache';
+import { isStorageReady, waitForStorageReady } from './utils/storage';
 
 // Navigators
 import MainNavigator from './navigation/MainNavigator';
 import OnboardingNavigator from './navigation/OnboardingNavigator';
 import AuthNavigator from './navigation/AuthNavigator';
-
-// CRITICAL: Read auth cache state SYNCHRONOUSLY at module load (same MMKV instance).
-// This determines whether we should wait for auth to resolve before showing onboarding.
-// For genuinely new users (no cache), we skip the auth wait and show onboarding immediately.
-// For returning users (cache exists), we wait for auth to prevent the hydration-race flash.
-const hadCachedAuthAtBoot = hasCachedAuthenticatedSession();
 
 const Stack = createStackNavigator();
 
@@ -111,10 +112,33 @@ const authStyles = StyleSheet.create({
 export default function CoreApp() {
   const { completed: isOnboardingCompleted, isHydrated: isOnboardingHydrated } = useOnboardingStore();
   const { isAuthenticated, isLoading: isAuthLoading, initialize: initAuth } = useAuthStore();
+  const [isBootStorageReady, setIsBootStorageReady] = useState(() => isStorageReady());
+  const [hadCachedAuthAtBoot, setHadCachedAuthAtBoot] = useState(
+    () => isStorageReady() && hasCachedAuthenticatedSession()
+  );
   const appInitializedRef = useRef(false);
   const appInitializingRef = useRef(false);
   const initSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    waitForStorageReady()
+      .then(() => {
+        if (!active) return;
+        setHadCachedAuthAtBoot(hasCachedAuthenticatedSession());
+        setIsBootStorageReady(true);
+      })
+      .catch((error) => {
+        if (__DEV__) console.warn('Boot storage readiness wait failed:', error);
+        if (!active) return;
+        setHadCachedAuthAtBoot(hasCachedAuthenticatedSession());
+        setIsBootStorageReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // APPLE REJECTION FIX: Handle iOS memory warnings.
   // Apple tests with low-memory conditions on iPad. Apps that don't respond to memory
@@ -134,14 +158,15 @@ export default function CoreApp() {
   // Without production logging, "logout on kill" reports are impossible to diagnose.
   useEffect(() => {
     try {
-      const { DirectStorage, isMMKVPersistent } = require('./utils/storage');
+      const { DirectStorage, storageBackend, isStorageReady } = require('./utils/storage');
       const hasCached = DirectStorage.getBoolean('afetnet_auth_cached') || false;
       const onbRaw = DirectStorage.getString('afetnet-onboarding');
       const onbLegacy = DirectStorage.getString('AFETNET_ONBOARDING_COMPLETED');
       const eulaLegacy = DirectStorage.getString('AFETNET_EULA_ACCEPTED');
       if (__DEV__) {
         console.log(
-          `[ColdStart] mmkv=${isMMKVPersistent} auth_cached=${hasCached}` +
+          `[ColdStart] backend=${storageBackend} storage_ready=${isStorageReady()}` +
+          ` auth_cached=${hasCached}` +
           ` onb_store=${!!onbRaw} onb_legacy=${onbLegacy === '1'}` +
           ` eula_legacy=${eulaLegacy === '1'}` +
           ` zustand: onb=${isOnboardingCompleted} eula=${require('./stores/settingsStore').useSettingsStore.getState().eulaAccepted}` +
@@ -221,6 +246,10 @@ export default function CoreApp() {
   }, []);
 
   useEffect(() => {
+    if (!isBootStorageReady) {
+      return;
+    }
+
     if (isAuthLoading) {
       return;
     }
@@ -294,12 +323,12 @@ export default function CoreApp() {
         })
         .finally(() => { appInitializingRef.current = false; });
     }
-  }, [isAuthenticated, isAuthLoading]);
+  }, [isAuthenticated, isAuthLoading, isBootStorageReady]);
 
   // Safety net: if user is already authenticated but onboarding state is lost/corrupted,
   // restore onboarding completion to prevent unwanted onboarding loop after app restarts.
   useEffect(() => {
-    if (!isAuthenticated || isOnboardingCompleted) {
+    if (!isBootStorageReady || !isAuthenticated || isOnboardingCompleted) {
       return;
     }
 
@@ -307,7 +336,7 @@ export default function CoreApp() {
     import('./utils/onboardingStorage')
       .then(({ setOnboardingCompleted }) => setOnboardingCompleted().catch(e => { if (__DEV__) console.debug('Onboarding persist failed:', e); }))
       .catch(e => { if (__DEV__) console.debug('Onboarding storage import failed:', e); });
-  }, [isAuthenticated, isOnboardingCompleted]);
+  }, [isAuthenticated, isOnboardingCompleted, isBootStorageReady]);
 
   // ELITE: Determine which screen to show
   //
@@ -326,13 +355,17 @@ export default function CoreApp() {
   // starts as true but resolves within milliseconds to false + unauthenticated,
   // at which point the onboarding check correctly shows the Onboarding screen.
   const getNavigatorContent = () => {
-    // Step 0: Wait for onboarding store to hydrate from MMKV
-    // Fail-open: if onboardingCompleted is already true (DirectStorage sync), skip spinner
+    // Step 0: Never make auth/onboarding/EULA decisions until persistent storage is ready.
+    if (!isBootStorageReady) {
+      return <Stack.Screen name="BootStorageLoading" component={AuthLoadingScreen} />;
+    }
+
+    // Step 1: Wait for onboarding store to settle after storage boot.
     if (!isOnboardingHydrated && !isOnboardingCompleted) {
       return <Stack.Screen name="Loading" component={AuthLoadingScreen} />;
     }
 
-    // Step 1: CRITICAL FIX — If the user had a cached auth session at boot, wait
+    // Step 2: CRITICAL FIX — If the user had a cached auth session at boot, wait
     // for auth to resolve BEFORE making any navigation decisions.
     // Previously, onboarding was checked before auth loading. If Zustand persist
     // hydration briefly set completed=false (stale data merge), the user saw the
@@ -344,7 +377,7 @@ export default function CoreApp() {
       return <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />;
     }
 
-    // Step 2: Show onboarding ONLY if not completed AND not authenticated.
+    // Step 3: Show onboarding ONLY if not completed AND not authenticated.
     // An authenticated user MUST have completed onboarding — if the state says
     // otherwise, it's a hydration race / storage corruption. The safety-net
     // effect (useEffect with [isAuthenticated, isOnboardingCompleted]) will
@@ -353,17 +386,17 @@ export default function CoreApp() {
       return <Stack.Screen name="Onboarding" component={OnboardingNavigator} />;
     }
 
-    // Step 3: Show loading while auth resolves (for new users with no cache)
+    // Step 4: Show loading while auth resolves (for new users with no cache)
     if (isAuthLoading) {
       return <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />;
     }
 
-    // Step 4: Show auth flow if not authenticated (onboarding IS completed)
+    // Step 5: Show auth flow if not authenticated (onboarding IS completed)
     if (!isAuthenticated) {
       return <Stack.Screen name="Auth" component={AuthNavigator} />;
     }
 
-    // Step 5: Show main app if authenticated
+    // Step 6: Show main app if authenticated
     // (onboarding may briefly be false due to hydration race, but safety-net
     // effect will fix it within one render frame — user never sees Onboarding)
     return <Stack.Screen name="Main" component={MainNavigator} />;
@@ -401,13 +434,31 @@ export default function CoreApp() {
             </PermissionGuard>
 
             {/* ELITE: Compliance - Mandatory EULA */}
-            <EULAModal />
+              {isBootStorageReady ? <EULAModal /> : null}
 
             {/* ELITE V4: Full-screen SOS alert for foreground notifications */}
             <SOSFullScreenAlert />
 
             {/* ELITE: Incoming voice call overlay */}
             <IncomingCallOverlay />
+
+            {/* LIFE-SAFETY: Global EEW countdown overlay — covers every screen */}
+            <EEWCountdownAlert />
+
+            {/* LIFE-SAFETY: SOS 6/6 channel failure banner — persistent until SOS resolved */}
+            <SOSFailureBanner />
+
+            {/* DATA-INTEGRITY: Clock skew banner — Firestore rejects ±5min stale writes */}
+            <ClockSkewBanner />
+
+            {/* SECURITY: Biometric app lock — opsiyonel Face ID/Touch ID kilidi */}
+            <BiometricLockOverlay />
+
+            {/* GROWTH: Notification permission re-prompt (24h sonra, max 3 kez) */}
+            <NotificationRePromptModal />
+
+            {/* LIFE-SAFETY: Bildirim kapali ise persistent banner (EEW/SOS ulaşmaz uyarısı) */}
+            <NotificationDisabledBanner />
           </NavigationContainer>
         </ErrorBoundary>
       </SafeAreaProvider>

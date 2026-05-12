@@ -2,12 +2,12 @@ import { getErrorMessage } from '../../utils/errorUtils';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { eliteStorage } from '../../utils/storage';
-import { PreparednessPlanService } from '../services/PreparednessPlanService';
-import { PreparednessPlan, PlanItem, PlanSection } from '../types/ai.types'; // Use centralized types
+import { preparednessPlanService } from '../services/PreparednessPlanService';
+import { PreparednessPlan, PlanItem, PlanSection } from '../types/ai.types';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('PreparednessStore');
-const planService = new PreparednessPlanService();
+const planService = preparednessPlanService;
 
 interface PreparednessState {
   plan: PreparednessPlan | null;

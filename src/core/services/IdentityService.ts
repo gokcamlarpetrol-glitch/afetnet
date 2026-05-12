@@ -15,7 +15,8 @@
 
 import { DirectStorage } from '../utils/storage';
 import { User } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { getDeviceId as getHardwareDeviceId } from '../../lib/device';
 import { getInstallationId } from '../../lib/installationId';
 import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
@@ -36,6 +37,8 @@ export interface UserIdentity {
   uid: string;
   /** Random, rotatable sharing code (e.g. "AFN-A3F9B2C1") */
   publicUserCode: string;
+  /** Stable QR/device share code (legacy compatible, e.g. AFN-1A2B3C4D) */
+  qrId?: string;
   /** User display name */
   displayName: string;
   /** User email */
@@ -65,7 +68,7 @@ export interface QRPayload {
   code?: string;
 }
 
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
+const UID_REGEX = /^[A-Za-z0-9_.\-+:]{1,128}$/;
 
 /**
  * Generate a random, collision-resistant public user code.
@@ -90,6 +93,73 @@ class IdentityService {
   private identity: UserIdentity | null = null;
   private isInitialized = false;
   private initPromise: Promise<void> | null = null;
+  private listeners: Array<() => void> = [];
+
+  /** Subscribe to identity changes */
+  subscribe(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== listener);
+    };
+  }
+
+  private notifyListeners() {
+    this.listeners.forEach(l => l());
+  }
+
+  private normalizeDisplayName(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private deriveEmailDisplayName(email?: string | null): string {
+    if (!email) return '';
+    const localPart = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+    if (!localPart || localPart.length < 2) return '';
+    return localPart.charAt(0).toUpperCase() + localPart.slice(1);
+  }
+
+  private getProviderDisplayName(user: User): string {
+    const providerEntries = Array.isArray(user.providerData) ? user.providerData : [];
+    for (const entry of providerEntries) {
+      const providerName = this.normalizeDisplayName(entry?.displayName);
+      if (providerName && providerName !== 'İsimsiz Kahraman' && !this.isEmailDerivedDisplayName(providerName, user.email)) {
+        return providerName;
+      }
+    }
+    return '';
+  }
+
+  private isEmailDerivedDisplayName(name: string, email?: string | null): boolean {
+    if (!name || !email) return false;
+    const derived = this.deriveEmailDisplayName(email);
+    if (!derived) return false;
+
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9ğüşöçıİ]/gi, '');
+    return normalize(name) === normalize(derived);
+  }
+
+  /**
+   * Retrieve the cached Apple Sign-In name from MMKV.
+   * Apple only provides the user's name on FIRST authorization.
+   * AuthService caches it under multiple keys for reliability.
+   */
+  private getCachedAppleName(uid: string): string {
+    try {
+      // Priority: 1) By Firebase UID, 2) Global latest
+      const storedByUid = DirectStorage.getString(`@afetnet:apple_name_${uid}`) ?? null;
+      const storedLatest = DirectStorage.getString('@afetnet:apple_name_latest') ?? null;
+      const raw = storedByUid || storedLatest;
+      if (!raw) return '';
+
+      const parsed = JSON.parse(raw) as { givenName?: string | null; familyName?: string | null };
+      const givenName = (parsed?.givenName || '').trim();
+      const familyName = (parsed?.familyName || '').trim();
+      const fullName = `${givenName} ${familyName}`.trim();
+      return fullName || '';
+    } catch {
+      return '';
+    }
+  }
 
   /**
    * Initialize the identity service.
@@ -111,6 +181,7 @@ class IdentityService {
       if (auth?.currentUser) {
         await this.syncFromFirebase(auth.currentUser);
         this.isInitialized = true;
+        this.notifyListeners();
         logger.info(`✅ Identity from Firebase: uid=${this.identity?.uid}`);
         return;
       }
@@ -119,6 +190,7 @@ class IdentityService {
       if (cached?.isVerified && cached.uid) {
         this.identity = cached;
         this.isInitialized = true;
+        this.notifyListeners();
         logger.info(`✅ Identity from cache: uid=${this.identity.uid}`);
         return;
       }
@@ -127,7 +199,7 @@ class IdentityService {
       logger.warn('⚠️ No identity — user must login');
     } catch (error) {
       logger.error('❌ Identity init failed:', error);
-      this.isInitialized = true;
+      // Leave isInitialized = false to allow retry on next call
     } finally {
       this.initPromise = null;
     }
@@ -141,9 +213,11 @@ class IdentityService {
       const app = initializeFirebase();
       if (!app) return;
 
-      const db = getFirestore(app);
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
       const userRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userRef);
+      const derivedQrId = `AFN-${user.uid.substring(0, 8).toUpperCase()}`;
 
       if (userDoc.exists()) {
         const data = userDoc.data();
@@ -157,23 +231,86 @@ class IdentityService {
           publicUserCode = `AFN-${Date.now().toString(16).slice(-8).toUpperCase()}`;
         }
 
+        const firestoreName = this.normalizeDisplayName(data.displayName);
+        const authName = this.normalizeDisplayName(user.displayName);
+        const providerName = this.getProviderDisplayName(user);
+        const resolvedEmail = (data.email || user.email || '').trim();
+        const emailName = this.deriveEmailDisplayName(resolvedEmail);
+        // CRITICAL FIX: Apple Sign-In only provides the user's real name on FIRST authorization.
+        // AuthService caches it in MMKV. If Firestore/Auth only have the email prefix,
+        // the cached Apple name is the ONLY source of the real name.
+        const cachedAppleName = this.getCachedAppleName(user.uid);
+
+        // Filter out email-derived names from the resolution chain
+        const isFirestoreNameEmailDerived = this.isEmailDerivedDisplayName(firestoreName, resolvedEmail);
+        const isAuthNameEmailDerived = this.isEmailDerivedDisplayName(authName, resolvedEmail);
+
+        // Prefer provider name if stored name is missing/generic/email-derived.
+        const shouldPreferProviderName = !!providerName && (
+          !firestoreName ||
+          firestoreName === 'İsimsiz Kahraman' ||
+          isFirestoreNameEmailDerived
+        );
+
+        // Name resolution priority:
+        // 1. Provider display name (if Firestore name is missing/generic/email-derived)
+        // 2. Firestore name (if it's a real name, not email-derived)
+        // 3. Cached Apple Sign-In name (only source of real name after first Apple auth)
+        // 4. Auth display name (if it's a real name, not email-derived)
+        // 5. Provider name (even if not preferred)
+        // 6. Firestore name (even if email-derived — better than nothing)
+        // 7. Auth name (even if email-derived)
+        // 8. Email-derived name as last resort
+        // 9. 'Kullanici' as absolute fallback
+        const resolvedName =
+          (shouldPreferProviderName ? providerName : '') ||
+          (!isFirestoreNameEmailDerived ? firestoreName : '') ||
+          cachedAppleName ||
+          (!isAuthNameEmailDerived ? authName : '') ||
+          providerName ||
+          firestoreName ||
+          authName ||
+          emailName ||
+          'Kullanıcı';
+
+        const resolvedQrId = this.normalizeDisplayName(data.qrId) || derivedQrId;
+
+        const userDocPatch: Record<string, unknown> = {
+          lastLoginAt: new Date(),
+        };
+        if (!data.publicUserCode) {
+          userDocPatch.publicUserCode = publicUserCode;
+        }
+        if (!this.normalizeDisplayName(data.qrId)) {
+          userDocPatch.qrId = resolvedQrId;
+        }
+        if (shouldPreferProviderName && providerName !== firestoreName) {
+          userDocPatch.displayName = providerName;
+        }
+        // CRITICAL FIX: If Firestore has an email-derived name but we found a real name
+        // (from cached Apple name, auth, or provider), update Firestore so future syncs
+        // use the correct name directly.
+        if (isFirestoreNameEmailDerived && resolvedName && resolvedName !== firestoreName && !this.isEmailDerivedDisplayName(resolvedName, resolvedEmail) && resolvedName !== 'Kullanıcı') {
+          userDocPatch.displayName = resolvedName;
+        }
+
         this.identity = {
           uid: user.uid,
           publicUserCode,
-          displayName: data.displayName || user.displayName || 'İsimsiz Kahraman',
-          email: data.email || user.email || undefined,
+          qrId: resolvedQrId,
+          displayName: resolvedName || 'Kullanıcı',
+          email: resolvedEmail || undefined,
           photoURL: data.photoURL || user.photoURL || undefined,
           isVerified: true,
           createdAt: data.createdAt?.toMillis?.() || Date.now(),
           lastSyncAt: Date.now(),
         };
 
-        // Ensure user doc has publicUserCode
-        if (!data.publicUserCode) {
-          await setDoc(userRef, { publicUserCode, lastLoginAt: new Date() }, { merge: true });
-          logger.info(`✅ User doc updated: users/${user.uid}`);
-        } else {
-          await setDoc(userRef, { lastLoginAt: new Date() }, { merge: true });
+        if (Object.keys(userDocPatch).length > 0) {
+          await setDoc(userRef, userDocPatch, { merge: true });
+          if (!data.publicUserCode) {
+            logger.info(`✅ User doc updated: users/${user.uid}`);
+          }
         }
 
       } else {
@@ -183,10 +320,26 @@ class IdentityService {
           publicUserCode = `AFN-${Date.now().toString(16).slice(-8).toUpperCase()}`;
         }
 
+        // New user: resolve display name from auth/provider first, email only as last resort
+        const authName = this.normalizeDisplayName(user.displayName);
+        const providerName = this.getProviderDisplayName(user);
+        const cachedAppleNameNew = this.getCachedAppleName(user.uid);
+        const emailName = this.deriveEmailDisplayName(user.email || undefined);
+        // Priority: real auth name > provider name > cached Apple name > email-derived
+        const isAuthNameEmailDerived = this.isEmailDerivedDisplayName(authName, user.email);
+        const newUserName =
+          (!isAuthNameEmailDerived ? authName : '') ||
+          providerName ||
+          cachedAppleNameNew ||
+          authName ||
+          emailName;
+        const qrId = derivedQrId;
+
         this.identity = {
           uid: user.uid,
           publicUserCode,
-          displayName: user.displayName || 'İsimsiz Kahraman',
+          qrId,
+          displayName: newUserName || 'Kullanıcı',
           email: user.email || undefined,
           photoURL: user.photoURL || undefined,
           isVerified: true,
@@ -196,6 +349,7 @@ class IdentityService {
 
         const userData: Record<string, any> = {
           publicUserCode,
+          qrId,
           displayName: this.identity.displayName,
           createdAt: new Date(),
           lastLoginAt: new Date(),
@@ -208,6 +362,7 @@ class IdentityService {
       }
 
       await this.cacheIdentity();
+      this.notifyListeners();
       logger.info(`🔄 Identity synced: uid=${user.uid}, code=${this.identity!.publicUserCode}`);
     } catch (error) {
       logger.error('Failed to sync from Firebase:', error);
@@ -221,7 +376,11 @@ class IdentityService {
     return this.identity;
   }
 
-  /** Firebase Auth UID — TEK BİRİNCİL ANAHTAR. Returns null when not initialized. */
+  /**
+   * Returns the Firebase Auth UID — the SINGLE canonical primary key for ALL write paths.
+   * CANONICAL: This is a Firebase Auth UID. Never use deviceId or installationId for write paths.
+   * Returns null when not initialized.
+   */
   getUid(): string | null {
     return this.identity?.uid || null;
   }
@@ -233,7 +392,30 @@ class IdentityService {
 
   /** Display name */
   getDisplayName(): string {
-    return this.identity?.displayName || 'İsimsiz Kahraman';
+    return this.identity?.displayName || 'Kullanıcı';
+  }
+
+  /**
+   * Identity aliases used for routing/dedup in chat + mesh layers.
+   * NOTE: These are for READ/MATCHING purposes only (e.g., mesh routing, dedup).
+   * NEVER use aliases as Firestore document keys in write paths — use getUid() instead.
+   */
+  getAliases(): string[] {
+    if (!this.identity?.uid) return [];
+
+    const aliases = new Set<string>();
+    aliases.add(this.identity.uid);
+
+    if (this.identity.publicUserCode) {
+      aliases.add(this.identity.publicUserCode);
+    }
+    if (this.identity.qrId) {
+      aliases.add(this.identity.qrId);
+    } else {
+      aliases.add(`AFN-${this.identity.uid.substring(0, 8).toUpperCase()}`);
+    }
+
+    return Array.from(aliases);
   }
 
   getEmail(): string | undefined {
@@ -249,16 +431,18 @@ class IdentityService {
   }
 
   // ─── BACKWARD COMPAT ALIASES (tüm eski çağrıları uid'ye yönlendir) ──
+  // All these methods return Firebase Auth UID. They exist only for backward
+  // compatibility — callers should migrate to getUid() directly.
 
-  /** @deprecated Use getUid() */
+  /** @deprecated Use getUid(). Returns Firebase Auth UID (NOT a legacy device ID). */
   getMyId(): string | null { return this.getUid(); }
-  /** @deprecated Use getUid() */
+  /** @deprecated Use getUid(). Returns Firebase Auth UID. */
   getCloudUid(): string | undefined { return this.identity?.uid; }
-  /** @deprecated Use getUid() — deviceId artık identity katmanında yok */
+  /** @deprecated Use getUid(). Returns Firebase Auth UID (NOT a hardware device ID). */
   getDeviceId(): string | null { return this.getUid(); }
-  /** @deprecated Use getUid() */
+  /** @deprecated Use getUid(). Returns Firebase Auth UID (NOT a BLE mesh device ID). */
   getMeshDeviceId(): string | null { return this.getUid(); }
-  /** @deprecated Not needed */
+  /** @deprecated Use getUid(). Returns Firebase Auth UID (NOT an installation ID). */
   getInstallationId(): string | null { return this.getUid(); }
 
   // ─── QR CODE ──────────────────────────────────────
@@ -322,7 +506,7 @@ class IdentityService {
     }
 
     // Plain UID
-    if (UID_REGEX.test(raw)) {
+    if (UID_REGEX.test(raw) && !raw.toUpperCase().startsWith('AFN-')) {
       return { v: 0, uid: raw, name: 'Bilinmeyen Kullanıcı' };
     }
 
@@ -332,7 +516,8 @@ class IdentityService {
         const app = initializeFirebase();
         if (!app) return null;
 
-        const db = getFirestore(app);
+        const db = await getFirestoreInstanceAsync();
+        if (!db) return null;
         const { collection, getDocs, query, where, limit } = require('firebase/firestore');
         const usersRef = collection(db, 'users');
         const code = raw.toUpperCase();
@@ -396,7 +581,8 @@ class IdentityService {
       try {
         const app = initializeFirebase();
         if (app) {
-          const db = getFirestore(app);
+          const db = await getFirestoreInstanceAsync();
+          if (!db) return;
           await setDoc(
             doc(db, 'users', this.identity.uid),
             { displayName: name, updatedAt: new Date() },
@@ -419,7 +605,8 @@ class IdentityService {
       try {
         const app = initializeFirebase();
         if (app) {
-          const db = getFirestore(app);
+          const db = await getFirestoreInstanceAsync();
+          if (!db) return;
           await setDoc(
             doc(db, 'users', this.identity.uid),
             { photoURL, updatedAt: new Date() },
@@ -441,7 +628,8 @@ class IdentityService {
       const app = initializeFirebase();
       if (!app) return null;
 
-      const db = getFirestore(app);
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return null;
       await setDoc(
         doc(db, 'users', this.identity.uid),
         { publicUserCode: newCode, updatedAt: new Date() },
@@ -464,6 +652,7 @@ class IdentityService {
   async clearIdentity(): Promise<void> {
     this.identity = null;
     this.isInitialized = false;
+    this.notifyListeners();
     try { DirectStorage.delete(IDENTITY_CACHE_KEY); } catch { /* best effort */ }
     logger.info('🗑️ Identity cleared');
   }

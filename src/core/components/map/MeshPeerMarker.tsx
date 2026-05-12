@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming, withSequence } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming, withSequence, cancelAnimation } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 
@@ -23,6 +23,7 @@ export const MeshPeerMarker = React.memo(({ name, rssi, status, isSelected }: Me
       -1,
       true,
     );
+    return () => { cancelAnimation(pulseAnim); };
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({

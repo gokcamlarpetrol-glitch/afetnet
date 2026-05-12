@@ -1,7 +1,20 @@
 /**
- * AI EARTHQUAKE PREDICTION SERVICE - Elite Level 3 AI
- * Real-time AI-powered earthquake prediction using ensemble models
- * Provides 10-20 seconds advance warning with high accuracy
+ * EARTHQUAKE RISK ANALYSIS SERVICE
+ *
+ * BİLİMSEL DOĞRULUK NOTU:
+ * Depremler "tahmin edilemez" — günümüz bilimi bir depremin tam zamanını, yerini
+ * ve büyüklüğünü önceden söyleyemez. Bu servis:
+ *
+ *   1. Mevcut sensör verilerinden (akselerometre + gyro) P-dalgası tespiti yapar
+ *      — bu "early warning" (erken uyarı) tekniğidir, deprem oluştuktan SONRA
+ *      yerel sarsıntı şiddet TAHMİNİ verir. Tahmin edilen değer fay merkezi
+ *      verilerinden değil, cihazın hissettiği sinyalden çıkarılır.
+ *   2. Tarihsel verilerden bölgesel RİSK ANALİZİ yapar (Kahramanmaraş fayı,
+ *      Marmara fayı vb. kaç yılda bir M7+ üretmiş, son depremden geçen süre).
+ *
+ * Eski isim `AIEarthquakePredictionService` yanıltıcıydı. Geriye uyumluluk için
+ * eski export alias olarak korunuyor — yeni kullanımlar `earthquakeRiskAnalysisService`
+ * üzerinden olmalı.
  */
 
 import { createLogger } from '../utils/logger';
@@ -455,4 +468,9 @@ Sadece JSON döndür, başka metin ekleme.`;
   }
 }
 
-export const aiEarthquakePredictionService = new AIEarthquakePredictionService();
+// Yeni isim (kullanılmalı)
+export const earthquakeRiskAnalysisService = new AIEarthquakePredictionService();
+
+// Geriye uyumluluk — eski adıyla import edenler için (deprecated)
+/** @deprecated Use `earthquakeRiskAnalysisService` instead. */
+export const aiEarthquakePredictionService = earthquakeRiskAnalysisService;

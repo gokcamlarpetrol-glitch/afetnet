@@ -6,7 +6,7 @@
  * @version 2.0.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
     View,
     Text,
@@ -17,6 +17,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
+    ScrollView,
     Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,15 +25,32 @@ import { useNavigation } from '@react-navigation/native';
 import { EmailAuthService } from '../../services/EmailAuthService';
 import * as Haptics from 'expo-haptics';
 
+// ELITE: Mask email for privacy — `user@example.com` → `us***@example.com`
+const maskEmail = (rawEmail: string): string => {
+    const parts = rawEmail.split('@');
+    if (parts.length !== 2) return '***@***';
+    const local = parts[0];
+    const domain = parts[1];
+    const visible = local.length <= 2 ? local[0] || '*' : local.slice(0, 2);
+    return `${visible}***@${domain}`;
+};
+
 export const ForgotPasswordScreen = () => {
     const navigation = useNavigation<any>();
     const [email, setEmail] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [emailSent, setEmailSent] = useState(false);
 
+    // ELITE: Double-tap prevention
+    const isSubmittingRef = useRef(false);
+
     const handleResetPassword = async () => {
+        if (isSubmittingRef.current) return;
+        isSubmittingRef.current = true;
+
         if (!email) {
             Alert.alert('Uyarı', 'Lütfen e-posta adresinizi girin.');
+            isSubmittingRef.current = false;
             return;
         }
 
@@ -47,6 +65,7 @@ export const ForgotPasswordScreen = () => {
             Alert.alert('Hata', error.message);
         } finally {
             setIsLoading(false);
+            isSubmittingRef.current = false;
         }
     };
 
@@ -72,7 +91,7 @@ export const ForgotPasswordScreen = () => {
                     </View>
                     <Text style={styles.successTitle}>E-posta Gönderildi</Text>
                     <Text style={styles.successText}>
-                        {email} adresine şifre sıfırlama bağlantısı gönderdik.
+                        {maskEmail(email)} adresine şifre sıfırlama bağlantısı gönderdik.
                     </Text>
                     <Text style={styles.spamNote}>
                         E-postayı bulamıyorsanız spam klasörünü kontrol edin.
@@ -109,7 +128,11 @@ export const ForgotPasswordScreen = () => {
             />
             <View style={styles.overlay} />
 
-            <View style={styles.content}>
+            <ScrollView
+                contentContainerStyle={styles.content}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={handleBack} style={styles.backButton}>
@@ -135,6 +158,9 @@ export const ForgotPasswordScreen = () => {
                             autoCapitalize="none"
                             autoCorrect={false}
                             autoComplete="email"
+                            returnKeyType="go"
+                            onSubmitEditing={handleResetPassword}
+                            accessibilityLabel="E-posta adresi"
                         />
                     </View>
 
@@ -156,7 +182,7 @@ export const ForgotPasswordScreen = () => {
                         <Text style={styles.backLinkText}>Giriş ekranına dön</Text>
                     </TouchableOpacity>
                 </View>
-            </View>
+            </ScrollView>
         </KeyboardAvoidingView>
     );
 };
@@ -184,9 +210,13 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.65)',
     },
     content: {
-        flex: 1,
+        flexGrow: 1,
         paddingHorizontal: 28,
         paddingTop: 60,
+        paddingBottom: 40,
+        maxWidth: 500,
+        width: '100%',
+        alignSelf: 'center',
     },
     header: {
         marginBottom: 32,
@@ -270,6 +300,9 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 28,
+        maxWidth: 500,
+        width: '100%',
+        alignSelf: 'center',
     },
     successIcon: {
         width: 80,

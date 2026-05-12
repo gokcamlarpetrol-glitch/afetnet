@@ -8,11 +8,13 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 
 import { useMeshStore } from '../services/mesh/MeshStore';
 
 export default function OfflineIndicator() {
+  const insets = useSafeAreaInsets();
   const [isOffline, setIsOffline] = useState(false);
   const slideAnim = useState(new Animated.Value(-100))[0];
   const peerCount = useMeshStore(state => state.peers.length);
@@ -20,7 +22,10 @@ export default function OfflineIndicator() {
   useEffect(() => {
     // Subscribe to network state
     const unsubscribe = NetInfo.addEventListener((state) => {
-      const offline = !state.isConnected || !state.isInternetReachable;
+      // CRITICAL FIX: On iOS, isInternetReachable is `null` during initial check.
+      // Treating null as offline causes a false offline banner flash on every launch.
+      // Only treat as offline when explicitly `false`, not `null`.
+      const offline = state.isConnected === false || state.isInternetReachable === false;
       // Force offline for dev if needed
       // setIsOffline(true); 
       setIsOffline(offline);
@@ -55,6 +60,7 @@ export default function OfflineIndicator() {
       style={[
         styles.container,
         {
+          paddingTop: insets.top + 8,
           transform: [{ translateY: slideAnim }],
         },
       ]}
@@ -86,7 +92,7 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 9999,
     backgroundColor: '#f59e0b',
-    paddingTop: 44, // Status bar height
+    paddingTop: 44, // Overridden inline with safe area insets
     paddingBottom: 8,
     paddingHorizontal: 16,
     shadowColor: '#000',

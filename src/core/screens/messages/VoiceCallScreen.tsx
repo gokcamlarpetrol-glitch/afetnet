@@ -49,7 +49,7 @@ const formatDuration = (seconds: number): string => {
 
 export default function VoiceCallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { recipientUid, recipientName, callId: incomingCallId, isIncoming } = route.params;
+  const { recipientUid = '', recipientName = '', callId: incomingCallId, isIncoming } = route.params || {};
 
   const [callStatus, setCallStatus] = useState<CallStatus>(isIncoming ? 'ringing' : 'idle');
   const [isMuted, setIsMuted] = useState(false);
@@ -57,6 +57,8 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
   const [duration, setDuration] = useState(0);
   const [activeCallId, setActiveCallId] = useState<string | null>(incomingCallId || null);
   const durationInterval = useRef<NodeJS.Timeout | null>(null);
+  const endNavTimer = useRef<NodeJS.Timeout | null>(null);
+  const failNavTimer = useRef<NodeJS.Timeout | null>(null);
   const hasInitiated = useRef(false);
 
   // Pulse animation for ringing state
@@ -93,6 +95,10 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
           Alert.alert('Arama Hatası', 'Arama yanıtlanamadı.');
           navigation.goBack();
         }
+      }).catch((err) => {
+        if (__DEV__) console.debug('answerCall error:', err);
+        Alert.alert('Arama Hatası', 'Arama yanıtlanırken bir hata oluştu.');
+        navigation.goBack();
       });
     } else {
       // Start outgoing call
@@ -104,6 +110,10 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
           Alert.alert('Arama Hatası', 'Arama başlatılamadı. Lütfen tekrar deneyin.');
           navigation.goBack();
         }
+      }).catch((err) => {
+        if (__DEV__) console.debug('startCall error:', err);
+        Alert.alert('Arama Hatası', 'Arama başlatılırken bir hata oluştu.');
+        navigation.goBack();
       });
     }
   }, [isIncoming, incomingCallId, recipientUid, recipientName, navigation]);
@@ -120,7 +130,7 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
       if (durationInterval.current) {
         clearInterval(durationInterval.current);
       }
-      setTimeout(() => {
+      endNavTimer.current = setTimeout(() => {
         if (navigation.canGoBack()) {
           navigation.goBack();
         }
@@ -130,7 +140,7 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
     const failSub = DeviceEventEmitter.addListener(VOICE_CALL_EVENTS.CALL_FAILED, ({ reason }: { reason: string }) => {
       setCallStatus('ended');
       Alert.alert('Arama Başarısız', reason || 'Bağlantı kurulamadı.');
-      setTimeout(() => {
+      failNavTimer.current = setTimeout(() => {
         if (navigation.canGoBack()) {
           navigation.goBack();
         }
@@ -141,6 +151,8 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
       connSub.remove();
       endSub.remove();
       failSub.remove();
+      if (endNavTimer.current) clearTimeout(endNavTimer.current);
+      if (failNavTimer.current) clearTimeout(failNavTimer.current);
     };
   }, [navigation]);
 
@@ -187,12 +199,13 @@ export default function VoiceCallScreen({ navigation, route }: Props) {
     }
   };
 
-  const initials = recipientName
+  const initials = (recipientName || '?')
     .split(' ')
+    .filter(Boolean)
     .map((w) => w[0])
     .join('')
     .toUpperCase()
-    .substring(0, 2);
+    .substring(0, 2) || '??';
 
   return (
     <View style={styles.container}>

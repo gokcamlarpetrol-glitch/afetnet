@@ -49,8 +49,8 @@ const RECORDING_OPTIONS: RecordingOptions = {
   },
 };
 
-const MAX_RECORDING_DURATION_MS = 30000; // 30 seconds max
-const VOICE_MESSAGE_STORAGE = '@afetnet:voice_messages';
+const MAX_RECORDING_DURATION_MS = 60000; // 60 seconds max — must match ChatInput.MAX_VOICE_DURATION
+const VOICE_MESSAGE_STORAGE_BASE = '@afetnet:voice_messages';
 
 export interface VoiceMessage {
   id: string;
@@ -76,6 +76,13 @@ class VoiceMessageService {
   private recordingStartTime = 0;
   private voiceMessages: VoiceMessage[] = [];
   private autoStopTimer: NodeJS.Timeout | null = null;
+  private playbackSubscription: { remove: () => void } | null = null;
+  private onAutoStopCallback: ((voiceMessage: VoiceMessage | null) => void) | null = null;
+
+  /** Register callback for auto-stop events (max duration reached) */
+  setOnAutoStop(cb: ((voiceMessage: VoiceMessage | null) => void) | null): void {
+    this.onAutoStopCallback = cb;
+  }
 
   /**
      * Initialize audio permissions
@@ -220,9 +227,13 @@ class VoiceMessageService {
       this.isRecording = true;
       this.recordingStartTime = Date.now();
 
-      // Auto-stop after max duration
-      this.autoStopTimer = setTimeout(() => {
-        this.stopRecording();
+      // Auto-stop after max duration — FIX: capture result and notify callback,
+      // otherwise the recording is silently discarded and ChatInput UI stays in recording state.
+      this.autoStopTimer = setTimeout(async () => {
+        const result = await this.stopRecording();
+        if (this.onAutoStopCallback) {
+          this.onAutoStopCallback(result);
+        }
       }, MAX_RECORDING_DURATION_MS);
 
       logger.info('Recording started');
@@ -270,12 +281,18 @@ class VoiceMessageService {
         logger.warn('Could not read audio as base64', e);
       }
 
+      const resolvedSenderId =
+        identityService.getUid() ||
+        identityService.getMyId() ||
+        bleMeshService.getMyDeviceId() ||
+        'unknown';
+
       const voiceMessage: VoiceMessage = {
         id: Date.now().toString(),
         uri,
         durationMs: duration,
         timestamp: Date.now(),
-        from: bleMeshService.getMyDeviceId() || 'unknown',
+        from: resolvedSenderId,
         to: '*', // Will be set when sending
         delivered: false,
         played: false,
@@ -312,7 +329,7 @@ class VoiceMessageService {
         }
         const uri = this.recording.uri;
         if (uri) {
-          await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+          await FileSystem.deleteAsync(uri, { idempotent: true }).catch(e => { if (__DEV__) logger.debug('Recording file cleanup failed:', e); });
         }
       }
 
@@ -334,14 +351,15 @@ class VoiceMessageService {
       await this.stop();
     }
 
-    try {
-      // Resolve the audio source: prefer local URI, fall back to Firebase URL
-      const audioUri = message.uri || message.firebaseUrl;
-      if (!audioUri) {
-        logger.warn('No audio URI or Firebase URL for voice message', message.id);
-        return;
-      }
+    // Resolve the audio source: prefer local URI, fall back to Firebase URL
+    const audioUri = message.uri || message.firebaseUrl;
+    if (!audioUri) {
+      const error = new Error(`No audio URI or Firebase URL for voice message ${message.id}`);
+      logger.warn(error.message);
+      throw error;
+    }
 
+    try {
       // Set audio mode for playback (disable recording mode)
       await setAudioModeAsync({
         allowsRecording: false,
@@ -349,10 +367,16 @@ class VoiceMessageService {
         shouldPlayInBackground: true,
       });
 
+      // CRITICAL: Clean up old subscription BEFORE creating new player
+      if (this.playbackSubscription) {
+        this.playbackSubscription.remove();
+        this.playbackSubscription = null;
+      }
+
       const sound = createAudioPlayer(
         { uri: audioUri },
       );
-      sound.play();
+      await Promise.resolve(sound.play());
 
       this.sound = sound;
       this.isPlaying = true;
@@ -362,15 +386,32 @@ class VoiceMessageService {
       await this.saveMessages();
 
       // Listen for playback completion
-      sound.addListener('playbackStatusUpdate', (status: any) => {
+      const subscription = sound.addListener('playbackStatusUpdate', (status: any) => {
         if (status.playing === false && status.currentTime >= status.duration) {
           this.isPlaying = false;
+          if (this.playbackSubscription === subscription) {
+            this.playbackSubscription.remove();
+            this.playbackSubscription = null;
+          }
+          // FIX: Clean up AudioPlayer native resource to prevent leak.
+          // Without this, each naturally-completed playback leaks one AudioPlayer.
+          if (this.sound === sound) {
+            try { sound.remove(); } catch { /* already removed */ }
+            this.sound = null;
+          }
         }
       });
+      this.playbackSubscription = subscription;
 
       logger.info('Playing voice message', message.id);
     } catch (e) {
+      // CRITICAL: Cleanup on error to prevent orphaned subscriptions
+      if (this.playbackSubscription) {
+        this.playbackSubscription.remove();
+        this.playbackSubscription = null;
+      }
       logger.error('Failed to play voice message', e);
+      throw e;
     }
   }
 
@@ -378,6 +419,10 @@ class VoiceMessageService {
      * Stop playback
      */
   async stop(): Promise<void> {
+    if (this.playbackSubscription) {
+      this.playbackSubscription.remove();
+      this.playbackSubscription = null;
+    }
     if (this.sound) {
       try {
         this.sound.pause();
@@ -402,32 +447,54 @@ class VoiceMessageService {
     try {
       message.to = to;
 
-      // Note: BLE has payload size limits (~200 bytes for advertising)
-      // For larger voice messages, we need to use GATT connections
-      // or split into chunks. For MVP, we'll truncate and warn.
-      // In a real elite implementation, this would be chunked.
-      const truncatedData = message.base64Data.substring(0, 500);
+      // Voice messages over BLE use MeshMediaService for chunked transfer.
+      // This method is a legacy path — use HybridMessageService.sendMediaMessage() instead.
+      // Do NOT mark as delivered since BLE truncation makes the audio unusable.
+      logger.warn('sendVoiceMessage() is deprecated — use HybridMessageService.sendMediaMessage() for voice');
 
-      const payload = JSON.stringify({
-        type: 'VOICE',
-        id: message.id,
-        duration: message.durationMs,
-        audio: truncatedData, // First ~500 chars for preview
-        full: false, // Indicates truncated
-      });
-
-      await bleMeshService.sendMessage(payload, to);
-
-      message.delivered = true;
       this.voiceMessages.push(message);
       await this.saveMessages();
 
-      logger.info('Voice message sent', message.id);
-      return true;
+      return false;
     } catch (e) {
       logger.error('Failed to send voice message', e);
       return false;
     }
+  }
+
+  /**
+   * Destroy the service — clean up all resources.
+   * Call on logout or app shutdown to prevent leaks.
+   */
+  async destroy(): Promise<void> {
+    // Stop any active recording
+    if (this.autoStopTimer) {
+      clearTimeout(this.autoStopTimer);
+      this.autoStopTimer = null;
+    }
+    if (this.recording) {
+      try { await this.recording.stop(); } catch { /* may already be stopped */ }
+      this.recording = null;
+    }
+    this.isRecording = false;
+    this.recordingStartTime = 0;
+
+    // Stop any active playback
+    if (this.playbackSubscription) {
+      this.playbackSubscription.remove();
+      this.playbackSubscription = null;
+    }
+    if (this.sound) {
+      try {
+        this.sound.pause();
+        this.sound.remove();
+      } catch { /* ignore */ }
+      this.sound = null;
+    }
+    this.isPlaying = false;
+
+    // Clear in-memory voice messages to prevent stale data after logout
+    this.voiceMessages = [];
   }
 
   /**
@@ -454,9 +521,27 @@ class VoiceMessageService {
 
   // Private Methods
 
+  // FIX: User-scoped storage key to prevent cross-account voice message data leak
+  private getScopedKey(): string {
+    const uid = identityService.getUid?.();
+    return uid ? `${VOICE_MESSAGE_STORAGE_BASE}:${uid}` : VOICE_MESSAGE_STORAGE_BASE;
+  }
+
   private async loadMessages() {
     try {
-      const data = DirectStorage.getString(VOICE_MESSAGE_STORAGE) ?? null;
+      const scopedKey = this.getScopedKey();
+      let data = DirectStorage.getString(scopedKey) ?? null;
+
+      // Legacy migration: check unscoped key if scoped is empty
+      if (!data && scopedKey !== VOICE_MESSAGE_STORAGE_BASE) {
+        data = DirectStorage.getString(VOICE_MESSAGE_STORAGE_BASE) ?? null;
+        if (data) {
+          DirectStorage.setString(scopedKey, data);
+          DirectStorage.delete(VOICE_MESSAGE_STORAGE_BASE);
+          logger.info('Migrated voice messages to user-scoped storage');
+        }
+      }
+
       if (data) {
         this.voiceMessages = JSON.parse(data);
       }
@@ -469,7 +554,7 @@ class VoiceMessageService {
     try {
       // Keep only last 50 messages
       const toSave = this.voiceMessages.slice(-50);
-      DirectStorage.setString(VOICE_MESSAGE_STORAGE, JSON.stringify(toSave));
+      DirectStorage.setString(this.getScopedKey(), JSON.stringify(toSave));
     } catch (e) {
       logger.warn('Failed to save voice messages');
     }
@@ -497,6 +582,11 @@ class VoiceMessageService {
         return null;
       }
       const storagePath = `voice/${userId}/${message.id}.m4a`;
+
+      // FIX: Ensure Firebase Storage is initialized before upload.
+      // backupToFirebase can be called without prior initialize() —
+      // uploadFile returns null silently if service not ready.
+      await firebaseStorageService.initialize();
 
       // Convert base64 to Blob for upload
       const bytes = Uint8Array.from(Buffer.from(message.base64Data, 'base64'));

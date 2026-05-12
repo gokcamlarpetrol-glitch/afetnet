@@ -100,8 +100,14 @@ export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsS
           text: 'Sıfırla',
           style: 'destructive',
           onPress: async () => {
-            DirectStorage.clearAll();
-            Alert.alert('Başarılı', 'Uygulama sıfırlandı. Lütfen yeniden başlatın.');
+            try {
+              DirectStorage.clearAll();
+              // Sign out and navigate to auth screen
+              const { useAuthStore } = require('../../stores/authStore');
+              await useAuthStore.getState().logout();
+            } catch (e) {
+              Alert.alert('Başarılı', 'Uygulama sıfırlandı. Lütfen yeniden başlatın.');
+            }
           },
         },
       ],
@@ -123,7 +129,7 @@ export default function AdvancedSettingsScreen({ navigation }: AdvancedSettingsS
 
   return (
     <ImageBackground
-      source={require('../../../../assets/images/premium/family_soft_bg.png')}
+      source={require('../../../../assets/images/premium/family_soft_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >

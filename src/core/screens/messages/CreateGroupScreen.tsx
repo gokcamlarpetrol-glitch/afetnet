@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getAuth } from 'firebase/auth';
+import { getFirebaseAuth } from '../../../lib/firebase';
 import { useFamilyStore } from '../../stores/familyStore';
 import { groupChatService } from '../../services/GroupChatService';
 import { identityService } from '../../services/IdentityService';
@@ -25,9 +25,9 @@ import { contactService } from '../../services/ContactService';
 import { colors } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import { isLikelyFirebaseUid } from '../../utils/messaging/identityUtils';
 
 const logger = createLogger('CreateGroupScreen');
-const UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
 
 interface CreateGroupScreenProps {
     navigation: {
@@ -54,19 +54,20 @@ const resolveMemberUid = (member: {
         .map(trimIdentity)
         .filter((value) => value.length > 0);
 
-    const directUid = candidates.find((value) => UID_REGEX.test(value));
+    const directUid = candidates.find((value) => isLikelyFirebaseUid(value));
     if (directUid) {
         return directUid;
     }
 
     for (const candidate of candidates) {
         const resolved = trimIdentity(contactService.resolveCloudUid(candidate));
-        if (UID_REGEX.test(resolved)) {
+        // CRITICAL FIX: If identity resolves to any value, return it.
+        if (resolved) {
             return resolved;
         }
     }
 
-    return '';
+    return candidates.length > 0 ? candidates[0] : '';
 };
 
 const toSelectableMembers = (
@@ -93,7 +94,7 @@ const toSelectableMembers = (
 
 const getCurrentUserSafe = () => {
     try {
-        return getAuth().currentUser;
+        return getFirebaseAuth()?.currentUser ?? null;
     } catch {
         return null;
     }

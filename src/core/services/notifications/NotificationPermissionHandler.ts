@@ -102,6 +102,12 @@ export async function requestPermissions(): Promise<PermissionResult> {
         allowBadge: true,
         allowSound: true,
         allowProvisional: true, // Allow provisional notifications
+        // Sprint Audit FIX A5: Request Critical Alerts permission.
+        // Apple sadece entitlement onaylanmis app'lerde bu izni gosterir; aksi halde
+        // sessiz reddedilir (no-op). Entitlement onaylandiginda otomatik olarak aktif olur.
+        // Bu sayede entitlement onayi geldikten sonra kod degisikligine gerek kalmaz —
+        // sadece App Store update yeterli.
+        allowCriticalAlerts: true,
       };
     }
 

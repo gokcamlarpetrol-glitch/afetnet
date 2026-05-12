@@ -24,9 +24,9 @@ import { identityService } from '../IdentityService';
 
 const logger = createLogger('MeshEmergency');
 
-// Storage keys
-const STORAGE_KEY_EMERGENCY_SETTINGS = '@mesh_emergency_settings';
-const STORAGE_KEY_FAMILY_MEMBERS = '@mesh_family_members';
+// Storage keys — user-scoped to prevent cross-account data leak
+const STORAGE_KEY_EMERGENCY_SETTINGS_PREFIX = '@mesh_emergency_settings_';
+const STORAGE_KEY_FAMILY_MEMBERS_PREFIX = '@mesh_family_members_';
 
 // Configuration
 const EMERGENCY_BEACON_INTERVAL_MS = 30 * 1000; // Broadcast every 30s in emergency
@@ -83,6 +83,7 @@ class MeshEmergencyService {
     // Timers
     private beaconTimer: NodeJS.Timeout | null = null;
     private inactivityTimer: NodeJS.Timeout | null = null;
+    private impactConfirmTimer: NodeJS.Timeout | null = null;
 
     // Sensors
     private accelerometerSubscription: { remove: () => void } | null = null;
@@ -157,7 +158,7 @@ class MeshEmergencyService {
         this.startEmergencyBeacon(reason);
 
         // Notify listeners
-        this.sosCallbacks.forEach(cb => cb(reason, this.lastLocation || undefined));
+        [...this.sosCallbacks].forEach(cb => cb(reason, this.lastLocation || undefined));
 
         // Add to store
         const sosMessage: MeshMessage = {
@@ -215,8 +216,10 @@ class MeshEmergencyService {
             clearInterval(this.beaconTimer);
         }
 
-        this.beaconTimer = setInterval(async () => {
-            await this.broadcastEmergencyBeacon(reason);
+        this.beaconTimer = setInterval(() => {
+            this.broadcastEmergencyBeacon(reason).catch(e => {
+                logger.warn('Emergency beacon broadcast failed:', e);
+            });
         }, EMERGENCY_BEACON_INTERVAL_MS);
     }
 
@@ -321,7 +324,10 @@ class MeshEmergencyService {
 
         // Auto-trigger after 30 seconds if no user activity since impact
         // CRITICAL: If user is unconscious under rubble, this ensures SOS fires
-        setTimeout(() => {
+        // ELITE: Store timer ref so destroy() can cancel it (prevents phantom SOS after shutdown)
+        if (this.impactConfirmTimer) clearTimeout(this.impactConfirmTimer);
+        this.impactConfirmTimer = setTimeout(() => {
+            this.impactConfirmTimer = null;
             // Only trigger if:
             // 1. Not already in emergency mode (user didn't manually trigger)
             // 2. No user activity recorded since the impact (user may be unconscious)
@@ -343,7 +349,7 @@ class MeshEmergencyService {
 
         // Check inactivity periodically
         this.inactivityTimer = setInterval(() => {
-            this.checkInactivity();
+            try { this.checkInactivity(); } catch (e) { if (__DEV__) logger.debug('Inactivity check error:', e); }
         }, 60 * 1000); // Check every minute
     }
 
@@ -458,7 +464,7 @@ class MeshEmergencyService {
                 if (location) member.lastKnownLocation = location;
                 if (status) member.status = status;
 
-                this.familyFoundCallbacks.forEach(cb => cb(member));
+                [...this.familyFoundCallbacks].forEach(cb => cb(member));
                 break;
             }
         }
@@ -588,9 +594,15 @@ class MeshEmergencyService {
     // PERSISTENCE
     // ===========================================================================
 
+    /** Get user-scoped storage key to prevent cross-account data leak */
+    private getScopedKey(prefix: string): string {
+        const uid = identityService.getUid?.() || 'anon';
+        return `${prefix}${uid}`;
+    }
+
     private async saveSettings(): Promise<void> {
         try {
-            DirectStorage.setString(STORAGE_KEY_EMERGENCY_SETTINGS, JSON.stringify(this.settings));
+            DirectStorage.setString(this.getScopedKey(STORAGE_KEY_EMERGENCY_SETTINGS_PREFIX), JSON.stringify(this.settings));
         } catch (error) {
             logger.error('Failed to save emergency settings', error);
         }
@@ -598,7 +610,7 @@ class MeshEmergencyService {
 
     private async loadSettings(): Promise<void> {
         try {
-            const data = DirectStorage.getString(STORAGE_KEY_EMERGENCY_SETTINGS) ?? null;
+            const data = DirectStorage.getString(this.getScopedKey(STORAGE_KEY_EMERGENCY_SETTINGS_PREFIX)) ?? null;
             if (data) {
                 this.settings = { ...this.settings, ...JSON.parse(data) };
             }
@@ -609,7 +621,7 @@ class MeshEmergencyService {
 
     private async saveFamilyMembers(): Promise<void> {
         try {
-            DirectStorage.setString(STORAGE_KEY_FAMILY_MEMBERS, JSON.stringify(this.familyMembers));
+            DirectStorage.setString(this.getScopedKey(STORAGE_KEY_FAMILY_MEMBERS_PREFIX), JSON.stringify(this.familyMembers));
         } catch (error) {
             logger.error('Failed to save family members', error);
         }
@@ -617,7 +629,7 @@ class MeshEmergencyService {
 
     private async loadFamilyMembers(): Promise<void> {
         try {
-            const data = DirectStorage.getString(STORAGE_KEY_FAMILY_MEMBERS) ?? null;
+            const data = DirectStorage.getString(this.getScopedKey(STORAGE_KEY_FAMILY_MEMBERS_PREFIX)) ?? null;
             if (data) {
                 const parsed = JSON.parse(data);
                 this.familyMembers = Array.isArray(parsed) ? parsed : [];
@@ -663,11 +675,32 @@ class MeshEmergencyService {
             clearInterval(this.inactivityTimer);
             this.inactivityTimer = null;
         }
+        // ELITE: Clear impact confirmation timer to prevent phantom SOS after destroy
+        if (this.impactConfirmTimer) {
+            clearTimeout(this.impactConfirmTimer);
+            this.impactConfirmTimer = null;
+        }
         if (this.appStateSubscription) {
             this.appStateSubscription.remove();
             this.appStateSubscription = null;
         }
         this.stopImpactDetection();
+
+        // FIX: Clear callback arrays to prevent stale references after cleanup
+        this.sosCallbacks = [];
+        this.familyFoundCallbacks = [];
+
+        // FIX: Reset state flags so service can be re-initialized
+        this.isActive = false;
+        this.isInEmergencyMode = false;
+        this.impactSamples = [];
+
+        // CRITICAL FIX: Clear identity to prevent old user's data leaking after account switch.
+        // Without this, re-init may use stale myDeviceId/myName if initialize() isn't called.
+        this.myDeviceId = '';
+        this.myName = '';
+        this.lastLocation = null;
+        this.familyMembers = [];
     }
 }
 

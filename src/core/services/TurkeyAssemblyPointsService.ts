@@ -1,12 +1,20 @@
 /**
- * TURKEY ASSEMBLY POINTS SERVICE - ELITE EDITION
- * 
- * Tüm Türkiye için toplanma alanları veritabanı
- * 
+ * TURKEY ASSEMBLY POINTS SERVICE
+ *
+ * Türkiye için toplanma alanları veritabanı (offline cache).
+ *
+ * KAYNAK ŞEFFAFLIĞI:
+ * - Veriler AFAD ve yerel belediyelerin kamuya açık listelerinden derlenmiştir.
+ * - `isAfadApproved` flag'i UI'da "AFAD Listesi" olarak gösterilir; her noktanın
+ *   resmi olarak AFAD tarafından onaylandığını ifade etmez. Periyodik olarak
+ *   AFAD'ın güncel listesi ile karşılaştırılıp doğrulanmalıdır.
+ * - Listenin doğruluğu sürekli güncelleme gerektirir; kullanıcı kendi
+ *   mahallesindeki resmi toplanma alanını yerel valilik/belediye sitesinden
+ *   teyit etmelidir.
+ *
  * Features:
- * - 81 il için toplanma alanları
- * - AFAD onaylı noktalar
- * - Kapasite ve hizmet bilgileri
+ * - 81 il için toplanma alanları (mevcut: 45+ nokta)
+ * - Kapasite ve hizmet bilgileri (yaklaşık)
  * - Offline erişim
  */
 
