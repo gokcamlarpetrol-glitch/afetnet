@@ -384,6 +384,17 @@ export async function sendPushToToken(
             // the top-level data fields into the APNS payload. Without this, iOS
             // notification taps have EMPTY data → handleNotificationTap falls through
             // to "navigate to Home" instead of the target screen.
+            // iOS notification grouping: thread-id from caller's explicit threadId,
+            // or fall back to conversationId so DM/group chats collapse into one stack.
+            const threadId = safeData?.threadId || safeData?.conversationId;
+            const aps: Record<string, unknown> = {
+                alert: { title, body },
+                sound: 'default',
+                badge: 1,
+                'interruption-level': iosInterruptionLevel,
+                'content-available': 1,
+            };
+            if (threadId) aps['thread-id'] = threadId;
             await messaging.send({
                 token,
                 notification: { title, body },
@@ -394,7 +405,7 @@ export async function sendPushToToken(
                 },
                 apns: {
                     payload: {
-                        aps: { alert: { title, body }, sound: 'default', badge: 1, 'interruption-level': iosInterruptionLevel, 'content-available': 1 },
+                        aps,
                         ...(safeData || {}),
                     },
                 },
