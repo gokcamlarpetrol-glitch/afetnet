@@ -474,6 +474,163 @@ class OpenAIService {
   }
 
   /**
+   * Streaming chat — delivers OpenAI response token-by-token via onChunk callback.
+   * Falls back to sync chat() if proxy unavailable, auth missing, or upstream fails.
+   * onChunk(delta, accumulated) fires for each new piece of text.
+   */
+  async chatStream(
+    messages: OpenAIMessage[],
+    onChunk: (delta: string, accumulated: string) => void,
+    options: {
+      maxTokens?: number;
+      temperature?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<string> {
+    const { maxTokens = 500, temperature = 0.7, signal } = options;
+
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return this.getUnavailableMessage();
+    }
+
+    if (this.proxyUrls.length === 0) {
+      // Direct API key path keeps the sync wrapper — streaming flows through the proxy only
+      return this.chat(messages, { maxTokens, temperature });
+    }
+
+    let idToken = await this.getFirebaseIdToken({ waitForUserMs: this.authTokenWaitMs });
+    if (!idToken) {
+      this.warnAuthTokenUnavailable();
+      return this.chat(messages, { maxTokens, temperature });
+    }
+
+    const orderedProxyUrls = this.activeProxyUrl
+      ? [this.activeProxyUrl, ...this.proxyUrls.filter((u) => u !== this.activeProxyUrl)]
+      : [...this.proxyUrls];
+
+    for (const proxyUrl of orderedProxyUrls) {
+      try {
+        let response = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            model: this.model,
+            messages,
+            max_tokens: maxTokens,
+            temperature,
+            stream: true,
+          }),
+          signal,
+        });
+
+        if (response.status === 401 || response.status === 403) {
+          const refreshed = await this.getFirebaseIdToken({ forceRefresh: true, waitForUserMs: 2500 });
+          if (refreshed) {
+            idToken = refreshed;
+            response = await fetch(proxyUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({
+                model: this.model,
+                messages,
+                max_tokens: maxTokens,
+                temperature,
+                stream: true,
+              }),
+              signal,
+            });
+          }
+        }
+
+        if (!response.ok || !response.body) {
+          logger.warn('chatStream proxy non-OK', { url: proxyUrl, status: response.status });
+          if (response.status === 404 || response.status === 405 || response.status >= 500) {
+            continue;
+          }
+          break;
+        }
+
+        this.activeProxyUrl = proxyUrl;
+
+        const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let accumulated = '';
+        let promptTokens = 0;
+        let completionTokens = 0;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith(':')) continue;
+              if (!trimmed.startsWith('data: ')) continue;
+
+              const payload = trimmed.slice(6);
+              if (payload === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed?.afetnet_done && parsed.usage) {
+                  promptTokens = parsed.usage.prompt_tokens || promptTokens;
+                  completionTokens = parsed.usage.completion_tokens || completionTokens;
+                  continue;
+                }
+                if (parsed?.error) {
+                  logger.warn('Stream error chunk:', parsed.error);
+                  continue;
+                }
+                const delta = parsed?.choices?.[0]?.delta?.content;
+                if (typeof delta === 'string' && delta.length > 0) {
+                  accumulated += delta;
+                  try { onChunk(delta, accumulated); } catch { /* swallow callback errors */ }
+                }
+                if (parsed?.usage) {
+                  promptTokens = parsed.usage.prompt_tokens || promptTokens;
+                  completionTokens = parsed.usage.completion_tokens || completionTokens;
+                }
+              } catch {
+                // Non-JSON chunk — already forwarded by server, ignore here
+              }
+            }
+          }
+        } finally {
+          try { reader.releaseLock(); } catch { /* reader may already be closed */ }
+        }
+
+        try {
+          await costTracker.recordCall('chatStream', promptTokens, completionTokens, this.model);
+        } catch { /* cost tracking is best-effort */ }
+
+        return accumulated.trim() || this.getUnavailableMessage();
+      } catch (e) {
+        logger.warn('chatStream attempt failed:', getErrorMessage(e));
+        continue;
+      }
+    }
+
+    // All proxies failed — fall back to synchronous chat so the user still gets an answer
+    return this.chat(messages, { maxTokens, temperature });
+  }
+
+  /**
    * Fallback response generator
    */
   private getFallbackResponse(prompt: string): string {

@@ -402,7 +402,11 @@ export const aiAssistantCoordinator = {
    * Enhances with OpenAI when online for better answers
    * Includes conversation history (Memory)
    */
-  async chat(message: string, history?: { role: 'user' | 'assistant', content: string }[]): Promise<HybridAIResponse> {
+  async chat(
+    message: string,
+    history?: { role: 'user' | 'assistant', content: string }[],
+    onChunk?: (delta: string, accumulated: string) => void,
+  ): Promise<HybridAIResponse> {
     const startTime = Date.now();
 
     try {
@@ -428,7 +432,7 @@ export const aiAssistantCoordinator = {
       // 4. Try online enhancement if appropriate
       if (shouldTryOnline) {
         try {
-          const onlineResponse = await this.getOnlineResponse(message, offlineResponse, history);
+          const onlineResponse = await this.getOnlineResponse(message, offlineResponse, history, onChunk);
           if (onlineResponse) {
             // Append medical disclaimer for health/first-aid intents
             const answer = appendHealthDisclaimer(onlineResponse.answer, onlineResponse.intent);
@@ -471,7 +475,8 @@ export const aiAssistantCoordinator = {
   async getOnlineResponse(
     message: string,
     offlineContext: any,
-    history?: { role: 'user' | 'assistant', content: string }[]
+    history?: { role: 'user' | 'assistant', content: string }[],
+    onChunk?: (delta: string, accumulated: string) => void,
   ): Promise<HybridAIResponse | null> {
     try {
       // ELITE: Using static import to prevent LoadBundleFromServerRequestError
@@ -521,7 +526,11 @@ Bağlam bilgisi:
       // Apply PII redaction to user message before sending to AI
       messagesToSend.push({ role: 'user', content: redactPII(message) });
 
-      const response = await openAIService.chat(messagesToSend);
+      // Stream when caller wired up onChunk (UI shows tokens as they arrive);
+      // otherwise stick with the synchronous chat path so existing consumers don't change behaviour.
+      const response = onChunk
+        ? await openAIService.chatStream(messagesToSend, onChunk)
+        : await openAIService.chat(messagesToSend);
 
       // chat() returns string directly
       if (response && typeof response === 'string' && response.length > 0) {

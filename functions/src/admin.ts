@@ -350,7 +350,7 @@ export const registerFCMToken = functions
 
 export const openAIChatProxy = functions
     .region(REGION)
-    .runWith({ timeoutSeconds: 60, memory: '256MB' })
+    .runWith({ timeoutSeconds: 300, memory: '256MB' })
     .https.onRequest(async (req, res) => {
         // FIX #6: Restrict CORS to AfetNet domains instead of wildcard
         const proxyAllowedOrigins = [
@@ -466,10 +466,15 @@ export const openAIChatProxy = functions
         // Previous cap of 1000 was truncating PreparednessPlanService JSON responses
         const maxTokens = Math.max(16, Math.min(4000, Math.floor(requestedMaxTokens)));
         const temperature = Math.max(0, Math.min(1.5, requestedTemperature));
+        // Streaming: when body.stream === true, forward OpenAI SSE chunks line-by-line.
+        // Backward compatible — sync clients omit the flag and get a single JSON response.
+        const streamRequested = body.stream === true;
 
         try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 25000);
+            // Stream responses keep the connection open until OpenAI finishes — give them more headroom.
+            const upstreamTimeoutMs = streamRequested ? 240_000 : 25_000;
+            const timeout = setTimeout(() => controller.abort(), upstreamTimeoutMs);
 
             let openAIResponse: Response;
             try {
@@ -484,6 +489,7 @@ export const openAIChatProxy = functions
                         messages,
                         max_tokens: maxTokens,
                         temperature,
+                        ...(streamRequested ? { stream: true, stream_options: { include_usage: true } } : {}),
                     }),
                     signal: controller.signal,
                 });
@@ -499,7 +505,77 @@ export const openAIChatProxy = functions
                     body: errorText.slice(0, 500),
                     uid,
                 });
-                res.status(502).json({ error: 'OpenAI upstream error' });
+                if (streamRequested) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.write(`data: ${JSON.stringify({ error: 'OpenAI upstream error', status: openAIResponse.status })}\n\n`);
+                    res.end();
+                } else {
+                    res.status(502).json({ error: 'OpenAI upstream error' });
+                }
+                return;
+            }
+
+            if (streamRequested) {
+                // Forward OpenAI SSE response chunks straight to the client.
+                // Client (OpenAIService.chatStream) parses `data: {...}` lines and accumulates content.
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache, no-transform');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Accel-Buffering', 'no');
+                if (typeof (res as { flushHeaders?: () => void }).flushHeaders === 'function') {
+                    (res as { flushHeaders: () => void }).flushHeaders();
+                }
+
+                const reader = openAIResponse.body?.getReader();
+                if (!reader) {
+                    res.write(`data: ${JSON.stringify({ error: 'No upstream body' })}\n\n`);
+                    res.end();
+                    return;
+                }
+
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let promptTokens = 0;
+                let completionTokens = 0;
+
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (!trimmed || trimmed.startsWith(':')) continue;
+                            res.write(line + '\n');
+                            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+                                try {
+                                    const payload = JSON.parse(trimmed.slice(6));
+                                    if (payload && typeof payload === 'object' && payload.usage) {
+                                        promptTokens = payload.usage.prompt_tokens || promptTokens;
+                                        completionTokens = payload.usage.completion_tokens || completionTokens;
+                                    }
+                                } catch {
+                                    // Non-JSON chunk — already forwarded, ignore parsing failure
+                                }
+                            }
+                        }
+                        // Emit blank line between events to flush each SSE record promptly
+                        res.write('\n');
+                    }
+                    // Final marker carries final usage tally so the client can record cost
+                    res.write(`data: ${JSON.stringify({ afetnet_done: true, usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens } })}\n\n`);
+                    res.end();
+                } catch (streamErr) {
+                    functions.logger.error('OpenAI stream forward error', { error: streamErr, uid });
+                    try {
+                        res.write(`data: ${JSON.stringify({ error: 'stream interrupted' })}\n\n`);
+                    } catch { /* socket may already be closed */ }
+                    res.end();
+                }
                 return;
             }
 

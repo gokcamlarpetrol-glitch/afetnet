@@ -205,7 +205,53 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
         const offlineResult = await offlineAIService.getResponse(text);
         response = { ...offlineResult, source: 'offline', responseTime: Date.now() - Date.now() };
       } else {
-        response = await aiAssistantCoordinator.chat(text, history);
+        // Streaming UX: insert a placeholder AI bubble immediately, then mutate its text as
+        // tokens arrive over SSE. The user sees the answer materialize in real time
+        // instead of waiting 3-5s for the full payload.
+        const streamingId = `stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        let receivedAnyChunk = false;
+        setMessages(prev => [...prev, {
+          id: streamingId,
+          text: '',
+          sender: 'ai',
+          timestamp: Date.now(),
+        }]);
+        setIsTyping(false); // streaming bubble replaces the typing indicator
+
+        response = await aiAssistantCoordinator.chat(text, history, (_delta, accumulated) => {
+          receivedAnyChunk = true;
+          setMessages(prev => prev.map(m => (m.id === streamingId ? { ...m, text: accumulated } : m)));
+        });
+
+        // Finalize the streaming bubble with full metadata so suggested actions etc. render.
+        // Fallback to response.answer when no chunks arrived (offline route or sync path).
+        const finalText = receivedAnyChunk ? (response.answer || '') : response.answer;
+        setMessages(prev => prev.map(m => (m.id === streamingId ? {
+          ...m,
+          text: finalText,
+          source: response.source,
+          emergencyLevel: response.emergencyLevel,
+          responseTime: response.responseTime,
+          suggestedActions: response.suggestedActions,
+        } : m)));
+
+        // ELITE: Emergency haptic feedback
+        if (response.emergencyLevel === 'critical') {
+          haptics.notificationError();
+        } else if (response.emergencyLevel === 'urgent') {
+          haptics.notificationWarning();
+        } else {
+          haptics.notificationSuccess();
+        }
+
+        // Track AI conversation metrics (unchanged)
+        firebaseAnalyticsService.logEvent('ai_conversation', {
+          source: response.source,
+          response_time_ms: response.responseTime,
+          emergency_level: response.emergencyLevel,
+          query_length: text.length,
+        });
+        return; // streaming path already rendered the message
       }
 
       const aiMsg: Message = {
