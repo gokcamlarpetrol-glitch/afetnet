@@ -52,7 +52,7 @@ const NEWS_SOURCES: NewsSource[] = [
   {
     id: 'ntv-sondakika',
     name: 'NTV',
-    url: 'https://www.ntv.com.tr/rss/sondakika',
+    url: 'https://www.ntv.com.tr/son-dakika.rss',
     category: 'earthquake',
     keywords: ['deprem', 'sarsıntı', 'son deprem'],
     maxItems: 20,
@@ -63,14 +63,6 @@ const NEWS_SOURCES: NewsSource[] = [
     url: 'https://www.haberturk.com/rss/manset.xml',
     category: 'general',
     keywords: ['deprem', 'sarsıntı', 'AFAD', 'fay'],
-    maxItems: 15,
-  },
-  {
-    id: 'hurriyet',
-    name: 'Hürriyet',
-    url: 'https://www.hurriyet.com.tr/rss/turkiye',
-    category: 'general',
-    keywords: ['deprem', 'sarsıntı', 'son dakika deprem'],
     maxItems: 15,
   },
   // Yeni eklenen popüler Türk haber kanalları
@@ -85,7 +77,7 @@ const NEWS_SOURCES: NewsSource[] = [
   {
     id: 'sabah',
     name: 'Sabah',
-    url: 'https://www.sabah.com.tr/rss/turkiye.xml',
+    url: 'https://www.sabah.com.tr/rss/anasayfa.xml',
     category: 'general',
     keywords: ['deprem', 'sarsıntı', 'afet'],
     maxItems: 15,
@@ -93,7 +85,7 @@ const NEWS_SOURCES: NewsSource[] = [
   {
     id: 'milliyet',
     name: 'Milliyet',
-    url: 'https://www.milliyet.com.tr/rss/rssnew/gundemrss.xml',
+    url: 'https://www.milliyet.com.tr/rss/rssnew/sondakikarss.xml',
     category: 'general',
     keywords: ['deprem', 'sarsıntı', 'AFAD'],
     maxItems: 15,
@@ -109,7 +101,7 @@ const NEWS_SOURCES: NewsSource[] = [
   {
     id: 'cumhuriyet',
     name: 'Cumhuriyet',
-    url: 'https://www.cumhuriyet.com.tr/rss/son_dakika.xml',
+    url: 'https://www.cumhuriyet.com.tr/rss',
     category: 'general',
     keywords: ['deprem', 'sarsıntı', 'afet'],
     maxItems: 15,
@@ -295,46 +287,93 @@ class NewsAggregatorService {
     const articles: NewsArticle[] = [];
 
     try {
-      // <item> tag'lerini bul
-      // ELITE: Use compatible regex for all JS engines (including Hermes)
-      const itemRegex = /<item>(.*?)<\/item>/g;
-      const matches: RegExpExecArray[] = [];
-      let match: RegExpExecArray | null;
-      while ((match = itemRegex.exec(xmlText)) !== null) {
-        matches.push(match);
+      const rssItems = this.extractBlocks(xmlText, 'item');
+      for (const itemXml of rssItems) {
+        const article = this.parseRSSItem(itemXml, newsSource);
+        if (article) articles.push(article);
       }
 
-      for (const match of matches) {
-        const itemXml = match[1];
-
-        // Title, link, pubDate extract et
-        const title = this.extractTag(itemXml, 'title');
-        const link = this.extractTag(itemXml, 'link');
-        const pubDate = this.extractTag(itemXml, 'pubDate');
-        const description = this.extractTag(itemXml, 'description');
-        const source = this.extractTag(itemXml, 'source') || newsSource.name;
-
-        if (title && link) {
-          const cleanTitle = this.cleanHTML(title);
-          const cleanSummary = this.cleanHTML(description || title);
-          const sanitizedUrl = this.sanitizeUrl(link, newsSource.url);
-
-          articles.push({
-            id: `news_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            title: cleanTitle,
-            summary: cleanSummary,
-            url: sanitizedUrl,
-            source: this.cleanHTML(source),
-            publishedAt: pubDate ? new Date(pubDate).getTime() : Date.now(),
-            category: newsSource.category,
-          });
-        }
+      const atomEntries = this.extractBlocks(xmlText, 'entry');
+      for (const entryXml of atomEntries) {
+        const article = this.parseAtomEntry(entryXml, newsSource);
+        if (article) articles.push(article);
       }
     } catch (error) {
       logger.error('Failed to parse RSS feed:', error);
     }
 
     return articles;
+  }
+
+  private parseRSSItem(itemXml: string, newsSource: NewsSource): NewsArticle | null {
+    const title = this.extractTag(itemXml, 'title');
+    const link = this.extractTag(itemXml, 'link') || this.extractTag(itemXml, 'guid');
+    const pubDate = this.extractTag(itemXml, 'pubDate') || this.extractTag(itemXml, 'dc:date');
+    const description = this.extractTag(itemXml, 'description') || this.extractTag(itemXml, 'content:encoded');
+    const source = this.extractTag(itemXml, 'source') || newsSource.name;
+
+    return this.buildParsedArticle({
+      title,
+      link,
+      summary: description || title,
+      source,
+      publishedAtText: pubDate,
+      imageUrl: this.extractMediaUrl(itemXml),
+      newsSource,
+    });
+  }
+
+  private parseAtomEntry(entryXml: string, newsSource: NewsSource): NewsArticle | null {
+    const title = this.extractTag(entryXml, 'title');
+    const link = this.extractTagAttribute(entryXml, 'link', 'href') || this.extractTag(entryXml, 'link') || this.extractTag(entryXml, 'id');
+    const updated = this.extractTag(entryXml, 'published') || this.extractTag(entryXml, 'updated');
+    const summary = this.extractTag(entryXml, 'summary') || this.extractTag(entryXml, 'content') || title;
+    const sourceTitle = this.extractNestedTag(entryXml, 'source', 'title');
+
+    return this.buildParsedArticle({
+      title,
+      link,
+      summary,
+      source: sourceTitle || newsSource.name,
+      publishedAtText: updated,
+      imageUrl: this.extractMediaUrl(entryXml),
+      newsSource,
+    });
+  }
+
+  private buildParsedArticle({
+    title,
+    link,
+    summary,
+    source,
+    publishedAtText,
+    imageUrl,
+    newsSource,
+  }: {
+    title: string;
+    link: string;
+    summary: string;
+    source: string;
+    publishedAtText?: string;
+    imageUrl?: string;
+    newsSource: NewsSource;
+  }): NewsArticle | null {
+    const cleanTitle = this.cleanHTML(title);
+    const sanitizedUrl = this.sanitizeUrl(this.cleanHTML(link), newsSource.url);
+    if (!cleanTitle || !sanitizedUrl || sanitizedUrl === '#') {
+      return null;
+    }
+
+    return {
+      id: `news_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      title: cleanTitle,
+      summary: this.cleanHTML(summary || title),
+      url: sanitizedUrl,
+      source: this.cleanHTML(source || newsSource.name),
+      publishedAt: this.parseFeedTimestamp(publishedAtText),
+      imageUrl: imageUrl ? this.sanitizeUrl(imageUrl, newsSource.url) : undefined,
+      category: newsSource.category,
+    };
   }
 
   private async fetchFromSource(source: NewsSource): Promise<NewsArticle[]> {
@@ -383,9 +422,43 @@ class NewsAggregatorService {
   private extractTag(xml: string, tag: string): string {
     // ELITE: Use compatible regex for all JS engines (including Hermes)
     // Remove 's' flag and use [\s\S] instead of . for multiline matching
-    const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`);
+    const regex = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i');
     const match = xml.match(regex);
     return match ? match[1].trim() : '';
+  }
+
+  private extractBlocks(xml: string, tag: string): string[] {
+    const blocks: string[] = [];
+    const regex = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(xml)) !== null) {
+      blocks.push(match[1]);
+    }
+    return blocks;
+  }
+
+  private extractTagAttribute(xml: string, tag: string, attribute: string): string {
+    const regex = new RegExp(`<${tag}\\b[^>]*\\s${attribute}=["']([^"']+)["'][^>]*>`, 'i');
+    const match = xml.match(regex);
+    return match ? match[1].trim() : '';
+  }
+
+  private extractNestedTag(xml: string, parentTag: string, childTag: string): string {
+    const parent = this.extractTag(xml, parentTag);
+    return parent ? this.extractTag(parent, childTag) : '';
+  }
+
+  private extractMediaUrl(xml: string): string | undefined {
+    return this.extractTagAttribute(xml, 'media:content', 'url')
+      || this.extractTagAttribute(xml, 'media:thumbnail', 'url')
+      || this.extractTagAttribute(xml, 'enclosure', 'url')
+      || undefined;
+  }
+
+  private parseFeedTimestamp(value?: string): number {
+    if (!value) return Date.now();
+    const parsed = Date.parse(this.cleanHTML(value));
+    return Number.isFinite(parsed) ? parsed : Date.now();
   }
 
   /**
@@ -407,6 +480,15 @@ class NewsAggregatorService {
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#(\d+);/g, (_, code) => {
+        const parsed = Number(code);
+        return Number.isFinite(parsed) ? String.fromCharCode(parsed) : '';
+      })
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => {
+        const parsed = parseInt(code, 16);
+        return Number.isFinite(parsed) ? String.fromCharCode(parsed) : '';
+      })
       .trim();
   }
 
@@ -855,7 +937,7 @@ class NewsAggregatorService {
 
     // CRITICAL: Check domain - be permissive to allow all legitimate news sources
     const isAllowedDomain = allowedDomains.some(domain =>
-      hostname.includes(domain) || hostname.endsWith(domain) || hostname === domain,
+      hostname === domain || hostname.endsWith(`.${domain}`),
     );
 
     if (!isAllowedDomain) {
@@ -884,7 +966,8 @@ class NewsAggregatorService {
         const location = response.headers.get('location');
         if (location && maxRedirects > 0) {
           // Recursively validate redirect URL with decremented depth
-          return this.fetchWithTimeout(location, maxRedirects - 1);
+          const redirectUrl = new URL(location, parsedUrl).toString();
+          return this.fetchWithTimeout(redirectUrl, maxRedirects - 1);
         }
         // Max redirects exhausted — log and return empty
         logger.warn(`Max redirects exhausted for ${url}`);
@@ -928,7 +1011,13 @@ class NewsAggregatorService {
    */
   async convertEarthquakesToNews(): Promise<NewsArticle[]> {
     try {
-      const { useEarthquakeStore } = await import('../../stores/earthquakeStore');
+      let earthquakeStoreModule: typeof import('../../stores/earthquakeStore');
+      try {
+        earthquakeStoreModule = require('../../stores/earthquakeStore');
+      } catch {
+        earthquakeStoreModule = await import('../../stores/earthquakeStore');
+      }
+      const { useEarthquakeStore } = earthquakeStoreModule;
       const earthquakes = useEarthquakeStore.getState().items;
 
       // Son 24 saatteki buyuk depremleri (>= 4.0) habere donustur

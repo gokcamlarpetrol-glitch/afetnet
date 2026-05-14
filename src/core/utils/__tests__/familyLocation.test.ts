@@ -74,6 +74,26 @@ describe('familyLocation resolver', () => {
     })).toBe(true);
   });
 
+  it('prefers timestamped last known location over untimestamped legacy coordinates', () => {
+    const resolved = resolveFamilyMemberLocation({
+      latitude: 39.9334,
+      longitude: 32.8597,
+      location: undefined,
+      lastKnownLocation: {
+        latitude: 41.0082,
+        longitude: 28.9784,
+        timestamp: 1_780_000_000_000,
+      },
+    });
+
+    expect(resolved).toEqual({
+      latitude: 41.0082,
+      longitude: 28.9784,
+      timestamp: 1_780_000_000_000,
+      source: 'lastKnown',
+    });
+  });
+
   it('returns null for invalid coordinates', () => {
     expect(resolveFamilyMemberLocation({
       latitude: 200,

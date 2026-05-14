@@ -26,15 +26,20 @@ service firebase.storage {
                        (isAuthenticated() && request.auth.uid == userId);
     }
     
-    // Elite Security: Emergency SOS images - Public read for emergency, strict write
-    // SECURITY FIX: Write requires authentication (removed metadata-only fallback)
-    match /sos/{sosId}/{allPaths=**} {
-      allow read: if true; // Public read for emergency response (life-saving)
+    // Elite Security: Emergency SOS media.
+    // In-app responders are authenticated; public unauthenticated reads would expose
+    // emergency photos/audio if a download path leaks. The first path segment is the
+    // uploader Firebase Auth UID, matching account-deletion cleanup paths.
+    match /sos/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
       allow write: if isAuthenticated() &&
+                      request.auth.uid == userId &&
+                      request.resource.metadata.ownerUid == request.auth.uid &&
                       request.resource.size <= 10 * 1024 * 1024 && // Max 10MB
                       request.resource.contentType.matches('(image|video|audio)/.*');
       allow delete: if isSystemClient() || 
-                       (isAuthenticated() && resource.metadata.ownerUid == request.auth.uid);
+                       (isAuthenticated() && request.auth.uid == userId &&
+                        resource.metadata.ownerUid == request.auth.uid);
     }
     
     // Elite Security: Family member images - STRICT access control
@@ -53,34 +58,42 @@ service firebase.storage {
                         resource.metadata.ownerUid == request.auth.uid);
     }
     
-    // Voice messages - Owner-write, authenticated-read
-    // SECURITY MODEL: Recipients receive download URLs via Firestore messages,
-    // which are participant-restricted (conversations/{id}/messages with senderUid
-    // validation). Storage rules cannot query Firestore to verify conversation
-    // membership, so read access is auth-gated. Firebase Storage download URLs
-    // contain a signed token and are not enumerable or guessable.
-    // Write is path-restricted: only the UID path owner can upload.
+    // Voice messages - Owner-write, recipient-or-owner read.
+    // P0-10: Uploaders MUST set metadata.uploaderUid and metadata.recipientUids.
     match /voice/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource.metadata != null && resource.metadata.uploaderUid == request.auth.uid) ||
+        (resource.metadata != null && resource.metadata.recipientUids != null &&
+         resource.metadata.recipientUids.matches('(^|,)' + request.auth.uid + '(,|$)'))
+      );
       allow write: if isAuthenticated() &&
                       request.auth.uid == userId &&
+                      request.resource.metadata.uploaderUid == request.auth.uid &&
                       request.resource.size <= 2 * 1024 * 1024 && // Max 2MB (30s audio)
                       request.resource.contentType.matches('audio/.*');
       allow delete: if isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Chat media (images, voice in conversations)
-    // SECURITY MODEL: Files are uploaded to chat/{sender.uid}/timestamp.ext.
-    // Recipients receive download URLs via Firestore messages, which are
-    // participant-restricted (conversations/{id}/messages with senderUid validation).
-    // Storage rules cannot query Firestore for conversation membership, so read
-    // access requires authentication only. Firebase Storage download URLs contain
-    // a signed token and are not enumerable or guessable.
-    // Write is path-restricted: only the UID path owner can upload.
+    // Chat media (images, voice in conversations).
+    //
+    // P0-10 (Phase 0): Read access is now uploader-or-recipient gated using
+    // file metadata. Uploaders MUST write the following custom metadata keys:
+    //   • uploaderUid   — must equal request.auth.uid
+    //   • recipientUids — comma-separated UIDs allowed to read the file
+    // A recipient that is not listed cannot read the object even with a valid
+    // download URL — the previous "any authenticated user" rule was too
+    // permissive given that Firebase Storage download URLs can be forwarded.
     match /chat/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource.metadata != null && resource.metadata.uploaderUid == request.auth.uid) ||
+        (resource.metadata != null && resource.metadata.recipientUids != null &&
+         resource.metadata.recipientUids.matches('(^|,)' + request.auth.uid + '(,|$)'))
+      );
       allow write: if isAuthenticated() &&
                       request.auth.uid == userId &&
+                      request.resource.metadata.uploaderUid == request.auth.uid &&
                       request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
                       (request.resource.contentType.matches('image/.*') ||
                        request.resource.contentType.matches('audio/.*'));
@@ -89,15 +102,20 @@ service firebase.storage {
 
     // Group chat media (family/group conversation attachments)
     // Path: group-chat/{groupId}/{ownerUid}/{file}
-    // SECURITY MODEL: Same as chat media — Firestore family/conversation rules
-    // control who receives the download URL. Storage read is auth-gated since
-    // Storage rules cannot verify group membership. Download URLs contain a
-    // signed token and are not enumerable or guessable.
-    // Write is path-restricted: only the UID path owner can upload.
+    //
+    // P0-10: Same uploader-or-recipient gating as chat/, plus the upload must
+    // tag the groupId in metadata so a future per-group rule can be applied
+    // without re-uploading.
     match /group-chat/{groupId}/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource.metadata != null && resource.metadata.uploaderUid == request.auth.uid) ||
+        (resource.metadata != null && resource.metadata.recipientUids != null &&
+         resource.metadata.recipientUids.matches('(^|,)' + request.auth.uid + '(,|$)'))
+      );
       allow write: if isAuthenticated() &&
                       request.auth.uid == userId &&
+                      request.resource.metadata.uploaderUid == request.auth.uid &&
                       request.resource.size <= 10 * 1024 * 1024 &&
                       (request.resource.contentType.matches('image/.*') ||
                        request.resource.contentType.matches('audio/.*'));

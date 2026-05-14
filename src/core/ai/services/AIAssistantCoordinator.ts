@@ -121,6 +121,17 @@ export const aiAssistantCoordinator = {
       }
 
       store.setPreparednessPlan(plan);
+      try {
+        const { usePreparednessStore } = await import('../stores/preparednessStore');
+        usePreparednessStore.setState({
+          plan,
+          currentPlanId: plan.id,
+          loading: false,
+          error: null,
+        });
+      } catch (syncError) {
+        logger.debug('Preparedness store sync skipped:', syncError);
+      }
       logger.info('Hazırlık planı güncellendi');
       return plan;
     } catch (error: unknown) {
@@ -347,6 +358,55 @@ export const aiAssistantCoordinator = {
     }
   },
 
+  /**
+   * P0-6: Build a default EmergencyContext for the current user.
+   *
+   * Without this, PanicAssistantService.getEmergencyActions(scenario) is
+   * called with `context === undefined`, and the rule-based fallback
+   * silently assumes "indoor user in apartment". An open-field user, a
+   * driver, and a user on the Antalya coast all get the same
+   * "duck under a table" advice — which is wrong and potentially deadly.
+   *
+   * The heuristic here is intentionally conservative:
+   *   • If we have a GPS fix AND it's inside one of the Turkish coastal
+   *     bboxes → environment = 'coastal'
+   *   • Otherwise → environment = 'inside' (the safest default for the
+   *     majority of users in apartment-dense Turkey)
+   *   • Mode of transport is not detectable on RN without Motion API
+   *     permission, so 'vehicle' must be set by an explicit caller (a
+   *     future "Yoldayım" UI button).
+   *
+   * residenceType defaults to 'apartment' (P0-14) and can be overridden
+   * by a future onboarding question.
+   */
+  buildDefaultEmergencyContext(): { environment: 'inside' | 'outside' | 'vehicle' | 'coastal' | 'unknown'; residenceType: 'apartment' | 'detached' | 'workplace' | 'other'; userLocation?: { latitude: number; longitude: number } } {
+    let environment: 'inside' | 'outside' | 'vehicle' | 'coastal' | 'unknown' = 'inside';
+    let userLocation: { latitude: number; longitude: number } | undefined;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { useUserStore } = require('../../stores/userStore');
+      const loc = useUserStore.getState().lastKnownLocation;
+      if (loc && Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
+        userLocation = { latitude: loc.latitude, longitude: loc.longitude };
+        // Coarse coastal bbox check (mirrors PanicAssistantService.isNearTurkishCoast)
+        const lat = loc.latitude;
+        const lng = loc.longitude;
+        const COASTS = [
+          { latMin: 40.0, latMax: 41.4, lngMin: 26.0, lngMax: 30.5 },
+          { latMin: 36.5, latMax: 40.5, lngMin: 25.5, lngMax: 28.2 },
+          { latMin: 35.8, latMax: 37.4, lngMin: 28.0, lngMax: 36.5 },
+          { latMin: 40.8, latMax: 42.2, lngMin: 27.5, lngMax: 41.8 },
+        ];
+        if (COASTS.some(b => lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax)) {
+          environment = 'coastal';
+        }
+      }
+    } catch { /* userStore unavailable — fall back to defaults */ }
+
+    return { environment, residenceType: 'apartment', userLocation };
+  },
+
   async ensurePanicAssistant(scenario: 'earthquake' | 'flood' | 'fire' = 'earthquake', force = false) {
     const store = useAIAssistantStore.getState();
 
@@ -365,10 +425,29 @@ export const aiAssistantCoordinator = {
 
     try {
       store.setPanicAssistantLoading(true);
-      const actions = await panicAssistantService.getEmergencyActions(scenario);
+      // P0-6: Always pass an explicit context so location/environment-specific
+      // advice (open-field, vehicle, coastal) wins over the indoor default.
+      const ctx = this.buildDefaultEmergencyContext();
+      const actions = await panicAssistantService.getEmergencyActions(scenario, ctx);
       const completedCount = actions.filter(a => a.completed).length;
       const totalCount = actions.length;
       const criticalRemaining = actions.filter(a => !a.completed && (a.warningLevel === 'critical' || a.warningLevel === 'emergency')).length;
+
+      // P0-7: Attach a non-dismissable medical/safety disclaimer to every
+      // action list. UI is required to render `aiDisclaimer` as a footer
+      // banner. The text differs slightly depending on whether OpenAI was
+      // used (currently OpenAI is configured per project — assume yes for
+      // the disclaimer wording; the static fallback wording is still safe).
+      const aiUsed = (() => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { openAIService } = require('./OpenAIService');
+          return openAIService.isConfigured?.() === true;
+        } catch { return false; }
+      })();
+      const disclaimer = aiUsed
+        ? 'Bu tavsiyeler yapay zekâ tarafından üretildi. Acil tıbbi durumda 112\'yi arayın. AfetNet, profesyonel tıbbi veya kurtarma hizmetinin yerine geçmez.'
+        : 'Bu tavsiyeler bilgilendirme amaçlıdır. Acil tıbbi durumda 112\'yi arayın. AfetNet, profesyonel tıbbi veya kurtarma hizmetinin yerine geçmez.';
 
       const payload = {
         isActive: true,
@@ -377,8 +456,10 @@ export const aiAssistantCoordinator = {
         lastUpdate: Date.now(),
         completedActionsCount: completedCount,
         totalActionsCount: totalCount,
-        progressPercentage: Math.round((completedCount / totalCount) * 100),
+        progressPercentage: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
         criticalActionsRemaining: criticalRemaining,
+        aiDisclaimer: disclaimer,
+        isAIGenerated: aiUsed,
       };
       store.setPanicAssistant(payload);
       logger.info('Panik asistan aksiyonları güncellendi');
@@ -461,7 +542,7 @@ export const aiAssistantCoordinator = {
       return {
         answer: 'Şu an yanıt oluşturulamadı. Acil durumlarda 112\'yi arayın.',
         confidence: 0.5,
-        intent: 'UNKNOWN' as any,
+        intent: 'UNKNOWN',
         source: 'offline',
         emergencyLevel: 'normal',
         responseTime: Date.now() - startTime,

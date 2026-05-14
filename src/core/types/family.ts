@@ -48,6 +48,8 @@ export interface FamilyMember {
     source: 'gps' | 'mesh' | 'cloud' | 'manual';
   };
   batteryLevel?: number;
+  /** Last trusted battery telemetry timestamp. Prevents stale battery snapshots from looking current. */
+  batteryUpdatedAt?: number;
   isOnline?: boolean;
   deviceId?: string; // BLE mesh device ID — sadece offline mesh routing için
   avatarUrl?: string;

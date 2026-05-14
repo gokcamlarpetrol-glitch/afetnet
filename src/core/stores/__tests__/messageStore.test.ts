@@ -94,6 +94,40 @@ describe('messageStore', () => {
             const state = useMessageStore.getState();
             expect(state.messages).toHaveLength(1);
         });
+
+        it('uses a deterministic tie-breaker for same-timestamp conversation previews', async () => {
+            const timestamp = Date.now();
+
+            await useMessageStore.getState().addMessage(createMockMessage({
+                id: 'msg-b',
+                content: 'Second message',
+                timestamp,
+            }) as any);
+            await useMessageStore.getState().addMessage(createMockMessage({
+                id: 'msg-a',
+                content: 'First message',
+                timestamp,
+            }) as any);
+
+            useMessageStore.getState().updateConversations();
+
+            const conversation = useMessageStore.getState().conversations[0];
+            expect(conversation.lastMessage).toBe('Second message');
+            expect(useMessageStore.getState().getConversationMessages(OTHER_UID).map(m => m.id)).toEqual(['msg-a', 'msg-b']);
+        });
+
+        it('shows useful previews for media messages with empty content', async () => {
+            await useMessageStore.getState().addMessage(createMockMessage({
+                id: 'msg-photo',
+                content: '',
+                mediaType: 'image',
+                timestamp: Date.now(),
+            }) as any);
+
+            useMessageStore.getState().updateConversations();
+
+            expect(useMessageStore.getState().conversations[0].lastMessage).toBe('Fotoğraf');
+        });
     });
 
     describe('markAsRead', () => {
@@ -167,6 +201,33 @@ describe('messageStore', () => {
 
             expect(firebaseMessageOperationsMock.findOrCreateDMConversation).toHaveBeenCalledTimes(1);
             expect(firebaseMessageOperationsMock.markConversationRead).toHaveBeenCalledWith(ME_UID, 'conv-fallback');
+        });
+    });
+
+    describe('addConversation', () => {
+        it('does not regress preview text when older metadata arrives late', async () => {
+            await useMessageStore.getState().addConversation({
+                userId: OTHER_UID,
+                userName: 'Other User',
+                lastMessage: 'Newest preview',
+                lastMessageTime: 2000,
+                unreadCount: 0,
+                lastMessageStatus: 'sent',
+            });
+
+            await useMessageStore.getState().addConversation({
+                userId: OTHER_UID,
+                userName: 'Other User',
+                lastMessage: 'Older preview',
+                lastMessageTime: 1000,
+                unreadCount: 0,
+                lastMessageStatus: 'delivered',
+            });
+
+            const conversation = useMessageStore.getState().conversations[0];
+            expect(conversation.lastMessage).toBe('Newest preview');
+            expect(conversation.lastMessageTime).toBe(2000);
+            expect(conversation.lastMessageStatus).toBe('sent');
         });
     });
 

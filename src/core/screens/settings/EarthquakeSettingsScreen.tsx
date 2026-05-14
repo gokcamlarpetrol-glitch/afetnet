@@ -23,6 +23,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, typography } from '../../theme';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
+import {
+  CRITICAL_EEW_NOTIFICATION_DEFAULT_LABEL,
+  CRITICAL_EEW_NOTIFICATION_MIN_MAGNITUDE,
+  GENERAL_EARTHQUAKE_NOTIFICATION_DEFAULT_LABEL,
+  GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE,
+} from '../../config/earthquakeDefaults';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 // ELITE: Proper navigation typing for type safety
@@ -284,13 +290,22 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bildirim Eşikleri</Text>
 
+          <View style={[styles.infoCard, styles.thresholdInfoCard]}>
+            <Ionicons name="information-circle" size={24} color={colors.status.info} />
+            <Text style={styles.infoText}>
+              Varsayılan genel deprem bildirimi {GENERAL_EARTHQUAKE_NOTIFICATION_DEFAULT_LABEL} için açıktır.
+              M5.0 altı depremler Son Depremler listesinde görünür; bildirim almak isterseniz eşiği manuel düşürebilirsiniz.
+              Kritik alarm varsayılanı {CRITICAL_EEW_NOTIFICATION_DEFAULT_LABEL}; M4.0-M5.4 yakın uyarı, M5.5+ geniş kritik alarmdır.
+            </Text>
+          </View>
+
           {renderInputRow(
             'notifications',
-            'Minimum Büyüklük',
-            'Bu büyüklüğün altındaki depremler için bildirim gönderilmez',
+            'Genel Bildirim Eşiği',
+            `Varsayılan ${GENERAL_EARTHQUAKE_NOTIFICATION_DEFAULT_LABEL}; altındaki depremler bildirim göndermez`,
             magnitudeInput,
             handleMagnitudeChange,
-            '3.0',
+            GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE.toFixed(1),
             'numeric',
             'M',
           )}
@@ -309,10 +324,10 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
           {renderInputRow(
             'warning',
             'Kritik Büyüklük Eşiği',
-            'Bu büyüklüğün üstündeki depremler kritik olarak işaretlenir',
+            `Varsayılan ${CRITICAL_EEW_NOTIFICATION_DEFAULT_LABEL}; M5.5+ geniş kritik alarmdır`,
             criticalMagnitudeInput,
             handleCriticalMagnitudeChange,
-            '6.0',
+            CRITICAL_EEW_NOTIFICATION_MIN_MAGNITUDE.toFixed(1),
             'numeric',
             'M',
           )}
@@ -645,7 +660,7 @@ export default function EarthquakeSettingsScreen({ navigation }: EarthquakeSetti
               <Ionicons name="warning" size={24} color={colors.status.warning} />
             </View>
             <View style={styles.settingContent}>
-              <Text style={styles.settingTitle}>Büyük Depremler (5.0-6.0 M)</Text>
+              <Text style={styles.settingTitle}>Büyük Depremler (5.0-{criticalMagnitudeThreshold.toFixed(1)} M)</Text>
               <Text style={styles.settingSubtitle}>Büyük depremler için öncelik</Text>
             </View>
           </View>
@@ -821,6 +836,10 @@ const styles = StyleSheet.create({
     borderColor: colors.status.info + '40',
     marginTop: 8,
     gap: 12,
+  },
+  thresholdInfoCard: {
+    marginTop: 0,
+    marginBottom: 12,
   },
   infoText: {
     flex: 1,

@@ -19,9 +19,10 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { initializeFirebase, getFirebaseAuth } from '../../lib/firebase';
-import { useSettingsStore } from '../stores/settingsStore';
+import { isValidQuietHourTime, useSettingsStore } from '../stores/settingsStore';
 import { useOnboardingStore } from '../stores/onboardingStore';
 import { createLogger } from '../utils/logger';
+import { migrateEarthquakeNotificationDefault } from '../config/earthquakeDefaults';
 
 const logger = createLogger('SettingsSyncService');
 
@@ -47,8 +48,10 @@ const SYNCABLE_KEYS = [
 
   // Earthquake thresholds
   'minMagnitudeForNotification',
+  'earthquakeNotificationDefaultMigratedToM5',
   'maxDistanceForNotification',
   'criticalMagnitudeThreshold',
+  'criticalMagnitudeDefaultMigratedToM55',
   'criticalDistanceThreshold',
   'eewMinMagnitude',
 
@@ -90,6 +93,7 @@ const SYNCABLE_KEYS = [
   'aiHazardEnabled',
 
   // Social
+  'sosAmbientAudioEnabled',
   'blockedUsers',
 ] as const;
 
@@ -144,7 +148,7 @@ class SettingsSyncService {
         return;
       }
 
-      const cloudData = snapshot.data();
+      const cloudData = migrateEarthquakeNotificationDefault(snapshot.data());
 
       this.isLoadingFromCloud = true;
       try {
@@ -154,6 +158,10 @@ class SettingsSyncService {
 
         for (const key of SYNCABLE_KEYS) {
           if (cloudData[key] !== undefined) {
+            if ((key === 'quietHoursStart' || key === 'quietHoursEnd') && !isValidQuietHourTime(cloudData[key])) {
+              logger.warn(`Ignoring invalid quiet-hours setting from cloud: ${key}=${String(cloudData[key])}`);
+              continue;
+            }
             // CRITICAL GUARD: Never downgrade eulaAccepted from true→false via cloud sync.
             // Once EULA is accepted locally, cloud data must not un-accept it (could show
             // EULA modal mid-use if cloud document is stale/corrupt).

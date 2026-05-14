@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, StatusBar, ImageBackground, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -97,7 +97,6 @@ const TypeWriterText = React.memo(({ text, onComplete }: { text: string; onCompl
 
 export default function LocalAIAssistantScreen({ navigation }: { navigation: LocalAINavigationProp }) {
   const insets = useSafeAreaInsets();
-  const aiDataSharingConsented = useSettingsStore((s) => s.aiDataSharingConsented);
   const setAiDataSharingConsented = useSettingsStore((s) => s.setAiDataSharingConsented);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -118,11 +117,11 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   const promptAiConsent = useCallback((): Promise<boolean> => {
     return new Promise((resolve) => {
       Alert.alert(
-        'AI Asistan Veri Kullanimi',
-        'Bu ozellik sorularinizi islemek icin OpenAI yapay zeka servisini kullanir.\n\nMesajlariniz guvenli sunucu proxy\'si uzerinden OpenAI\'ye iletilir. Kisisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model egitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
+        'AI Asistan Veri Kullanımı',
+        'Bu özellik sorularınızı işlemek için OpenAI yapay zekâ servisini kullanır.\n\nMesajlarınız güvenli sunucu proxy\'si üzerinden OpenAI\'ye iletilir. Kişisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model eğitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
         [
           {
-            text: 'Hayir',
+            text: 'Hayır',
             style: 'cancel',
             onPress: () => resolve(false),
           },
@@ -161,11 +160,16 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   const handleSend = async (textOverride?: string) => {
     const text = textOverride || inputText.trim();
     if (!text || isSendingRef.current) return;
+    const requestStartedAt = Date.now();
 
     // Apple Guideline 5.1.2(i): Require explicit consent before sending data to OpenAI
     // If user declines, STILL serve offline AI response (no data sent to OpenAI)
     let forceOfflineOnly = false;
-    if (!useSettingsStore.getState().aiDataSharingConsented) {
+    const online = await aiAssistantCoordinator.isOnline().catch(() => false);
+    setIsOnlineMode(online);
+    if (!online) {
+      forceOfflineOnly = true;
+    } else if (!useSettingsStore.getState().aiDataSharingConsented) {
       const consented = await promptAiConsent();
       if (!consented) {
         forceOfflineOnly = true;
@@ -203,7 +207,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
       if (forceOfflineOnly) {
         const { offlineAIService } = await import('../../ai/services/OfflineAIService');
         const offlineResult = await offlineAIService.getResponse(text);
-        response = { ...offlineResult, source: 'offline', responseTime: Date.now() - Date.now() };
+        response = { ...offlineResult, source: 'offline', responseTime: Date.now() - requestStartedAt };
       } else {
         // Streaming UX: insert a placeholder AI bubble immediately, then mutate its text as
         // tokens arrive over SSE. The user sees the answer materialize in real time
@@ -298,6 +302,43 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
     }
   };
 
+  const handleSuggestedAction = async (action: SuggestedAction) => {
+    haptics.impactLight();
+    try {
+      if (action.action === 'call') {
+        await Linking.openURL(`tel:${action.data || '112'}`);
+        return;
+      }
+
+      if (action.action === 'navigate') {
+        const routeMap: Record<string, string> = {
+          first_aid: 'PanicAssistant',
+          preparedness: 'PreparednessPlan',
+          map: 'DisasterMap',
+          risk: 'RiskScore',
+        };
+        const routeName = routeMap[action.data || ''] || action.data;
+        if (routeName) {
+          (navigation as any).navigate(routeName);
+        }
+        return;
+      }
+
+      if (action.action === 'share') {
+        if (action.id === 'sos') {
+          (navigation as any).navigate('FlashlightWhistle');
+        } else {
+          (navigation as any).navigate('DisasterMap');
+        }
+        return;
+      }
+
+      Alert.alert(action.label, 'Bu aksiyon için ilgili ekran açılacak.');
+    } catch {
+      Alert.alert('Aksiyon açılamadı', 'Lütfen bağlantınızı ve cihaz izinlerinizi kontrol edin.');
+    }
+  };
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === 'user';
     const isEmergency = item.emergencyLevel === 'critical';
@@ -341,6 +382,22 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
                 {item.source === 'openai' ? 'AI' : item.source === 'hybrid' ? 'Hibrit' : 'Offline'}
                 {item.responseTime ? ` • ${item.responseTime}ms` : ''}
               </Text>
+            </View>
+          )}
+
+          {!isUser && item.suggestedActions && item.suggestedActions.length > 0 && (
+            <View style={styles.actionChips}>
+              {item.suggestedActions.slice(0, 3).map((action) => (
+                <TouchableOpacity
+                  key={action.id}
+                  style={styles.actionChip}
+                  onPress={() => handleSuggestedAction(action)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name={action.icon as any} size={13} color="#6d28d9" />
+                  <Text style={styles.actionChipText}>{action.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
         </TouchableOpacity>
@@ -462,6 +519,9 @@ const styles = StyleSheet.create({
 
   sourceTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, opacity: 0.8 },
   sourceText: { fontSize: 10, fontWeight: '700' },
+  actionChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  actionChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 14, backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: '#ddd6fe' },
+  actionChipText: { fontSize: 11, fontWeight: '700', color: '#6d28d9' },
 
   timestamp: { fontSize: 10, color: '#a78bfa', marginLeft: 12, marginTop: 4 },
 

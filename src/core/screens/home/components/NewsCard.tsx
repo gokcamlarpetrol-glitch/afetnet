@@ -4,12 +4,13 @@
  * Every element crafted for maximum visual impact
  */
 
-import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { LinearGradient } from '../../../components/SafeLinearGradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/core';
-import { colors, spacing } from '../../../theme';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { MainStackParamList } from '../../../types/navigation';
 import * as haptics from '../../../utils/haptics';
 import { useNewsStore } from '../../../ai/stores/newsStore';
 import { newsAggregatorService } from '../../../ai/services/NewsAggregatorService';
@@ -20,26 +21,40 @@ import { PremiumMaterialSurface } from '../../../components/PremiumMaterialSurfa
 const logger = createLogger('NewsCard');
 const SPACING = 12;
 
+type NewsCardNavigationProp = StackNavigationProp<MainStackParamList>;
+
 export default function NewsCard() {
-  const navigation = useNavigation();
-  const { articles, loading } = useNewsStore();
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const navigation = useNavigation<NewsCardNavigationProp>();
+  const { articles, loading, error } = useNewsStore();
   // ELITE: iPad-safe — recompute on rotation / Split View resize
   const { width: screenWidth } = useWindowDimensions();
   const CARD_WIDTH = useMemo(() => Math.min(screenWidth - 32, 600), [screenWidth]);
 
-  useEffect(() => {
-    newsAggregatorService.fetchLatestNews().then(news => {
-      useNewsStore.getState().setArticles(news.slice(0, 5));
-    }).catch(err => logger.error('News fetch failed', err));
+  const loadNews = useCallback(async () => {
+    const store = useNewsStore.getState();
+    // ORDER MATTERS: setError(null) flips loading=false in the store, so it must
+    // come BEFORE setLoading(true) — otherwise the spinner never shows on retry.
+    store.setError(null);
+    store.setLoading(true);
+    try {
+      const news = await newsAggregatorService.fetchLatestNews();
+      store.setArticles(news.slice(0, 5));
+    } catch (err) {
+      logger.error('News fetch failed', err);
+      store.setError('Deprem haberleri yüklenemedi.');
+    } finally {
+      store.setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadNews().catch(err => logger.error('News load failed', err));
+  }, [loadNews]);
 
   const handleArticlePress = (article: NewsArticle) => {
     haptics.impactLight();
     try {
-      if (navigation && 'navigate' in navigation) {
-        (navigation as any).navigate('NewsDetail', { article });
-      }
+      navigation.navigate('NewsDetail', { article });
     } catch (error) {
       logger.error('Nav failed', error);
     }
@@ -56,10 +71,31 @@ export default function NewsCard() {
     );
   }
 
+  if (error && articles.length === 0) {
+    return (
+      <TouchableOpacity
+        style={styles.errorContainer}
+        activeOpacity={0.86}
+        onPress={() => {
+          haptics.impactLight();
+          loadNews().catch(err => logger.error('News retry failed', err));
+        }}
+      >
+        <View style={styles.loadingIcon}>
+          <Ionicons name="cloud-offline-outline" size={20} color="#64748B" />
+        </View>
+        <View style={styles.errorTextWrap}>
+          <Text style={styles.loadingText}>Deprem haberleri alınamadı</Text>
+          <Text style={styles.retryText}>Tekrar dene</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   if (articles.length === 0) return null;
 
   return (
-    <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
+    <View style={styles.container}>
       {/* Premium Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -72,9 +108,7 @@ export default function NewsCard() {
           onPress={() => {
             haptics.impactLight();
             try {
-              if (navigation && 'navigate' in navigation) {
-                (navigation as any).navigate('AllNews');
-              }
+              navigation.navigate('AllNews');
             } catch (error) {
               logger.error('AllNews navigation failed', error);
             }
@@ -150,7 +184,7 @@ export default function NewsCard() {
           </TouchableOpacity>
         ))}
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -213,6 +247,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
+  errorContainer: {
+    minHeight: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderRadius: 12,
+    backgroundColor: 'rgba(241, 245, 249, 0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.24)',
+  },
+  errorTextWrap: {
+    flex: 1,
+  },
+  retryText: {
+    color: '#3B82F6',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
   scrollContent: {
     paddingRight: 16,
     gap: SPACING,
@@ -226,13 +281,6 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: 'space-between',
     overflow: 'hidden',
-  },
-  topGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 60,
   },
   cardHeader: {
     flexDirection: 'row',

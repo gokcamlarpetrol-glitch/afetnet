@@ -577,7 +577,7 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         if (isSystemPayloadMessage(m)) return false;
         return true;
       })
-      .sort((a, b) => a.timestamp - b.timestamp);
+      .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
   }, [isBlockedIdentity, meshMessages, storeMessages, selfIds, validUserId, activeConversationId, peerIdCandidates]);
 
   // ELITE V3: Load More functionality for Pagination

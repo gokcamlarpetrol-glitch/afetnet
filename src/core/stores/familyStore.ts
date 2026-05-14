@@ -108,8 +108,8 @@ const debouncedMergeAndSet = (
     const merged = mergeMembers(getState().members, pending);
     setState({ members: merged });
     await saveMembers(merged);
-    await syncLocationSubscriptions(merged, (uid, lat, lng, observedAt) => {
-      void getState().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+    await syncLocationSubscriptions(merged, (uid, lat, lng, observedAt, telemetry) => {
+      void getState().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
     });
     await syncStatusUpdateListeners(merged);
   }, MERGE_DEBOUNCE_MS);
@@ -212,10 +212,22 @@ interface FamilyActions {
   addMember: (member: Omit<FamilyMember, 'uid'> & { uid: string }) => Promise<void>;
   updateMember: (uid: string, updates: Partial<FamilyMember>) => Promise<void>;
   removeMember: (uid: string) => Promise<void>;
-  updateMemberLocation: (uid: string, latitude: number, longitude: number, source?: 'local' | 'remote', observedAt?: number) => Promise<void>;
+  updateMemberLocation: (
+    uid: string,
+    latitude: number,
+    longitude: number,
+    source?: 'local' | 'remote',
+    observedAt?: number,
+    telemetry?: MemberTelemetryUpdate,
+  ) => Promise<void>;
   updateMemberStatus: (uid: string, status: FamilyMember['status'], source?: 'local' | 'remote') => Promise<void>;
   clear: () => Promise<void>;
 }
+
+type MemberTelemetryUpdate = {
+  batteryLevel?: number;
+  status?: FamilyMember['status'];
+};
 
 // ─── Constants ──────────────────────────────────────
 const STORAGE_KEY_BASE = '@afetnet:family_members_v4';
@@ -261,6 +273,12 @@ const normalizeTimestamp = (value: unknown): number => {
   return n;
 };
 
+const normalizeBatteryLevel = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (value < 0 || value > 100) return undefined;
+  return Math.round(value);
+};
+
 const hasValidLocationCoordinates = (member: Partial<FamilyMember> | null | undefined): boolean => {
   if (!member) return false;
   const latitude = typeof member.latitude === 'number' && Number.isFinite(member.latitude)
@@ -273,14 +291,17 @@ const hasValidLocationCoordinates = (member: Partial<FamilyMember> | null | unde
     : (typeof member.location?.longitude === 'number' && Number.isFinite(member.location.longitude)
       ? member.location.longitude
       : 0);
-  return latitude !== 0 && longitude !== 0;
+  return latitude !== 0
+    && longitude !== 0
+    && latitude >= -90
+    && latitude <= 90
+    && longitude >= -180
+    && longitude <= 180;
 };
 
-const getMemberLocationFreshness = (member: Partial<FamilyMember> | null | undefined): number => {
+const getMemberLocationTimestamp = (member: Partial<FamilyMember> | null | undefined): number => {
   if (!member) return 0;
   return Math.max(
-    normalizeTimestamp(member.lastSeen),
-    normalizeTimestamp(member.updatedAt),
     normalizeTimestamp(member.location?.timestamp),
     normalizeTimestamp(member.lastKnownLocation?.timestamp),
   );
@@ -297,8 +318,8 @@ const preserveFresherLocationState = (
   }
 
   const incomingHasLocation = hasValidLocationCoordinates(incoming);
-  const existingFreshness = getMemberLocationFreshness(existing);
-  const incomingFreshness = getMemberLocationFreshness(incoming);
+  const existingFreshness = getMemberLocationTimestamp(existing);
+  const incomingFreshness = getMemberLocationTimestamp(incoming);
 
   if (incomingHasLocation && incomingFreshness >= existingFreshness) {
     return merged;
@@ -365,6 +386,8 @@ const normalizeMember = (raw: unknown): FamilyMember | null => {
     longitude,
     ...(location ? { location } : {}),
     ...(lastKnownLocation ? { lastKnownLocation } : {}),
+    ...(normalizeBatteryLevel(r.batteryLevel) !== undefined ? { batteryLevel: normalizeBatteryLevel(r.batteryLevel) } : {}),
+    ...(normalizeTimestamp(r.batteryUpdatedAt) > 0 ? { batteryUpdatedAt: normalizeTimestamp(r.batteryUpdatedAt) } : {}),
     ...(normalizeTimestamp(r.createdAt) > 0 ? { createdAt: normalizeTimestamp(r.createdAt) } : {}),
     ...(normalizeTimestamp(r.updatedAt) > 0 ? { updatedAt: normalizeTimestamp(r.updatedAt) } : {}),
   };
@@ -401,7 +424,13 @@ let _syncLocationInProgress = false;
 
 const syncLocationSubscriptions = async (
   members: FamilyMember[],
-  onLocation: (memberUid: string, latitude: number, longitude: number, observedAt?: number) => void,
+  onLocation: (
+    memberUid: string,
+    latitude: number,
+    longitude: number,
+    observedAt?: number,
+    telemetry?: MemberTelemetryUpdate,
+  ) => void,
 ) => {
   // Guard against concurrent calls (e.g., debouncedMergeAndSet firing while initialize is running)
   if (_syncLocationInProgress) return;
@@ -415,7 +444,13 @@ const syncLocationSubscriptions = async (
 
 const _syncLocationSubscriptionsInner = async (
   members: FamilyMember[],
-  onLocation: (memberUid: string, latitude: number, longitude: number, observedAt?: number) => void,
+  onLocation: (
+    memberUid: string,
+    latitude: number,
+    longitude: number,
+    observedAt?: number,
+    telemetry?: MemberTelemetryUpdate,
+  ) => void,
 ) => {
   const firebase = getFirebaseDataService();
   if (!firebase?.subscribeToUserLocation) return;
@@ -437,31 +472,24 @@ const _syncLocationSubscriptionsInner = async (
         const lngRaw = loc?.longitude;
         const lat = typeof latRaw === 'string' ? Number(latRaw) : latRaw;
         const lng = typeof lngRaw === 'string' ? Number(lngRaw) : lngRaw;
-        if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)) {
-          const observedAt = normalizeTimestamp(loc?.timestamp ?? loc?.updatedAt);
-          onLocation(member.uid, lat, lng, observedAt > 0 ? observedAt : undefined);
-        }
-
-        // Battery level from location doc
-        const batteryRaw = loc?.battery;
-        if (typeof batteryRaw === 'number' && batteryRaw >= 0 && batteryRaw <= 100) {
-          const currentMembers = useFamilyStore.getState().members;
-          const existing = currentMembers.find(m => m.uid === member.uid);
-          if (existing && existing.batteryLevel !== batteryRaw) {
-            useFamilyStore.getState().updateMember(member.uid, { batteryLevel: batteryRaw }).catch(e => {
-              if (__DEV__) logger.debug('Battery update from location failed:', e);
-            });
-          }
-        }
-
-        // Status from location doc
+        const observedAt = normalizeTimestamp(loc?.timestamp ?? loc?.updatedAt);
+        const batteryLevel = normalizeBatteryLevel(loc?.battery ?? loc?.batteryLevel);
         const deviceStatus = loc?._deviceStatus;
-        if (typeof deviceStatus === 'string' && VALID_STATUSES.includes(deviceStatus as FamilyMember['status'])) {
-          const currentMembers = useFamilyStore.getState().members;
-          const existing = currentMembers.find(m => m.uid === member.uid);
-          if (existing && existing.status !== deviceStatus) {
-            useFamilyStore.getState().updateMemberStatus(member.uid, deviceStatus as FamilyMember['status'], 'remote').catch(e => { if (__DEV__) logger.debug('Device status update failed:', e); });
-          }
+        const status = typeof deviceStatus === 'string' && VALID_STATUSES.includes(deviceStatus as FamilyMember['status'])
+          ? deviceStatus as FamilyMember['status']
+          : undefined;
+
+        if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)) {
+          onLocation(
+            member.uid,
+            lat,
+            lng,
+            observedAt > 0 ? observedAt : undefined,
+            {
+              ...(batteryLevel !== undefined ? { batteryLevel } : {}),
+              ...(status ? { status } : {}),
+            },
+          );
         }
       }, (error: any) => {
         // Auto-cleanup dead listener so next sync cycle re-subscribes
@@ -797,8 +825,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       {
         const current = get().members;
         if (current.length > 0) {
-          await syncLocationSubscriptions(current, (uid, lat, lng, observedAt) => {
-            void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+          await syncLocationSubscriptions(current, (uid, lat, lng, observedAt, telemetry) => {
+            void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
           });
           await syncStatusUpdateListeners(current);
         }
@@ -807,8 +835,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       logger.error('Firebase sync failed, using local:', error);
       const fallback = get().members;
       if (fallback.length > 0) {
-        await syncLocationSubscriptions(fallback, (uid, lat, lng, observedAt) => {
-          void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+        await syncLocationSubscriptions(fallback, (uid, lat, lng, observedAt, telemetry) => {
+          void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
         });
         await syncStatusUpdateListeners(fallback);
       }
@@ -845,8 +873,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMembers = [...members, newMember];
     set({ members: updatedMembers });
 
-    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt) => {
-      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt, telemetry) => {
+      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
     });
     await syncStatusUpdateListeners(updatedMembers);
     await saveMembers(updatedMembers);
@@ -887,8 +915,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updated = updatedMembers.find(m => m.uid === uid);
     set({ members: updatedMembers });
 
-    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt) => {
-      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt, telemetry) => {
+      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
     });
     await syncStatusUpdateListeners(updatedMembers);
     await saveMembers(updatedMembers);
@@ -914,8 +942,8 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const updatedMembers = members.filter(m => m.uid !== uid);
     set({ members: updatedMembers });
 
-    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt) => {
-      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt);
+    await syncLocationSubscriptions(updatedMembers, (uid, lat, lng, observedAt, telemetry) => {
+      void get().updateMemberLocation(uid, lat, lng, 'remote', observedAt, telemetry);
     });
     await syncStatusUpdateListeners(updatedMembers);
     await saveMembers(updatedMembers);
@@ -939,7 +967,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
   },
 
   // ─── Update Location ──────────────────────────────
-  updateMemberLocation: async (uid, latitude, longitude, source = 'local', observedAt) => {
+  updateMemberLocation: async (uid, latitude, longitude, source = 'local', observedAt, telemetry) => {
     if (!uid) return;
     const latNum = typeof latitude === 'string' ? Number(latitude) : latitude;
     const lngNum = typeof longitude === 'string' ? Number(longitude) : longitude;
@@ -951,14 +979,45 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     const existing = members.find(m => m.uid === uid || m.deviceId === uid);
     if (!existing) return;
 
-    const currentFreshness = getMemberLocationFreshness(existing);
+    const currentLocationTimestamp = getMemberLocationTimestamp(existing);
     const sameCoordinates = existing.latitude === latNum && existing.longitude === lngNum;
-    if (sameCoordinates && eventTimestamp <= currentFreshness) return;
+    if (source === 'remote' && currentLocationTimestamp > 0 && eventTimestamp < currentLocationTimestamp) {
+      return;
+    }
+
+    const incomingBatteryLevel = normalizeBatteryLevel(telemetry?.batteryLevel);
+    const incomingStatus = telemetry?.status && VALID_STATUSES.includes(telemetry.status)
+      ? telemetry.status
+      : undefined;
+    const existingBatteryTimestamp = normalizeTimestamp(existing.batteryUpdatedAt);
+    const existingStatusTimestamp = normalizeTimestamp(existing.statusUpdatedAt);
+    const hasFreshBatteryTelemetry = incomingBatteryLevel !== undefined
+      && eventTimestamp >= existingBatteryTimestamp
+      && existing.batteryLevel !== incomingBatteryLevel;
+    const hasFreshStatusTelemetry = incomingStatus !== undefined
+      && eventTimestamp >= existingStatusTimestamp
+      && existing.status !== incomingStatus;
+
+    if (
+      sameCoordinates
+      && eventTimestamp <= currentLocationTimestamp
+      && !hasFreshBatteryTelemetry
+      && !hasFreshStatusTelemetry
+    ) {
+      return;
+    }
 
     const updatedMembers = members.map(m => {
       if (m.uid !== uid && m.deviceId !== uid) return m;
       const prevHistory = m.locationHistory || [];
       const newEntry = { latitude: latNum, longitude: lngNum, timestamp: eventTimestamp };
+      const currentBatteryTimestamp = normalizeTimestamp(m.batteryUpdatedAt);
+      const shouldApplyBattery = incomingBatteryLevel !== undefined && eventTimestamp >= currentBatteryTimestamp;
+      const currentStatusTimestamp = normalizeTimestamp(m.statusUpdatedAt);
+      const shouldApplyStatus = incomingStatus !== undefined && eventTimestamp >= currentStatusTimestamp;
+      const batteryLevelAtCapture = shouldApplyBattery
+        ? incomingBatteryLevel
+        : (typeof m.batteryLevel === 'number' ? m.batteryLevel : 0);
       return {
         ...m,
         latitude: latNum,
@@ -968,7 +1027,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
           latitude: latNum,
           longitude: lngNum,
           timestamp: eventTimestamp,
-          batteryLevelAtCapture: typeof m.batteryLevel === 'number' ? m.batteryLevel : 0,
+          batteryLevelAtCapture,
           source: (source === 'remote' ? 'cloud' : 'gps') as 'cloud' | 'gps',
         },
         lastSeen: Math.max(m.lastSeen || 0, eventTimestamp),
@@ -976,6 +1035,14 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
         locationHistory: sameCoordinates
           ? prevHistory
           : [...prevHistory, newEntry].slice(-100),
+        ...(shouldApplyBattery ? {
+          batteryLevel: incomingBatteryLevel,
+          batteryUpdatedAt: eventTimestamp,
+        } : {}),
+        ...(shouldApplyStatus ? {
+          status: incomingStatus,
+          statusUpdatedAt: eventTimestamp,
+        } : {}),
       };
     });
     const updated = updatedMembers.find(m => m.uid === uid);

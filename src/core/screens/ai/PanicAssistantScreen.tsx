@@ -9,6 +9,7 @@ import * as haptics from '../../utils/haptics';
 import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
 import { eliteKnowledgeBase } from '../../services/ai/KnowledgeBase';
 import { medicalDecisionTree, DecisionNode } from '../../services/ai/knowledge/MedicalDecisionTree';
+import type { EmergencyAction } from '../../ai/types/ai.types';
 
 import { createLogger } from '../../utils/logger';
 
@@ -34,10 +35,21 @@ export default function PanicAssistantScreen() {
   const insets = useSafeAreaInsets();
   const [activeHazard, setActiveHazard] = useState<HazardType>('earthquake');
   const [medicalNode, setMedicalNode] = useState<DecisionNode | null>(null);
+  const [completedActionIds, setCompletedActionIds] = useState<Set<string>>(new Set());
 
   // Elite Tools - Navigate to FlashlightWhistleScreen for real hardware access
 
   const { panicAssistant, panicAssistantLoading } = useAIAssistantStore();
+
+  const earthquakeActions = panicAssistant?.actions || [];
+  const earthquakeProgress = useMemo(() => {
+    const total = earthquakeActions.length || 4;
+    if (total === 0) return 0;
+    const completed = earthquakeActions.length
+      ? earthquakeActions.filter(action => completedActionIds.has(action.id)).length
+      : completedActionIds.size;
+    return Math.round((completed / total) * 100);
+  }, [completedActionIds, earthquakeActions]);
 
   const activeGuides = useMemo(() => {
     if (activeHazard === 'earthquake' || activeHazard === 'medical') return null;
@@ -112,6 +124,19 @@ export default function PanicAssistantScreen() {
   const handleMedicalOption = (nextNodeId: string) => {
     const node = medicalDecisionTree.getNode(nextNodeId);
     if (node) { setMedicalNode(node); haptics.selectionChanged(); }
+  };
+
+  const toggleEmergencyAction = (actionId: string) => {
+    haptics.impactLight();
+    setCompletedActionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(actionId)) {
+        next.delete(actionId);
+      } else {
+        next.add(actionId);
+      }
+      return next;
+    });
   };
 
   const renderTools = () => (
@@ -211,43 +236,87 @@ export default function PanicAssistantScreen() {
   };
 
   const renderEarthquakeContent = () => {
-    if (panicAssistantLoading) return <ActivityIndicator color="#fb7185" size="large" style={{ marginTop: 50 }} />;
+    if (panicAssistantLoading && earthquakeActions.length === 0) {
+      return <ActivityIndicator color="#fb7185" size="large" style={{ marginTop: 50 }} />;
+    }
 
     return (
       <View style={styles.contentSection}>
         {/* Step-by-step cards */}
         <Text style={styles.sectionHeader}>ACİL EYLEM PLANI</Text>
         <View style={{ gap: 12 }}>
-          {EARTHQUAKE_STEPS.map((step, index) => (
-            <Animated.View
-              key={step.id}
-              style={[styles.stepCard, { borderLeftColor: step.color }]}
-            >
-              <View style={[styles.stepNumber, { backgroundColor: step.color }]}>
-                <Text style={styles.stepNumberText}>{index + 1}</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <View style={styles.stepHeader}>
-                  <Ionicons name={step.icon as any} size={20} color={step.color} />
-                  <Text style={[styles.stepTitle, { color: step.color }]}>{step.title}</Text>
-                </View>
-                <Text style={styles.stepDesc}>{step.desc}</Text>
-              </View>
-            </Animated.View>
-          ))}
+          {earthquakeActions.length > 0
+            ? earthquakeActions.map((action, index) => renderEmergencyAction(action, index))
+            : EARTHQUAKE_STEPS.map((step, index) => {
+              const actionId = String(step.id);
+              const isDone = completedActionIds.has(actionId);
+              return (
+                <TouchableOpacity
+                  key={step.id}
+                  activeOpacity={0.85}
+                  onPress={() => toggleEmergencyAction(actionId)}
+                  style={[styles.stepCard, { borderLeftColor: step.color }]}
+                >
+                  <View style={[styles.stepNumber, { backgroundColor: step.color }]}>
+                    <Text style={styles.stepNumberText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.stepContent}>
+                    <View style={styles.stepHeader}>
+                      <Ionicons name={step.icon as any} size={20} color={step.color} />
+                      <Text style={[styles.stepTitle, { color: step.color }]}>{step.title}</Text>
+                    </View>
+                    <Text style={styles.stepDesc}>{step.desc}</Text>
+                  </View>
+                  <Ionicons name={isDone ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={isDone ? '#10b981' : '#fecdd3'} />
+                </TouchableOpacity>
+              );
+            })}
         </View>
 
         {/* Progress Card */}
-        {panicAssistant && (
+        {(panicAssistant || earthquakeActions.length > 0) && (
           <View style={[styles.progressCard, { marginTop: 20 }]}>
             <Text style={styles.progressTitle}>HAZIRLIK DURUMU</Text>
-            <Text style={styles.progressSubtitle}>{panicAssistant.progressPercentage}% Tamamlandı</Text>
+            <Text style={styles.progressSubtitle}>{earthquakeProgress}% Tamamlandı</Text>
             <View style={styles.progressBarBg}>
-              <View style={[styles.progressBarFill, { width: `${panicAssistant.progressPercentage}%` }]} />
+              <View style={[styles.progressBarFill, { width: `${earthquakeProgress}%` }]} />
             </View>
           </View>
         )}
       </View>
+    );
+  };
+
+  const renderEmergencyAction = (action: EmergencyAction, index: number) => {
+    const isDone = completedActionIds.has(action.id);
+    const color = action.warningLevel === 'emergency' || action.warningLevel === 'critical'
+      ? '#e11d48'
+      : action.warningLevel === 'warning'
+        ? '#f59e0b'
+        : '#10b981';
+
+    return (
+      <TouchableOpacity
+        key={action.id}
+        activeOpacity={0.85}
+        onPress={() => toggleEmergencyAction(action.id)}
+        style={[styles.stepCard, { borderLeftColor: color }]}
+      >
+        <View style={[styles.stepNumber, { backgroundColor: color }]}>
+          <Text style={styles.stepNumberText}>{index + 1}</Text>
+        </View>
+        <View style={styles.stepContent}>
+          <View style={styles.stepHeader}>
+            <Ionicons name={action.icon as any} size={20} color={color} />
+            <Text style={[styles.stepTitle, { color }]}>{action.text}</Text>
+          </View>
+          {action.details ? <Text style={styles.stepDesc}>{action.details}</Text> : null}
+          {action.checklist?.slice(0, 3).map((item, itemIndex) => (
+            <Text key={`${action.id}-${itemIndex}`} style={styles.stepChecklist}>• {item}</Text>
+          ))}
+        </View>
+        <Ionicons name={isDone ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={isDone ? '#10b981' : '#fecdd3'} />
+      </TouchableOpacity>
     );
   };
 
@@ -318,6 +387,19 @@ export default function PanicAssistantScreen() {
           {activeHazard === 'medical' && renderMedicalContent()}
           {!['earthquake', 'medical'].includes(activeHazard) && renderOtherHazardContent()}
         </View>
+
+        {/* P0-7: AI medical/safety disclaimer — mandatory, non-dismissable.
+            Renders below the action list so it is always visible after the
+            user reads the actions. Apple Guideline 5.1 + KVKK health-data
+            safety disclosure. */}
+        {panicAssistant?.aiDisclaimer && (
+          <View style={styles.aiDisclaimerBanner} accessibilityRole="alert" accessibilityLabel="AI tıbbi sorumluluk reddi">
+            <Ionicons name="information-circle" size={18} color="#92400e" />
+            <Text style={styles.aiDisclaimerText}>
+              {panicAssistant.aiDisclaimer}
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
@@ -330,6 +412,28 @@ export default function PanicAssistantScreen() {
 }
 
 const styles = StyleSheet.create({
+  // P0-7: AI disclaimer banner — must remain visually distinct from the
+  // playful pink theme so users don't dismiss it as decorative copy.
+  aiDisclaimerBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: 24,
+    marginTop: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#fef3c7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    borderRadius: 12,
+  },
+  aiDisclaimerText: {
+    flex: 1,
+    color: '#78350f',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '500',
+  },
   container: { flex: 1, backgroundColor: '#fff1f2' },
   headerContainer: { flexDirection: 'row', justifyContent: 'flex-start', paddingHorizontal: 20, marginBottom: 10 },
   backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10 },
@@ -381,6 +485,7 @@ const styles = StyleSheet.create({
   stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   stepTitle: { fontSize: 16, fontWeight: '800', letterSpacing: 1 },
   stepDesc: { fontSize: 13, color: '#64748b', lineHeight: 18 },
+  stepChecklist: { fontSize: 12, color: '#64748b', lineHeight: 17, marginTop: 4 },
 
   // ELITE: Hazard step styles
   hazardStep: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 16, gap: 14 },

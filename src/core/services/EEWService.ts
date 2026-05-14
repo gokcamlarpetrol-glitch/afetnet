@@ -765,8 +765,11 @@ class EEWService {
       }) ?? undefined; // ELITE: Convert null to undefined
 
       if (waveCalculation) {
-        // Use calculated warning time (more accurate)
-        warningTime = waveCalculation.warningTime;
+        // ELITE F2: Use effectiveWarningTime (accounts for detection latency).
+        // Old code used `warningTime` (theoretical sArrival - pArrival, assuming alert at origin).
+        // That's misleading: AFAD detects ~25s after origin, so by the time we alert the user,
+        // most of that window is already consumed by detection+polling+push latency.
+        warningTime = waveCalculation.effectiveWarningTime;
 
         // Format distance text
         distanceText = `${Math.round(waveCalculation.epicentralDistance)} km uzaklıkta`;
@@ -783,18 +786,29 @@ class EEWService {
           intensityText = `Hafif sarsıntı bekleniyor (MMI ${waveCalculation.estimatedIntensity.toFixed(1)} ±${waveCalculation.intensityUncertainty.toFixed(1)})`;
         }
 
-        // ELITE: Personalized warning message based on warning time, intensity, and uncertainty
-        const warningTimeMin = Math.max(0, warningTime - waveCalculation.warningTimeUncertainty);
-        const warningTimeMax = warningTime + waveCalculation.warningTimeUncertainty;
-
-        if (warningTimeMin < 5) {
-          personalizedMessage = `🚨🚨🚨 DEPREM ÇOK YAKIN! ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak! Hemen güvenli yere geçin!`;
-        } else if (warningTimeMin < 15) {
-          personalizedMessage = `⚠️ Deprem yaklaşıyor! ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak. Güvenli yere geçin!`;
-        } else if (warningTimeMin < 30) {
-          personalizedMessage = `⚠️ Deprem tespit edildi. ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak. Hazırlıklı olun.`;
+        // ELITE F2: Branch on real-world shaking state.
+        // Three cases:
+        //   1. sWaveAlreadyArrived → "ŞU AN SARSILMA OLABİLİR" (immediate action, no countdown)
+        //   2. effectiveWarningTime < 5 → "ÇOK YAKIN" (urgent, near-zero countdown)
+        //   3. effectiveWarningTime >= 5 → normal countdown
+        if (waveCalculation.sWaveAlreadyArrived) {
+          // S-wave has already reached user — shaking is happening / just started
+          personalizedMessage = `🚨🚨🚨 DEPREM BAŞLADI! ${Math.round(waveCalculation.elapsedSinceOrigin)}s önce başladı. ÇÖKÜN-KAPANIN-TUTUNUN! Sağlam bir masa altına geçin, kapı yanlarından ve camlardan uzaklaşın!`;
         } else {
-          personalizedMessage = `Deprem tespit edildi. ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak.`;
+          const effectiveWarning = waveCalculation.effectiveWarningTime;
+          const uncertainty = waveCalculation.warningTimeUncertainty;
+          const warningTimeMin = Math.max(0, effectiveWarning - uncertainty);
+          const warningTimeMax = effectiveWarning + uncertainty;
+
+          if (warningTimeMin < 5) {
+            personalizedMessage = `🚨🚨🚨 DEPREM ÇOK YAKIN! ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak! ŞU AN ÇÖK-KAPAN-TUTUN!`;
+          } else if (warningTimeMin < 15) {
+            personalizedMessage = `⚠️ Deprem yaklaşıyor! ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak. Güvenli yere geçin!`;
+          } else if (warningTimeMin < 30) {
+            personalizedMessage = `⚠️ Deprem tespit edildi. ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak. Hazırlıklı olun.`;
+          } else {
+            personalizedMessage = `Deprem tespit edildi. ${Math.round(warningTimeMin)}-${Math.round(warningTimeMax)} saniye içinde sarsıntı başlayacak.`;
+          }
         }
 
         // Add intensity information (always show for MMI >= 5.0)
@@ -847,9 +861,18 @@ class EEWService {
     // ELITE: Enhanced alert title based on warning time, intensity, and quality
     let alertTitle: string;
     const minIntensity = waveCalculation ? (waveCalculation.estimatedIntensity - waveCalculation.intensityUncertainty) : 0;
-    const minWarningTime = waveCalculation ? (waveCalculation.warningTime - waveCalculation.warningTimeUncertainty) : warningTime;
+    // ELITE F2: Use effectiveWarningTime (post-detection) not warningTime (theoretical).
+    // sWaveAlreadyArrived → treat as 0s (shaking now); otherwise use effective minus uncertainty.
+    const minWarningTime = waveCalculation
+      ? (waveCalculation.sWaveAlreadyArrived
+          ? 0
+          : Math.max(0, waveCalculation.effectiveWarningTime - waveCalculation.warningTimeUncertainty))
+      : warningTime;
 
-    if (waveCalculation && minIntensity >= 7.0) {
+    if (waveCalculation && waveCalculation.sWaveAlreadyArrived) {
+      // Shaking has started — drop the "warning" wording, use action wording
+      alertTitle = '🚨🚨🚨 DEPREM BAŞLADI — ÇÖK-KAPAN-TUTUN 🚨🚨🚨';
+    } else if (waveCalculation && minIntensity >= 7.0) {
       alertTitle = '🚨🚨🚨 KRİTİK DEPREM UYARISI 🚨🚨🚨';
     } else if (magnitude >= 6.0 || (waveCalculation && minIntensity >= 6.0)) {
       alertTitle = '🚨 KRİTİK DEPREM UYARISI';
@@ -978,11 +1001,18 @@ class EEWService {
 
         // CRITICAL: Trigger countdown directly for locally-detected earthquakes.
         // Without this, countdown only fires from incoming CF push notifications.
-        if (magnitude >= 4.0 && waveCalculation && waveCalculation.warningTime > 0) {
+        // ELITE F2: Use effectiveWarningTime — if S-wave already arrived, skip countdown
+        // and fall through to immediate action (modal/alert already says "DEPREM BAŞLADI").
+        if (
+          magnitude >= 4.0 &&
+          waveCalculation &&
+          !waveCalculation.sWaveAlreadyArrived &&
+          waveCalculation.effectiveWarningTime > 0
+        ) {
           try {
             const { eewCountdownEngine } = await import('./EEWCountdownEngine');
             eewCountdownEngine.startCountdown({
-              warningTime: Math.round(waveCalculation.warningTime),
+              warningTime: Math.round(waveCalculation.effectiveWarningTime),
               magnitude,
               estimatedIntensity: waveCalculation.estimatedIntensity,
               location: event.region || 'Bilinmeyen bölge',
@@ -998,6 +1028,10 @@ class EEWService {
           } catch (countdownErr) {
             logger.error('EEW countdown start failed:', countdownErr);
           }
+        } else if (waveCalculation?.sWaveAlreadyArrived && __DEV__) {
+          logger.info(
+            `⚡ EEW: S-wave already arrived (${Math.round(waveCalculation.elapsedSinceOrigin)}s elapsed) — skipping countdown, immediate action prompt only`,
+          );
         }
 
         if (__DEV__) {
@@ -1027,8 +1061,15 @@ class EEWService {
           ...formatted.data,
           eventId: event.id,
           location: { lat: event.latitude, lng: event.longitude },
-          warningTime: waveCalculation?.warningTime || warningTime,
+          // ELITE F2: Send effective warning to UI (countdown modal reads this).
+          // warningTime (theoretical) kept for analytics/debugging only.
+          warningTime: waveCalculation?.effectiveWarningTime ?? warningTime,
+          warningTimeTheoretical: waveCalculation?.warningTime,
           warningTimeUncertainty: waveCalculation?.warningTimeUncertainty,
+          timeUntilSWave: waveCalculation?.timeUntilSWave,
+          elapsedSinceOrigin: waveCalculation?.elapsedSinceOrigin,
+          sWaveAlreadyArrived: waveCalculation?.sWaveAlreadyArrived,
+          pWaveAlreadyArrived: waveCalculation?.pWaveAlreadyArrived,
           intensity: waveCalculation?.estimatedIntensity,
           intensityUncertainty: waveCalculation?.intensityUncertainty,
           pga: waveCalculation?.estimatedPGA,
@@ -1046,10 +1087,12 @@ class EEWService {
       });
     }
 
-    // Notify callbacks with enhanced event data
+    // Notify callbacks with enhanced event data.
+    // ELITE F2: etaSec is what UI countdown reads — must reflect real time-until-shaking.
+    // Use timeUntilSWave (= effective remaining S-wave countdown) instead of theoretical warningTime.
     const enhancedEvent: EEWEvent & { waveCalculation?: EliteWaveCalculationResult } = {
       ...event,
-      etaSec: waveCalculation?.warningTime || event.etaSec,
+      etaSec: waveCalculation?.timeUntilSWave ?? event.etaSec,
       waveCalculation,
     };
 

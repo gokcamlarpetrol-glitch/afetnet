@@ -77,7 +77,7 @@ export interface ExpoPushMessage {
     title: string;
     body: string;
     data?: Record<string, string>;
-    sound?: 'default' | null;
+    sound?: 'default' | string | null;
     badge?: number;
     priority?: 'default' | 'normal' | 'high';
     channelId?: string;
@@ -120,6 +120,7 @@ export const TURKEY_BOUNDS = {
 
 // Expo Push API
 const EXPO_PUSH_API = 'https://exp.host/--/api/v2/push/send';
+export const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
 
 // Firebase UID regex (strict canonical form used by most providers)
 export const FIREBASE_UID_REGEX = /^[A-Za-z0-9]{20,40}$/;
@@ -382,6 +383,7 @@ export async function sendPushToToken(
         const iosInterruptionLevel: 'active' | 'time-sensitive' = isEmergencyType
             ? 'time-sensitive'
             : 'active';
+        const notificationSound = isEmergencyType ? EMERGENCY_NOTIFICATION_SOUND : 'default';
 
         if (isExpoPushToken(token)) {
             const result = await sendExpoPush([{
@@ -389,7 +391,7 @@ export async function sendPushToToken(
                 title,
                 body,
                 data: safeData,
-                sound: 'default',
+                sound: notificationSound,
                 priority: 'high',
                 channelId,
             }]);
@@ -409,7 +411,7 @@ export async function sendPushToToken(
             const apnsCategory = mapTypeToApnsCategory(rawType);
             const aps: Record<string, unknown> = {
                 alert: { title, body },
-                sound: 'default',
+                sound: notificationSound,
                 badge: 1,
                 'interruption-level': iosInterruptionLevel,
                 'content-available': 1,
@@ -422,7 +424,7 @@ export async function sendPushToToken(
                 data: safeData,
                 android: {
                     priority: 'high',
-                    notification: { sound: 'default', priority: 'max', channelId },
+                    notification: { sound: notificationSound, priority: 'max', channelId },
                 },
                 apns: {
                     payload: {

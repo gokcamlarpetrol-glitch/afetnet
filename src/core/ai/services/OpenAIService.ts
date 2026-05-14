@@ -64,6 +64,7 @@ class OpenAIService {
   private readonly timeoutMs = 20000;
   private readonly authTokenWaitMs = 8000;
   private readonly authWarningThrottleMs = 10000;
+  private readonly userInitiatedRemoteServices = new Set(['chat', 'chatStream', 'LocalAIAssistant']);
 
   async initialize(apiKey?: string): Promise<void> {
     if (this.isInitialized) return;
@@ -229,7 +230,13 @@ class OpenAIService {
     messages: OpenAIMessage[],
     maxTokens: number,
     temperature: number,
+    serviceName = 'unknown',
   ): Promise<OpenAIResponse | null> {
+    const remoteAllowed = await this.shouldAllowRemoteAI(serviceName);
+    if (!remoteAllowed) {
+      return null;
+    }
+
     // ELITE: Cost guardrail — check daily spending threshold before calling API
     try {
       const { shouldSkipAPICall } = await import('../utils/costOptimizer');
@@ -399,7 +406,7 @@ class OpenAIService {
     messages.push({ role: 'user', content: prompt });
 
     try {
-      const data = await this.executeCompletion(messages, maxTokens, temperature);
+      const data = await this.executeCompletion(messages, maxTokens, temperature, serviceName || 'generateText');
       if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
         return { text: this.getFallbackResponse(prompt), usedFallback: true };
       }
@@ -448,15 +455,15 @@ class OpenAIService {
     }
 
     try {
-      const data = await this.executeCompletion(messages, maxTokens, temperature);
-      if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
-        return this.getUnavailableMessage();
-      }
+	      const data = await this.executeCompletion(messages, maxTokens, temperature, 'chat');
+	      if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+	        return '';
+	      }
 
-      const content = data.choices[0]?.message?.content;
-      if (typeof content !== 'string' || content.trim().length === 0) {
-        return this.getUnavailableMessage();
-      }
+	      const content = data.choices[0]?.message?.content;
+	      if (typeof content !== 'string' || content.trim().length === 0) {
+	        return '';
+	      }
 
       const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
       await costTracker.recordCall(
@@ -496,6 +503,11 @@ class OpenAIService {
     if (!Array.isArray(messages) || messages.length === 0) {
       return this.getUnavailableMessage();
     }
+
+	    const remoteAllowed = await this.shouldAllowRemoteAI('chatStream');
+	    if (!remoteAllowed) {
+	      return '';
+	    }
 
     if (this.proxyUrls.length === 0) {
       // Direct API key path keeps the sync wrapper — streaming flows through the proxy only
@@ -651,6 +663,32 @@ class OpenAIService {
 
   private getUnavailableMessage(): string {
     return 'AI servisi şu anda kullanılamıyor. Lütfen temel afet yönergelerini uygulayın ve daha sonra tekrar deneyin.';
+  }
+
+  private async shouldAllowRemoteAI(serviceName: string): Promise<boolean> {
+    const normalizedService = serviceName || 'unknown';
+    const backgroundRemoteEnabled =
+      typeof process !== 'undefined' &&
+      process.env?.EXPO_PUBLIC_ALLOW_BACKGROUND_AI === '1';
+
+    if (!this.userInitiatedRemoteServices.has(normalizedService) && !backgroundRemoteEnabled) {
+      logger.debug(`Remote AI skipped for ${normalizedService}: background AI disabled`);
+      return false;
+    }
+
+    try {
+      const { useSettingsStore } = await import('../../stores/settingsStore');
+      const consented = useSettingsStore.getState().aiDataSharingConsented === true;
+      if (!consented) {
+        logger.debug(`Remote AI skipped for ${normalizedService}: user consent missing`);
+        return false;
+      }
+    } catch (error) {
+      logger.warn('Remote AI consent state unavailable; blocking request by default', getErrorMessage(error));
+      return false;
+    }
+
+    return true;
   }
 
   /**

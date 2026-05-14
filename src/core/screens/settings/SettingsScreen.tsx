@@ -81,7 +81,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const seismicSensorEnabled = useSettingsStore((state) => state.seismicSensorEnabled);
   const alarmSoundEnabled = useSettingsStore((state) => state.alarmSoundEnabled);
   const vibrationEnabled = useSettingsStore((state) => state.vibrationEnabled);
-  const voiceCommandEnabled = useSettingsStore((state) => state.voiceCommandEnabled);
+  // P0-5: voice command UI removed; state read kept for future re-enable.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _voiceCommandEnabled = useSettingsStore((state) => state.voiceCommandEnabled);
   const batterySaverEnabled = useSettingsStore((state) => state.batterySaverEnabled);
   const currentLanguage = useSettingsStore((state) => state.language);
 
@@ -100,6 +102,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   // Health Sharing State
   const [healthSharingEnabled, setHealthSharingEnabled] = useState(false);
+  const sosAmbientAudioEnabled = useSettingsStore((state) => state.sosAmbientAudioEnabled);
+  const setSosAmbientAudioEnabled = useSettingsStore((state) => state.setSosAmbientAudioEnabled);
 
   // Load health sharing preference on mount
   useEffect(() => {
@@ -119,7 +123,9 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   const setSeismicSensorEnabled = useSettingsStore((state) => state.setSeismicSensor);
   const setAlarmSoundEnabled = useSettingsStore((state) => state.setAlarmSound);
   const setVibrationEnabled = useSettingsStore((state) => state.setVibration);
-  const setVoiceCommandEnabled = useSettingsStore((state) => state.setVoiceCommand);
+  // P0-5: setter kept for future re-enable.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _setVoiceCommandEnabled = useSettingsStore((state) => state.setVoiceCommand);
   const setBatterySaverEnabled = useSettingsStore((state) => state.setBatterySaver);
   const setLanguage = useSettingsStore((state) => state.setLanguage);
   const setNewsEnabled = useSettingsStore((state) => state.setNews);
@@ -686,14 +692,10 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
       value: vibrationEnabled,
       onPress: (val) => setVibrationEnabled(typeof val === 'boolean' ? val : !vibrationEnabled),
     },
-    {
-      icon: 'mic',
-      title: 'Sesli Komutlar',
-      subtitle: 'Eller serbest acil komut modu',
-      type: 'switch',
-      value: voiceCommandEnabled,
-      onPress: (val) => setVoiceCommandEnabled(typeof val === 'boolean' ? val : !voiceCommandEnabled),
-    },
+    // P0-5: "Sesli Komutlar" Settings toggle removed in v1.6.1 — feature
+    // is flag-disabled (real speech recognition not implemented). The
+    // underlying preference (`voiceCommandEnabled`) is still in the store
+    // so a future build can re-enable the toggle without losing user state.
     {
       icon: 'flash',
       title: 'LED Uyarısı',
@@ -764,10 +766,10 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         const newValue = typeof val === 'boolean' ? val : !aiDataSharingConsented;
         if (newValue) {
           Alert.alert(
-            'AI Asistan Veri Kullanimi',
-            'Bu ozellik sorularinizi islemek icin OpenAI yapay zeka servisini kullanir.\n\nMesajlariniz guvenli sunucu proxy\'si uzerinden OpenAI\'ye iletilir. Kisisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model egitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
+            'AI Asistan Veri Kullanımı',
+            'Bu özellik sorularınızı işlemek için OpenAI yapay zekâ servisini kullanır.\n\nMesajlarınız güvenli sunucu proxy\'si üzerinden OpenAI\'ye iletilir. Kişisel bilgileriniz (TC kimlik, telefon, e-posta) otomatik olarak filtrelenir.\n\nOpenAI, API verilerini model eğitiminde kullanmaz.\n\nDevam etmek istiyor musunuz?',
             [
-              { text: 'Hayir', style: 'cancel' },
+              { text: 'Hayır', style: 'cancel' },
               {
                 text: 'Kabul Ediyorum',
                 onPress: () => setAiDataSharingConsented(true),
@@ -777,8 +779,8 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         } else {
           setAiDataSharingConsented(false);
           Alert.alert(
-            'AI Veri Paylasimi',
-            'OpenAI veri paylasimi kapatildi. AI asistan yalnizca cevrimdisi modda calisacaktir.',
+            'AI Veri Paylaşımı',
+            'OpenAI veri paylaşımı kapatıldı. AI asistan yalnızca çevrimdışı modda çalışacaktır.',
             [{ text: 'Tamam' }],
           );
         }
@@ -1103,6 +1105,33 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
             'SOS sırasında sağlık bilgileri paylaşılmayacak.',
             [{ text: 'Tamam' }]
           );
+        }
+      },
+    },
+    {
+      icon: 'mic',
+      title: 'SOS Ortam Sesi',
+      subtitle: 'SOS sırasında 10 sn ortam sesi aileye paylaş',
+      type: 'switch',
+      value: sosAmbientAudioEnabled,
+      onPress: (val) => {
+        haptics.impactLight();
+        const newValue = typeof val === 'boolean' ? val : !sosAmbientAudioEnabled;
+        if (newValue) {
+          Alert.alert(
+            'SOS Ortam Sesi',
+            'Bu özellik SOS aktif olduğunda 10 saniyelik ortam sesi kaydeder ve yalnızca SOS bildirimi alan onaylı aile/yardım akışına ekler.\n\nSes kaydı varsayılan olarak kapalıdır. Mikrofon izniniz olsa bile bu ayarı açmadan kayıt başlamaz.',
+            [
+              { text: 'Vazgeç', style: 'cancel' },
+              {
+                text: 'Onaylıyorum',
+                onPress: () => setSosAmbientAudioEnabled(true),
+              },
+            ],
+          );
+        } else {
+          setSosAmbientAudioEnabled(false);
+          Alert.alert('SOS Ortam Sesi', 'SOS sırasında ortam sesi kaydı yapılmayacak.', [{ text: 'Tamam' }]);
         }
       },
     },

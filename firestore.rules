@@ -124,6 +124,33 @@ service cloud.firestore {
              && ts >= request.time.toMillis() - 300000;
     }
 
+    function isValidLatitude(latitude) {
+      return latitude is number && latitude >= -90 && latitude <= 90;
+    }
+
+    function isValidLongitude(longitude) {
+      return longitude is number && longitude >= -180 && longitude <= 180;
+    }
+
+    function isValidBatteryPercent(value) {
+      return value == null || (value is number && value >= 0 && value <= 100);
+    }
+
+    function isValidCurrentLocationWrite(userId) {
+      return isOwner(userId)
+             && isValidLatitude(request.resource.data.latitude)
+             && isValidLongitude(request.resource.data.longitude)
+             && !(request.resource.data.latitude == 0 && request.resource.data.longitude == 0)
+             && (!('userId' in request.resource.data) || request.resource.data.userId == userId)
+             && (!('deviceId' in request.resource.data) || request.resource.data.deviceId is string)
+             && (!('timestamp' in request.resource.data) || isRecentClientTimestamp(request.resource.data.timestamp))
+             && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt is number)
+             && (!('battery' in request.resource.data) || isValidBatteryPercent(request.resource.data.battery))
+             && (!('batteryLevel' in request.resource.data) || isValidBatteryPercent(request.resource.data.batteryLevel))
+             && (!('batteryUpdatedAt' in request.resource.data) || request.resource.data.batteryUpdatedAt == null || request.resource.data.batteryUpdatedAt is number)
+             && (!('source' in request.resource.data) || request.resource.data.source in ['gps', 'network', 'manual']);
+    }
+
     // Basic per-conversation throttle: same sender cannot post back-to-back in <700ms.
     function passesConversationMessageRateLimit(conversationId) {
       let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
@@ -221,12 +248,25 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.deviceId is string
                     && request.resource.data.timestamp is number
+                    && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.latitude is number
                     && request.resource.data.latitude >= -90
                     && request.resource.data.latitude <= 90
                     && request.resource.data.longitude is number
                     && request.resource.data.longitude >= -180
                     && request.resource.data.longitude <= 180
+                    && request.resource.data.accuracy is number
+                    && request.resource.data.accuracy >= 0
+                    && request.resource.data.accuracy <= 10000
+                    && request.resource.data.magnitude is number
+                    && request.resource.data.magnitude >= 0
+                    && request.resource.data.magnitude <= 5
+                    && request.resource.data.frequency is number
+                    && request.resource.data.frequency >= 0
+                    && request.resource.data.frequency <= 100
+                    && request.resource.data.staltaRatio is number
+                    && request.resource.data.staltaRatio >= 0
+                    && request.resource.data.staltaRatio <= 1000
                     && request.resource.data.confidence is number
                     && request.resource.data.confidence >= 0
                     && request.resource.data.confidence <= 100;
@@ -447,7 +487,11 @@ service cloud.firestore {
       match /sos_acks/{ackId} {
         allow read: if isDeviceReadable(deviceId);
         allow create: if isAuthenticated()
-                      && request.resource.data.timestamp is number;
+                      && request.resource.data.timestamp is number
+                      && request.resource.data.userId is string
+                      && request.resource.data.userId == request.auth.uid
+                      && (!('rescuerUid' in request.resource.data)
+                          || request.resource.data.rescuerUid == request.auth.uid);
         allow update: if false; // ACKs are immutable
         allow delete: if isDeviceOwner(deviceId); // Cleanup only
       }
@@ -820,7 +864,8 @@ service cloud.firestore {
                     && request.resource.data.timestamp is number
                     && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.status is string
-                    && request.resource.data.creatorUid == request.auth.uid;
+                    && request.resource.data.creatorUid == request.auth.uid
+                    && notBlockedByServerSosRateLimit();
       allow update: if isAuthenticated()
                     && resource.data.creatorUid == request.auth.uid
                     && request.resource.data.id == resource.data.id
@@ -857,9 +902,7 @@ service cloud.firestore {
       // SECURITY FIX: Only owner or family members can read location
       // Previously ANY authenticated user could read ANY user's real-time location
       allow read: if isOwner(userId) || sharesFamilyWith(userId);
-      allow create, update: if isOwner(userId)
-                            && request.resource.data.latitude is number
-                            && request.resource.data.longitude is number;
+      allow create, update: if isValidCurrentLocationWrite(userId);
       allow delete: if isOwner(userId); // GDPR: owner can delete their location
     }
 
@@ -870,9 +913,7 @@ service cloud.firestore {
 
       match /points/{pointId} {
         allow read: if isOwner(userId);
-        allow create: if isOwner(userId)
-                      && request.resource.data.latitude is number
-                      && request.resource.data.longitude is number;
+        allow create: if isValidCurrentLocationWrite(userId);
         allow update: if false;
         allow delete: if isOwner(userId); // GDPR: owner can delete
       }
@@ -995,9 +1036,16 @@ service cloud.firestore {
 
       // V3: Rescue ACKs — any authenticated user can ACK (rescuers may not be family)
       match /acks/{ackId} {
-        allow read: if isAuthenticated();
+        allow read: if isAuthenticated()
+                    && (isOwner(userId)
+                        || resource.data.userId == request.auth.uid
+                        || resource.data.rescuerUid == request.auth.uid);
         allow create: if isAuthenticated()
-                      && request.resource.data.timestamp is number;
+                      && request.resource.data.timestamp is number
+                      && request.resource.data.userId is string
+                      && request.resource.data.userId == request.auth.uid
+                      && (!('rescuerUid' in request.resource.data)
+                          || request.resource.data.rescuerUid == request.auth.uid);
         allow update: if false; // ACKs are immutable
         allow delete: if false;
       }
@@ -1117,18 +1165,31 @@ service cloud.firestore {
       allow read: if isAuthenticated() && resource.data.senderUid == request.auth.uid;
       // SECURITY FIX: Bind creatorUid to auth.uid to prevent spoofed SOS broadcasts
       // ANTI-ABUSE: Timestamp must be recent (within 5 min) to prevent replay attacks
-      // CRITICAL FIX: latitude/longitude made optional — SOS without location permission
-      // was being REJECTED, leaving nearby users completely unnotified.
+      //
+      // P0-10 (Phase 0): sos_broadcasts is the GLOBAL proximity channel — Cloud
+      // Functions fan it out to nearby users via geo-distance. Without a
+      // location, "nearby" is meaningless, so a global broadcast with no lat/lng
+      // would spam every nearby user incorrectly OR be silently dropped by the
+      // geo-query CF (worse: user thinks SOS is broadcasting but no one nearby
+      // receives it). Now latitude AND longitude are REQUIRED and must be
+      // finite numbers in valid range. Mesh/Firebase per-family channels still
+      // work without location — they use the device path, not the global path.
+      //
       // NOTE (FIX 12): Rate limiting (e.g., max 1 active SOS per user per 5 min) cannot be
       // reliably enforced in Firestore rules alone — rules lack query capabilities to check
       // for existing active broadcasts from the same senderUid. This MUST be enforced
       // server-side in the onSOSBroadcast Cloud Function or via a dedicated rate_limits
-      // collection. For now, the timestamp check provides basic replay protection.
+      // collection. For now, the timestamp check provides basic replay protection and
+      // notBlockedByServerSosRateLimit() provides server-driven blocking.
       allow create: if isAuthenticated()
                     && request.resource.data.signalId is string
                     && !('healthInfo' in request.resource.data)
-                    && (!('latitude' in request.resource.data) || request.resource.data.latitude == null || request.resource.data.latitude is number)
-                    && (!('longitude' in request.resource.data) || request.resource.data.longitude == null || request.resource.data.longitude is number)
+                    && request.resource.data.latitude is number
+                    && request.resource.data.latitude >= -90
+                    && request.resource.data.latitude <= 90
+                    && request.resource.data.longitude is number
+                    && request.resource.data.longitude >= -180
+                    && request.resource.data.longitude <= 180
                     && request.resource.data.timestamp is number
                     && isRecentClientTimestamp(request.resource.data.timestamp)
                     && request.resource.data.senderUid is string
@@ -1147,7 +1208,12 @@ service cloud.firestore {
 
       // SOS Acknowledgements — delivery confirmation from recipients
       match /acks/{ackId} {
-        allow read: if isAuthenticated();
+        allow read: if isAuthenticated()
+                    && (
+                      get(/databases/$(database)/documents/sos_broadcasts/$(broadcastId)).data.senderUid == request.auth.uid
+                      || resource.data.userId == request.auth.uid
+                      || resource.data.rescuerUid == request.auth.uid
+                    );
         allow create: if isAuthenticated()
                       && request.resource.data.userId == request.auth.uid
                       && request.resource.data.timestamp is number;

@@ -117,7 +117,7 @@ function ChatInputInner({
   // Send image message
   const sendImageMessage = useCallback(async (imageUri: string) => {
     if (!activeRecipientId) {
-      Alert.alert('Hata', 'Bu kisi icin gecerli bir mesajlasma kimligi bulunamadi. Kisiyi tekrar ekleyin.');
+      Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
       return;
     }
 
@@ -227,7 +227,7 @@ function ChatInputInner({
       if (voiceMessage) {
         const recipientId = activeRecipientIdRef.current;
         if (!recipientId) {
-          Alert.alert('Hata', 'Bu kisi icin gecerli bir mesajlasma kimligi bulunamadi. Kisiyi tekrar ekleyin.');
+          Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
           return;
         }
 
@@ -311,7 +311,7 @@ function ChatInputInner({
 
       if (voiceMessage) {
         if (!activeRecipientId) {
-          Alert.alert('Hata', 'Bu kisi icin gecerli bir mesajlasma kimligi bulunamadi. Kisiyi tekrar ekleyin.');
+          Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
           return;
         }
 
@@ -354,7 +354,7 @@ function ChatInputInner({
   // Share current location
   const handleShareLocation = useCallback(async () => {
     if (!activeRecipientId) {
-      Alert.alert('Hata', 'Bu kisi icin gecerli bir mesajlasma kimligi bulunamadi. Kisiyi tekrar ekleyin.');
+      Alert.alert('Hata', 'Bu kişi için geçerli bir mesajlaşma kimliği bulunamadı. Kişiyi tekrar ekleyin.');
       return;
     }
 

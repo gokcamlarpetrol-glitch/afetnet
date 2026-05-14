@@ -510,18 +510,39 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
       // SPRINT 4: Send mutual contact request — KVKK + stalking-prevention.
       // Without this, anyone with target UID could silently add+track them.
       // The recipient now sees a notification and can accept/decline.
-      // Best-effort: fire-and-forget; local add still succeeds even if cloud request fails.
+      // If offline, queue the invitation so the local pending member does not become a dead end.
+      const approvalMessage = `${trimmedName} sizi aile listesine ekledi — kabul ederek karşılıklı görünür olun.`;
+      let approvalRequestSent = false;
+      let approvalRequestQueued = false;
       try {
         const { contactRequestService } = await import('../../services/ContactRequestService');
         // toQrId is required by API but optional in flow — pass UID as fallback
-        await contactRequestService.sendContactRequest(
+        approvalRequestSent = await contactRequestService.sendContactRequest(
           uidToSave,
           uidToSave, // toQrId — fallback to uid when QR-based discovery not used
-          `${trimmedName} sizi aile listesine ekledi — kabul ederek karşılıklı görünür olun.`,
+          approvalMessage,
         );
+        if (!approvalRequestSent) {
+          throw new Error('contact request returned false');
+        }
         logger.info(`Mutual approval contact request sent to ${uidToSave}`);
       } catch (mutualErr) {
-        logger.warn('Mutual approval request failed (non-blocking):', mutualErr);
+        logger.warn('Mutual approval request failed; queueing for retry:', mutualErr);
+        try {
+          const { offlineSyncService } = await import('../../services/OfflineSyncService');
+          await offlineSyncService.queueOperation({
+            type: 'contact_request',
+            data: {
+              toUserId: uidToSave,
+              toQrId: uidToSave,
+              message: approvalMessage,
+            },
+            priority: 'high',
+          });
+          approvalRequestQueued = true;
+        } catch (queueErr) {
+          logger.warn('Mutual approval request queue failed:', queueErr);
+        }
       }
 
       haptics.notificationSuccess();
@@ -532,8 +553,16 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
 
       // ELITE: Show success message
       Alert.alert(
-        'Başarılı',
-        `${trimmedName} başarıyla eklendi!`,
+        approvalRequestSent
+          ? 'Davet Gönderildi'
+          : approvalRequestQueued
+            ? 'Davet Kuyruğa Alındı'
+            : 'Onay Bekleniyor',
+        approvalRequestSent
+          ? `${trimmedName} onay verince karşılıklı konum, şarj ve durum paylaşımı açılır.`
+          : approvalRequestQueued
+            ? `${trimmedName} için davet internet gelince tekrar gönderilecek. Onay verilene kadar konum ve şarj görünmez.`
+            : `${trimmedName} yerel listeye eklendi ama davet gönderilemedi. İnternet bağlantısını kontrol edip tekrar deneyin.`,
         [
           {
             text: 'Tamam',

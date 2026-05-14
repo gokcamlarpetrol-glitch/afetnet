@@ -110,7 +110,7 @@ export async function scheduleNotification(
       title: content.title,
       body: content.body,
       data: content.data || {},
-      sound: content.sound !== false,
+      sound: content.sound === undefined ? true : content.sound,
     };
 
     // Add Android-specific options

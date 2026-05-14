@@ -189,6 +189,30 @@ const isSystemConversationMessage = (message: Message): boolean => {
   return NON_CHAT_SYSTEM_TYPES.has(envelopeType);
 };
 
+const compareMessagesAscending = (a: Pick<Message, 'timestamp' | 'id'>, b: Pick<Message, 'timestamp' | 'id'>): number =>
+  a.timestamp - b.timestamp || a.id.localeCompare(b.id);
+
+const isMessageNewer = (candidate: Pick<Message, 'timestamp' | 'id'>, current: Pick<Message, 'timestamp' | 'id'>): boolean => {
+  if (candidate.timestamp !== current.timestamp) {
+    return candidate.timestamp > current.timestamp;
+  }
+  return candidate.id.localeCompare(current.id) > 0;
+};
+
+const formatConversationPreview = (message: Pick<Message, 'content' | 'type' | 'mediaType' | 'isDeleted'>): string => {
+  if (message.isDeleted) return 'Bu mesaj silindi';
+
+  const content = typeof message.content === 'string' ? message.content.trim() : '';
+  if (content) return content.substring(0, 100);
+
+  if (message.mediaType === 'image') return 'Fotoğraf';
+  if (message.mediaType === 'voice' || message.type === 'VOICE') return 'Sesli mesaj';
+  if (message.mediaType === 'location' || message.type === 'LOCATION') return 'Konum paylaşıldı';
+  if (message.type === 'SOS') return 'Acil durum mesajı';
+
+  return 'Mesaj';
+};
+
 
 const getStorageScope = (): string => {
   // Primary: Firebase Auth currentUser
@@ -388,7 +412,7 @@ const buildConversationIndex = (messages: Message[]): Map<string, Message[]> => 
   }
   // Sort each conversation by timestamp
   for (const [, msgs] of index) {
-    msgs.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+    msgs.sort(compareMessagesAscending);
   }
   return index;
 };
@@ -673,7 +697,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
         if (!changed) return state;
 
-        merged.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        merged.sort(compareMessagesAscending);
         const capped = merged.length > MAX_MESSAGES
           ? merged.slice(merged.length - MAX_MESSAGES)
           : merged;
@@ -818,7 +842,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       if (otherUserId) {
         const existing = newIndex.get(otherUserId);
         if (existing) {
-          const updated = [...existing, normalizedMessage].sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+          const updated = [...existing, normalizedMessage].sort(compareMessagesAscending);
           newIndex.set(otherUserId, updated);
         } else {
           newIndex.set(otherUserId, [normalizedMessage]);
@@ -923,7 +947,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
       // Sort updated conversations
       for (const [, msgs] of newIndex) {
-        msgs.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        msgs.sort(compareMessagesAscending);
       }
 
       return { messages: updatedMessages, conversationIndex: newIndex };
@@ -948,6 +972,11 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       );
       const existing = existingIndex >= 0 ? state.conversations[existingIndex] : null;
       const hasIncomingTimestamp = typeof conversation.lastMessageTime === 'number' && conversation.lastMessageTime > 0;
+      const incomingIsLatest = !existing
+        || (
+          hasIncomingTimestamp
+          && conversation.lastMessageTime >= (existing.lastMessageTime || 0)
+        );
       const resolvedLastMessageTime = existing
         ? (hasIncomingTimestamp ? Math.max(existing.lastMessageTime || 0, conversation.lastMessageTime) : existing.lastMessageTime)
         : (hasIncomingTimestamp ? conversation.lastMessageTime : Date.now());
@@ -965,7 +994,9 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         // || would treat '' as falsy too, but conversationId should never be empty string.
         conversationId: (conversation.conversationId != null ? conversation.conversationId : undefined) || existing?.conversationId,
         userName: conversation.userName || existing?.userName || resolvedConversationId,
-        lastMessage: conversation.lastMessage || existing?.lastMessage || '',
+        lastMessage: incomingIsLatest
+          ? (conversation.lastMessage || existing?.lastMessage || '')
+          : (existing?.lastMessage || conversation.lastMessage || ''),
         lastMessageTime: resolvedLastMessageTime,
         // FIX: Prefer incoming unreadCount when provided (non-null/non-undefined).
         // The caller (pushCloudMessageToMeshStore) passes the incremented count.
@@ -975,8 +1006,12 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         isPinned: existing?.isPinned ?? conversation.isPinned,
         isMuted: existing?.isMuted ?? conversation.isMuted,
         // Preserve optional metadata from existing conversation when not provided
-        lastMessageFrom: conversation.lastMessageFrom || existing?.lastMessageFrom,
-        lastMessageStatus: conversation.lastMessageStatus || existing?.lastMessageStatus,
+        lastMessageFrom: incomingIsLatest
+          ? (conversation.lastMessageFrom || existing?.lastMessageFrom)
+          : (existing?.lastMessageFrom || conversation.lastMessageFrom),
+        lastMessageStatus: incomingIsLatest
+          ? (conversation.lastMessageStatus || existing?.lastMessageStatus)
+          : (existing?.lastMessageStatus || conversation.lastMessageStatus),
         status: conversation.status || existing?.status,
         lastSeen: conversation.lastSeen ?? existing?.lastSeen,
       };
@@ -1219,7 +1254,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
           ? `conv:${msg.conversationId}`
           : `sender:${normalizeId(msg.from)}`;
         const existing = latestByConversation.get(key);
-        if (!existing || msg.timestamp > existing.timestamp) {
+        if (!existing || isMessageNewer(msg, existing)) {
           latestByConversation.set(key, msg);
         }
       });
@@ -1261,7 +1296,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
     if (merged.size > 0) {
       return Array.from(merged.values())
         .filter((message) => !isSystemConversationMessage(message))
-        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        .sort(compareMessagesAscending);
     }
 
     const selfIds = getSelfIdentityCandidates();
@@ -1274,7 +1309,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
         }
         return isIdentityInAliasSet(message.from, aliasIds);
       })
-      .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+      .sort(compareMessagesAscending);
   },
 
   // ELITE V2: Cursor-based pagination for large conversations (WhatsApp pattern)
@@ -1332,7 +1367,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
     // O(n) single-pass: compute unread counts and latest message per user
     const unreadCounts = new Map<string, number>();
-    const latestMessages = new Map<string, { content: string; timestamp: number; fromName?: string; from: string; status?: Message['status'] }>();
+    const latestMessages = new Map<string, Message>();
 
     for (const msg of messages) {
       if (isBlockedIdentity(msg.from) || isBlockedIdentity(msg.to)) continue;
@@ -1351,14 +1386,8 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
 
       // Track latest message
       const existing = latestMessages.get(otherUserId);
-      if (!existing || msg.timestamp > existing.timestamp) {
-        latestMessages.set(otherUserId, {
-          content: (msg.content || '').substring(0, 100),
-          timestamp: msg.timestamp,
-          fromName: msg.fromName,
-          from: msg.from,
-          status: msg.status,
-        });
+      if (!existing || isMessageNewer(msg, existing)) {
+        latestMessages.set(otherUserId, msg);
       }
     }
 
@@ -1370,7 +1399,7 @@ export const useMessageStore = create<MessageState & MessageActions>((set, get) 
       conversations.push({
         userId,
         userName: resolvedUserName,
-        lastMessage: latest.content,
+        lastMessage: formatConversationPreview(latest),
         lastMessageTime: latest.timestamp,
         unreadCount: unreadCounts.get(userId) || 0,
         isPinned: meta?.isPinned,

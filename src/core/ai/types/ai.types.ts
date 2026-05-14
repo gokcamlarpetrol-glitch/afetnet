@@ -369,6 +369,21 @@ export interface PanicAssistantState {
   progressPercentage: number;
   lastActionCompletedAt?: number;
   scenarioContext?: DisasterScenarioContext;
+  /**
+   * P0-7: AI-generated medical/safety disclaimer that MUST be displayed
+   * alongside the action list. UI screens render this as a fixed footer
+   * banner that cannot be dismissed while the action list is visible.
+   * Apple Guideline 5.1 (Health-related claims) — also a KVKK/GDPR safety
+   * disclosure for emergency advice.
+   */
+  aiDisclaimer?: string;
+  /**
+   * P0-7: True if any action in this list was produced by AI (vs. fully
+   * rule-based). When false, the disclaimer is still shown but with
+   * different wording ("Bilgilendirme amaçlıdır. Acil tıbbi durumda 112'yi
+   * arayın.") since we are not making AI-derived claims.
+   */
+  isAIGenerated?: boolean;
 }
 
 export type DisasterScenario = 'earthquake' | 'fire' | 'flood' | 'trapped' | 'tsunami' | 'landslide' | 'storm';

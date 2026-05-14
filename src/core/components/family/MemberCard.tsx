@@ -159,11 +159,16 @@ export const MemberCard = React.memo(function MemberCard({
 
   // Battery level
   const battery = member.batteryLevel ?? member.lastKnownLocation?.batteryLevelAtCapture;
+  const normalizedBatteryTs = normalizeTimestampMs(
+    member.batteryUpdatedAt ?? member.location?.timestamp ?? member.lastKnownLocation?.timestamp,
+  );
+  const isBatteryStale = !!normalizedBatteryTs && Date.now() - normalizedBatteryTs > STALE_OLD_MS;
   const batteryColor = battery !== undefined
-    ? battery > 40 ? '#22c55e' : battery > 20 ? '#f59e0b' : '#ef4444'
+    ? isBatteryStale ? '#94a3b8' : battery > 40 ? '#22c55e' : battery > 20 ? '#f59e0b' : '#ef4444'
     : '#94a3b8';
   const batteryIcon = battery !== undefined
-    ? battery > 80 ? 'battery-full' as const
+    ? isBatteryStale ? 'battery-dead' as const
+      : battery > 80 ? 'battery-full' as const
       : battery > 50 ? 'battery-half' as const
         : battery > 20 ? 'battery-dead' as const
           : 'battery-dead' as const
@@ -257,7 +262,9 @@ export const MemberCard = React.memo(function MemberCard({
                 {battery !== undefined && (
                   <View style={styles.batteryBadge}>
                     <Ionicons name={batteryIcon} size={11} color={batteryColor} />
-                    <Text style={[styles.batteryText, { color: batteryColor }]}>{battery}%</Text>
+                    <Text style={[styles.batteryText, { color: batteryColor }]}>
+                      {isBatteryStale ? `Eski ${battery}%` : `${battery}%`}
+                    </Text>
                   </View>
                 )}
               </View>

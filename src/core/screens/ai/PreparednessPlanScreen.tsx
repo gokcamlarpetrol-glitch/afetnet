@@ -1,13 +1,13 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, ImageBackground, TouchableOpacity, StatusBar, Alert } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, ImageBackground, TouchableOpacity, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/core';
 import { usePreparednessStore } from '../../ai/stores/preparednessStore';
+import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
 import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 import * as haptics from '../../utils/haptics';
-import { BlurView } from '../../components/SafeBlurView';
 import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring, withSequence, withTiming } from 'react-native-reanimated';
 import { DirectStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
@@ -26,75 +26,6 @@ function getChecklistKey(): string {
   }
 }
 
-// ELITE: Comprehensive checklist items
-const CHECKLIST_SECTIONS = [
-  {
-    id: 'essentials',
-    title: 'Temel İhtiyaçlar',
-    icon: 'cube',
-    color: '#0ea5e9',
-    items: [
-      { id: 'water', text: 'Su (Kişi başı 3 litre/gün, 3 günlük)' },
-      { id: 'food', text: 'Bozulmayan yiyecek (Konserve, bisküvi)' },
-      { id: 'firstaid', text: 'İlk yardım çantası' },
-      { id: 'flashlight', text: 'Fener ve yedek pil' },
-      { id: 'radio', text: 'Pilli/el radyo' },
-      { id: 'whistle', text: 'Düdük (sinyal için)' },
-    ]
-  },
-  {
-    id: 'documents',
-    title: 'Önemli Evraklar',
-    icon: 'document-text',
-    color: '#8b5cf6',
-    items: [
-      { id: 'id', text: 'Kimlik fotokopisi' },
-      { id: 'passport', text: 'Pasaport fotokopisi' },
-      { id: 'insurance', text: 'Sigorta belgeleri' },
-      { id: 'medical', text: 'Sağlık raporları' },
-      { id: 'contacts', text: 'Acil durum telefonları listesi' },
-    ]
-  },
-  {
-    id: 'clothing',
-    title: 'Giyim & Koruma',
-    icon: 'shirt',
-    color: '#f59e0b',
-    items: [
-      { id: 'clothes', text: 'Yedek kıyafet' },
-      { id: 'blanket', text: 'Battaniye / Uyku tulumu' },
-      { id: 'shoes', text: 'Sağlam ayakkabı' },
-      { id: 'mask', text: 'Toz maskesi' },
-      { id: 'gloves', text: 'Eldiven' },
-    ]
-  },
-  {
-    id: 'tools',
-    title: 'Araç & Gereç',
-    icon: 'build',
-    color: '#ef4444',
-    items: [
-      { id: 'knife', text: 'Çakı / Maket bıçağı' },
-      { id: 'rope', text: 'İp (10m)' },
-      { id: 'tape', text: 'Koli bandı' },
-      { id: 'matches', text: 'Kibrit / Çakmak' },
-      { id: 'bag', text: 'Plastik poşet (çeşitli boylar)' },
-    ]
-  },
-  {
-    id: 'family',
-    title: 'Aile Planı',
-    icon: 'people',
-    color: '#10b981',
-    items: [
-      { id: 'meeting', text: 'Buluşma noktası belirlendi' },
-      { id: 'contact', text: 'Dış il irtibat kişisi' },
-      { id: 'practice', text: 'Tatbikat yapıldı' },
-      { id: 'kids', text: 'Çocuklar eğitildi' },
-    ]
-  },
-];
-
 // Mock Elite Data for Kids
 const KIDS_ITEMS = [
   { id: 'k1', text: 'Süper Kahraman Çantası', desc: 'En sevdiğin oyuncağını çantana koydun mu?', icon: 'rocket' },
@@ -110,7 +41,7 @@ interface CheckedState {
 export default function PreparednessPlanScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { plan, loading, refreshPlan, toggleItem } = usePreparednessStore();
+  const { plan, loading, error, refreshPlan, toggleItem } = usePreparednessStore();
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [mode, setMode] = useState<'adult' | 'kid'>('adult');
   const [checkedItems, setCheckedItems] = useState<CheckedState>({});
@@ -119,20 +50,36 @@ export default function PreparednessPlanScreen() {
   // ELITE: Animation for celebration
   const celebrationScale = useSharedValue(1);
 
-  // Load saved progress on mount
+  // Mount: hydrate checklist from storage, then build plan only when missing.
+  // collectUserProfileParams triggers location permission + reverse geocode +
+  // family store query — skip if a usable plan already exists to save battery
+  // and avoid unnecessary permission prompts on every navigation.
   useEffect(() => {
     loadProgress();
-    refreshPlan();
+    const { plan: existingPlan, loading: storeLoading } = usePreparednessStore.getState();
+    const hasUsablePlan = !!(existingPlan && existingPlan.sections && existingPlan.sections.length > 0);
+    // Skip when a usable plan exists OR when a generation is already in flight
+    // (preparednessStore has no loading-guard, so revisiting the screen mid-fetch
+    // would otherwise spawn a duplicate generatePlan request).
+    if (!hasUsablePlan && !storeLoading) {
+      aiAssistantCoordinator.collectUserProfileParams()
+        .then((params) => refreshPlan(params))
+        .catch(() => refreshPlan());
+    }
+    // Mount-only effect — refreshPlan + coordinator are stable singletons.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save progress whenever it changes
+  // Persist checklist on every toggle. isLoading intentionally excluded:
+  // we only want to react to user-driven changes after initial hydration.
   useEffect(() => {
     if (!isLoading) {
       saveProgress();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedItems]);
 
-  const loadProgress = async () => {
+  const loadProgress = () => {
     try {
       const saved = DirectStorage.getString(getChecklistKey());
       if (saved) {
@@ -145,7 +92,7 @@ export default function PreparednessPlanScreen() {
     }
   };
 
-  const saveProgress = async () => {
+  const saveProgress = () => {
     try {
       DirectStorage.setString(getChecklistKey(), JSON.stringify(checkedItems));
     } catch (e) {
@@ -174,22 +121,16 @@ export default function PreparednessPlanScreen() {
     }
   };
 
-  const handleResetProgress = () => {
-    Alert.alert(
-      'İlerlemeyi Sıfırla',
-      'Tüm hazırlık ilerlemeniz silinecek. Emin misiniz?',
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Sıfırla',
-          style: 'destructive',
-          onPress: async () => {
-            haptics.notificationWarning();
-            setCheckedItems({});
-            DirectStorage.delete(getChecklistKey());
-          }
-        },
-      ]
+  const handleTogglePlanItem = async (sectionId: string, itemId: string) => {
+    haptics.impactLight();
+    await toggleItem(sectionId, itemId);
+    firebaseAnalyticsService.logEvent('preparedness_plan_item_toggle', {
+      section_id: sectionId,
+      item_id: itemId,
+    });
+    celebrationScale.value = withSequence(
+      withTiming(1.1, { duration: 100 }),
+      withSpring(1, { damping: 10 })
     );
   };
 
@@ -207,18 +148,14 @@ export default function PreparednessPlanScreen() {
       return { overallProgress: progress, totalItems: total, completedItems: completed };
     }
 
-    let total = 0;
-    let completed = 0;
-    CHECKLIST_SECTIONS.forEach(section => {
-      section.items.forEach(item => {
-        total++;
-        if (checkedItems[item.id]) completed++;
-      });
-    });
-
+    const total = plan?.totalItems || plan?.sections?.reduce((sum, section) => sum + section.items.length, 0) || 0;
+    const completed = plan?.completedItems || plan?.sections?.reduce(
+      (sum, section) => sum + section.items.filter(item => item.completed).length,
+      0,
+    ) || 0;
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     return { overallProgress: progress, totalItems: total, completedItems: completed };
-  }, [checkedItems, mode]);
+  }, [checkedItems, mode, plan]);
 
   const celebrationStyle = useAnimatedStyle(() => ({
     transform: [{ scale: celebrationScale.value }],
@@ -258,18 +195,33 @@ export default function PreparednessPlanScreen() {
 
   const renderAdultMode = () => (
     <View style={styles.listContainer}>
-      {CHECKLIST_SECTIONS.map((section) => {
-        const sectionCompleted = section.items.filter(item => checkedItems[item.id]).length;
+      {loading && !plan && (
+        <View style={styles.tipBox}>
+          <ActivityIndicator size="small" color="#059669" />
+          <Text style={styles.tipText}>Plan hazırlanıyor...</Text>
+        </View>
+      )}
+
+      {error && !loading && !plan && (
+        <View style={styles.tipBox}>
+          <Ionicons name="warning" size={24} color="#ef4444" />
+          <Text style={styles.tipText}>{error}</Text>
+        </View>
+      )}
+
+      {plan?.sections.map((section) => {
+        const sectionColor = section.color || '#10b981';
+        const sectionCompleted = section.items.filter(item => item.completed).length;
         const sectionTotal = section.items.length;
-        const sectionProgress = Math.round((sectionCompleted / sectionTotal) * 100);
+        const sectionProgress = sectionTotal > 0 ? Math.round((sectionCompleted / sectionTotal) * 100) : 0;
         const isComplete = sectionProgress === 100;
 
         return (
           <Animated.View key={section.id} style={styles.sectionWrapper} entering={FadeInDown.delay(100)}>
             <TouchableOpacity onPress={() => toggleCategory(section.id)} style={styles.sectionHeaderWrapper} activeOpacity={0.9}>
               <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIconBox, { backgroundColor: section.color + '20' }]}>
-                  <Ionicons name={section.icon as any} size={18} color={section.color} />
+                <View style={[styles.sectionIconBox, { backgroundColor: sectionColor + '20' }]}>
+                  <Ionicons name={(section.icon || 'list') as any} size={18} color={sectionColor} />
                 </View>
                 <Text style={styles.sectionTitle}>{section.title}</Text>
                 <View style={styles.rightContainer}>
@@ -279,7 +231,7 @@ export default function PreparednessPlanScreen() {
                     </View>
                   ) : (
                     <View style={styles.progressBadge}>
-                      <Text style={[styles.progressText, { color: section.color }]}>{sectionCompleted}/{sectionTotal}</Text>
+                      <Text style={[styles.progressText, { color: sectionColor }]}>{sectionCompleted}/{sectionTotal}</Text>
                     </View>
                   )}
                   <Ionicons
@@ -294,18 +246,21 @@ export default function PreparednessPlanScreen() {
             {expandedCategory === section.id && (
               <Animated.View style={styles.itemsWrapper} entering={FadeIn.duration(200)}>
                 {section.items.map((item) => {
-                  const isChecked = checkedItems[item.id];
+                  const isChecked = item.completed;
                   return (
                     <TouchableOpacity
                       key={item.id}
                       style={styles.itemTouchable}
-                      onPress={() => handleToggleItem(item.id)}
+                      onPress={() => handleTogglePlanItem(section.id, item.id)}
                       activeOpacity={0.7}
                     >
-                      <View style={[styles.checkbox, isChecked && { backgroundColor: section.color, borderColor: section.color }]}>
+                      <View style={[styles.checkbox, isChecked && { backgroundColor: sectionColor, borderColor: sectionColor }]}>
                         {isChecked && <Ionicons name="checkmark" size={14} color="#fff" />}
                       </View>
-                      <Text style={[styles.itemText, isChecked && styles.itemTextChecked]}>{item.text}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.itemText, isChecked && styles.itemTextChecked]}>{item.text}</Text>
+                        {item.instructions ? <Text style={styles.itemInstructions}>{item.instructions}</Text> : null}
+                      </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -314,12 +269,6 @@ export default function PreparednessPlanScreen() {
           </Animated.View>
         );
       })}
-
-      {/* Reset button */}
-      <TouchableOpacity style={styles.resetButton} onPress={handleResetProgress}>
-        <Ionicons name="refresh" size={16} color="#ef4444" />
-        <Text style={styles.resetText}>İlerlemeyi Sıfırla</Text>
-      </TouchableOpacity>
 
       {/* Elite Upgrade: Tip */}
       <View style={styles.tipBox}>
@@ -339,7 +288,7 @@ export default function PreparednessPlanScreen() {
 
   return (
     <ImageBackground
-      source={mode === 'kid' ? require('../../../../assets/images/premium/green_nature_bg.jpg') : require('../../../../assets/images/premium/green_nature_bg.jpg')}
+      source={require('../../../../assets/images/premium/green_nature_bg.jpg')}
       style={styles.container}
       resizeMode="cover"
     >
@@ -385,12 +334,41 @@ export default function PreparednessPlanScreen() {
 
         {mode === 'kid' ? renderKidMode() : renderAdultMode()}
 
+        {/* P0-7: AI medical/safety disclaimer — required on every screen that
+            renders AI-generated emergency advice. Non-dismissable. */}
+        <View style={styles.aiDisclaimerBanner} accessibilityRole="alert" accessibilityLabel="AI tıbbi sorumluluk reddi">
+          <Ionicons name="information-circle" size={18} color="#92400e" />
+          <Text style={styles.aiDisclaimerText}>
+            Bu öneriler yapay zekâ tarafından üretildi. Acil tıbbi durumda 112&apos;yi arayın. AfetNet, profesyonel tıbbi veya kurtarma hizmetinin yerine geçmez.
+          </Text>
+        </View>
+
       </ScrollView>
     </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  // P0-7
+  aiDisclaimerBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#fef3c7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    borderRadius: 12,
+  },
+  aiDisclaimerText: {
+    flex: 1,
+    color: '#78350f',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '500',
+  },
   container: { flex: 1, backgroundColor: '#f0fdf4' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingHorizontal: 10 },
   backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
@@ -422,10 +400,8 @@ const styles = StyleSheet.create({
   itemTouchable: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: '#cbd5e1', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   itemText: { fontSize: 14, fontWeight: '500', color: '#334155', flex: 1 },
+  itemInstructions: { fontSize: 12, color: '#64748b', lineHeight: 17, marginTop: 4 },
   itemTextChecked: { textDecorationLine: 'line-through', color: '#94a3b8' },
-
-  resetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, marginTop: 8 },
-  resetText: { fontSize: 13, color: '#ef4444', fontWeight: '600' },
 
   tipBox: { marginTop: 12, padding: 16, backgroundColor: '#ecfdf5', borderRadius: 16, flexDirection: 'row', gap: 12, alignItems: 'center' },
   tipText: { flex: 1, fontSize: 13, color: '#065f46', lineHeight: 18 },
@@ -441,4 +417,3 @@ const styles = StyleSheet.create({
   kidItemDesc: { fontSize: 12, color: '#64748b', marginTop: 2 },
   kidCheck: { opacity: 0.5 },
 });
-

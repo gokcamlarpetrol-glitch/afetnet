@@ -15,7 +15,7 @@
 
 import { DirectStorage } from '../utils/storage';
 import { User } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { deleteField, doc, getDoc, setDoc } from 'firebase/firestore';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { getDeviceId as getHardwareDeviceId } from '../../lib/device';
 import { getInstallationId } from '../../lib/installationId';
@@ -234,7 +234,7 @@ class IdentityService {
         const firestoreName = this.normalizeDisplayName(data.displayName);
         const authName = this.normalizeDisplayName(user.displayName);
         const providerName = this.getProviderDisplayName(user);
-        const resolvedEmail = (data.email || user.email || '').trim();
+        const resolvedEmail = (user.email || '').trim();
         const emailName = this.deriveEmailDisplayName(resolvedEmail);
         // CRITICAL FIX: Apple Sign-In only provides the user's real name on FIRST authorization.
         // AuthService caches it in MMKV. If Firestore/Auth only have the email prefix,
@@ -276,7 +276,10 @@ class IdentityService {
         const resolvedQrId = this.normalizeDisplayName(data.qrId) || derivedQrId;
 
         const userDocPatch: Record<string, unknown> = {
-          lastLoginAt: new Date(),
+          // users/{uid} supports public contact discovery. Keep email out of this
+          // readable profile document and rely on Firebase Auth for account email.
+          email: deleteField(),
+          lastLoginAt: deleteField(),
         };
         if (!data.publicUserCode) {
           userDocPatch.publicUserCode = publicUserCode;
@@ -352,9 +355,7 @@ class IdentityService {
           qrId,
           displayName: this.identity.displayName,
           createdAt: new Date(),
-          lastLoginAt: new Date(),
         };
-        if (this.identity.email) userData.email = this.identity.email;
         if (this.identity.photoURL) userData.photoURL = this.identity.photoURL;
 
         await setDoc(userRef, userData, { merge: true });

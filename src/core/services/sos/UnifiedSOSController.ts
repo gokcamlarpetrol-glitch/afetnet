@@ -28,6 +28,7 @@ import * as haptics from '../../utils/haptics';
 import { Vibration } from 'react-native';
 import { getDeviceId } from '../../utils/device';
 import { fallDetectionService } from './FallDetectionService';
+import { isApprovedFamilyMember } from '../../utils/familyApproval';
 
 const logger = createLogger('UnifiedSOSController');
 
@@ -36,12 +37,41 @@ const logger = createLogger('UnifiedSOSController');
 // ============================================================================
 
 const SOS_CONFIG = {
-    COUNTDOWN_SECONDS: 3,  // Default, overridden by user settings
+    // P0-4: COUNTDOWN_SECONDS is now a FALLBACK only. The real per-trigger
+    // duration is decided in SOSStateManager.startCountdown:
+    //   • Manual SOS         → 5 seconds  (DEFAULT_COUNTDOWN)
+    //   • Fall / crash / inactivity / trapped detection → 30 seconds (AUTO_TRIGGER_COUNTDOWN)
+    // This value is only used by legacy resume paths when the persisted store
+    // is missing a countdownTotalSeconds snapshot.
+    COUNTDOWN_SECONDS: 5,
     COUNTDOWN_TICK_MS: 1000,
     AUTO_LOCATION: true,
     // ELITE V2: Pre-cache location on app start for instant SOS attachment
     LOCATION_PRECACHE_INTERVAL_MS: 120_000,  // Refresh pre-cached location every 2 min (was 30s — too aggressive for battery)
+    MAX_PRECACHE_LOCATION_AGE_MS: 180_000,
+    MAX_SOS_LOCATION_FUTURE_SKEW_MS: 60_000,
 };
+
+function isUsableSOSLocation(location: SOSLocation | null | undefined, maxAgeMs = SOS_CONFIG.MAX_PRECACHE_LOCATION_AGE_MS): location is SOSLocation {
+    if (!location) return false;
+    const now = Date.now();
+    // typeof NaN === 'number' — reject NaN at assignment so downstream is finite-only.
+    const accuracy = (typeof location.accuracy === 'number' && Number.isFinite(location.accuracy))
+        ? location.accuracy
+        : Number.POSITIVE_INFINITY;
+    return Number.isFinite(location.latitude)
+        && Number.isFinite(location.longitude)
+        && location.latitude >= -90
+        && location.latitude <= 90
+        && location.longitude >= -180
+        && location.longitude <= 180
+        && Number.isFinite(accuracy)
+        && accuracy >= 0
+        && accuracy <= 5000
+        && Number.isFinite(location.timestamp)
+        && location.timestamp <= now + SOS_CONFIG.MAX_SOS_LOCATION_FUTURE_SKEW_MS
+        && now - location.timestamp <= maxAgeMs;
+}
 
 // ============================================================================
 // UNIFIED SOS CONTROLLER CLASS
@@ -134,9 +164,14 @@ class UnifiedSOSController {
                 }
             } else if (!store.isActive && store.isCountingDown && store.countdownStartedAt) {
                 // CRITICAL FIX: Resume countdown from crash instead of clearing.
-                // User pressed SOS, app crashed during 3s countdown — they still need help!
+                // User pressed SOS, app crashed during countdown — they still need help!
+                // P0-4: countdownTotalSeconds is persisted by the store, so we honour
+                // the original 5s/30s decision rather than collapsing to a static config.
+                const totalSeconds = typeof store.countdownTotalSeconds === 'number' && store.countdownTotalSeconds > 0
+                    ? store.countdownTotalSeconds
+                    : SOS_CONFIG.COUNTDOWN_SECONDS;
                 const elapsed = Math.floor((Date.now() - store.countdownStartedAt) / 1000);
-                const remaining = Math.max(0, SOS_CONFIG.COUNTDOWN_SECONDS - elapsed);
+                const remaining = Math.max(0, totalSeconds - elapsed);
                 if (remaining > 0) {
                     logger.warn(`Resuming SOS countdown from crash: ${remaining}s remaining`);
                     store.recalculateCountdown();
@@ -188,13 +223,16 @@ class UnifiedSOSController {
                 accuracy: Location.Accuracy.High,
             });
             if (loc?.coords) {
-                this.preCachedLocation = {
+                const candidate: SOSLocation = {
                     latitude: loc.coords.latitude,
                     longitude: loc.coords.longitude,
                     accuracy: loc.coords.accuracy || 0,
                     timestamp: Date.now(),
                     source: 'gps' as const,
                 };
+                if (isUsableSOSLocation(candidate)) {
+                    this.preCachedLocation = candidate;
+                }
             }
         } catch {
             // Pre-cache failure is silent — location will be fetched on-demand as fallback
@@ -259,13 +297,18 @@ class UnifiedSOSController {
     // ============================================================================
 
     /**
-     * Start SOS countdown sequence
-     * User has 3 seconds to cancel before broadcast
+     * Start SOS countdown sequence.
+     *
+     * P0-4 — Countdown durations:
+     *   • Manual SOS (button tap)             → 5 seconds
+     *   • Fall / crash / inactivity / trapped → 30 seconds (Apple Watch standard)
+     *   • Explicit `countdownSeconds` override → that value (clamped 1..60)
      */
     async triggerSOS(
         reason: EmergencyReason = EmergencyReason.MANUAL_SOS,
         message: string = 'Acil yardım gerekiyor!',
-        isSilent: boolean = false
+        isSilent: boolean = false,
+        countdownSeconds?: number,
     ): Promise<void> {
         await this.initialize();
 
@@ -298,11 +341,13 @@ class UnifiedSOSController {
         haptics.sosAlert();
 
         // Start countdown with resolved userId
-        store.startCountdown(reason, this.userId || this.deviceId, message, isSilent);
+        // P0-4: pass through optional countdownSeconds (UI override) — defaults
+        // to 5s manual / 30s auto inside startCountdown.
+        store.startCountdown(reason, this.userId || this.deviceId, message, isSilent, countdownSeconds);
 
         // ELITE V2: Use pre-cached location INSTANTLY (Noonlight pattern)
         // No delay — location was already fetched in background
-        if (this.preCachedLocation) {
+        if (isUsableSOSLocation(this.preCachedLocation)) {
             useSOSStore.setState(state => ({
                 currentSignal: state.currentSignal ? {
                     ...state.currentSignal,
@@ -310,6 +355,9 @@ class UnifiedSOSController {
                 } : null
             }));
             logger.info('📍 Pre-cached location attached to SOS instantly');
+        } else if (this.preCachedLocation) {
+            logger.warn('SOS pre-cached location ignored because it is stale or invalid');
+            this.preCachedLocation = null;
         }
 
         // Also fetch fresh location in parallel (will update if better)
@@ -464,7 +512,24 @@ class UnifiedSOSController {
     // CRITICAL FIX: Only updateDoc existing documents — do NOT call broadcastSOS() with
     // cancel-prefixed signal. broadcastSOS creates NEW Firestore documents which trigger
     // Cloud Functions onCreate → sends NEW "emergency" push notifications for a CANCELLED SOS.
+    //
+    // P0-1: If the device is offline when the user cancels, the cloud updates
+    // here silently disappear (Firestore on RN has no persistent cache for
+    // setDoc/updateDoc). We queue the cancellation to an MMKV outbox via
+    // sosChannelRouter so it can be replayed when connectivity returns. The
+    // mesh broadcast (step 4) still happens immediately and is unaffected.
     private async broadcastCancellation(originalSignal: SOSSignal): Promise<void> {
+        // P0-1: Always enqueue the cancel into the outbox first. processCloudOutbox()
+        // will reconcile, dedup, and drive retries; if we're already online the
+        // immediate calls below will normally win the race and the outbox entry
+        // will short-circuit on its next pass.
+        try {
+            await sosChannelRouter.queueCancelToOutbox(originalSignal.id);
+        } catch (queueErr) {
+            // Non-fatal: we still attempt the immediate cloud updates below.
+            if (__DEV__) logger.debug('SOS: cancel outbox enqueue failed (non-fatal):', queueErr);
+        }
+
         try {
             const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
             const db = await getFirestoreInstanceAsync();
@@ -484,7 +549,7 @@ class UnifiedSOSController {
                 // SOSAlertListener watches sos_alerts/{memberId}/items/{signalId}
                 try {
                     const { useFamilyStore } = await import('../../stores/familyStore');
-                    const members = useFamilyStore.getState().members;
+                    const members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
                     if (members.length > 0) {
                         await Promise.allSettled(
                             members.flatMap(m => {
@@ -548,10 +613,32 @@ class UnifiedSOSController {
 
         const store = useSOSStore.getState();
 
-        // Guard: don't create duplicate signal if SOS is already active
-        if (store.isActive) {
-            logger.warn('SOS already active, skipping forceActivate');
-            return;
+        // Guard: don't create duplicate signal if SOS is already active.
+        // BUT: if the existing signal is stale (>30min, e.g. orphaned by app crash
+        // before init recovery ran), cancel it first so this auto-trigger (fall/crash
+        // detection) is not silently dropped. cancelSOS() preserves signalHistory.
+        if (store.isActive && store.currentSignal) {
+            const ageMs = Date.now() - (store.currentSignal.timestamp ?? 0);
+            const MAX_RECOVERY_AGE_MS = 30 * 60 * 1000;
+            if (ageMs > MAX_RECOVERY_AGE_MS) {
+                logger.warn(`forceActivateSOS: existing signal ${Math.floor(ageMs / 60000)}min old — cancelling stale before re-activating`);
+                try {
+                    await this.cancelSOS();
+                } catch (err) {
+                    logger.error('Stale SOS cancel failed in forceActivate:', err);
+                }
+                // cancelSOS calls store.stopSOS() synchronously → isActive=false now.
+            } else {
+                logger.warn('SOS already active (fresh), skipping forceActivate');
+                return;
+            }
+        } else if (store.isActive) {
+            // isActive=true but currentSignal=null is a zombie state. stopSOS()
+            // early-returns when currentSignal is null, so the flag stays stuck.
+            // Fall through and let startCountdown() create a fresh signal — store
+            // will overwrite isActive when activateSOS() runs. NEVER call reset()
+            // here: it wipes signalHistory + incoming alerts (logout-only behavior).
+            logger.warn('SOS active without currentSignal (zombie state) — overwriting via startCountdown');
         }
 
         // Cancel any existing countdown — clear BOTH timer AND store state
@@ -781,6 +868,11 @@ class UnifiedSOSController {
                 source: 'gps',
             };
 
+            if (!isUsableSOSLocation(sosLocation)) {
+                logger.warn('SOS location rejected because coordinates, accuracy, or timestamp are invalid');
+                return null;
+            }
+
             useSOSStore.getState().updateLocation(sosLocation);
             return sosLocation;
         } catch (error) {
@@ -920,6 +1012,12 @@ class UnifiedSOSController {
         if (this.isAmbientRecording) return;
 
         try {
+            const { useSettingsStore } = await import('../../stores/settingsStore');
+            if (!useSettingsStore.getState().sosAmbientAudioEnabled) {
+                logger.info('SOS ambient recording disabled by user preference');
+                return;
+            }
+
             // CRITICAL FIX: Check microphone permission before recording.
             // Starting recording without permission violates Apple guidelines and crashes on iOS.
             const { getRecordingPermissionsAsync } = await import('expo-audio');
@@ -980,6 +1078,7 @@ class UnifiedSOSController {
                             { merge: true },
                         );
                         logger.info('✅ Ambient recording saved to Firestore:', audioUrl);
+                        await this.shareAmbientAudioWithApprovedFamily(signalId, audioUrl);
                     }
                 } catch (fsErr) {
                     logger.warn('Failed to save audio URL to Firestore:', fsErr);
@@ -987,6 +1086,47 @@ class UnifiedSOSController {
             }
         } catch (err) {
             logger.warn('Ambient recording finish error:', err);
+        }
+    }
+
+    private async shareAmbientAudioWithApprovedFamily(signalId: string, audioUrl: string): Promise<void> {
+        try {
+            const { useFamilyStore } = await import('../../stores/familyStore');
+            const members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
+            if (members.length === 0) return;
+
+            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+            const db = await getFirestoreInstanceAsync();
+            if (!db) return;
+
+            const { doc, updateDoc } = await import('firebase/firestore');
+            const targetIds = new Set<string>();
+            members.forEach(member => {
+                if (member.uid) targetIds.add(member.uid);
+                if (member.deviceId) targetIds.add(member.deviceId);
+            });
+
+            const audioPatch = {
+                audio_url: audioUrl,
+                audio_timestamp: Date.now(),
+                audio_consent: true,
+            };
+
+            const updates: Promise<unknown>[] = [];
+            targetIds.forEach(targetId => {
+                updates.push(updateDoc(doc(db, 'sos_alerts', targetId, 'items', signalId), audioPatch));
+                updates.push(updateDoc(doc(db, 'devices', targetId, 'sos_alerts', signalId), audioPatch));
+            });
+
+            const results = await Promise.allSettled(updates);
+            const successCount = results.filter(result => result.status === 'fulfilled').length;
+            if (successCount === 0 && updates.length > 0) {
+                logger.warn('Ambient audio family fan-out had no successful alert updates');
+            } else {
+                logger.info(`✅ Ambient audio shared to approved family alert paths (${successCount}/${updates.length})`);
+            }
+        } catch (error) {
+            logger.warn('Ambient audio family sharing failed:', error);
         }
     }
 

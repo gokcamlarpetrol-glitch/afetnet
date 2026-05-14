@@ -800,13 +800,21 @@ class NotificationCenter {
                 if (settings.notificationMode === 'silent') {
                     return { delivered: false, reason: 'Silent mode active', priority: decision.priority };
                 }
-                if (settings.notificationMode === 'critical-only' && decision.priority !== 'high') {
+                if (settings.notificationMode === 'critical-only') {
                     return { delivered: false, reason: 'Critical-only mode active', priority: decision.priority };
+                }
+                if (this.isQuietHoursActive(settings) && settings.quietHoursCriticalOnly !== false) {
+                    return { delivered: false, reason: 'Quiet hours active', priority: decision.priority };
                 }
             }
 
+            const deliveryData = { ...(data as Record<string, any>) };
+            if ((category === 'message' || category === 'news') && deliveryData.showPreview === undefined) {
+                deliveryData.showPreview = settings.notificationShowPreview !== false;
+            }
+
             // 3. FORMAT
-            const formatted = this.formatNotification(category, data as Record<string, any>, decision);
+            const formatted = this.formatNotification(category, deliveryData, decision);
 
             // 3.5. EMPTY GUARD — never deliver blank notifications
             if (!formatted.title?.trim() && !formatted.body?.trim()) {
@@ -815,7 +823,7 @@ class NotificationCenter {
             }
 
             // 4. DELIVER
-            const notificationId = await this.deliver(category, formatted, decision, settings, data as Record<string, any>);
+            const notificationId = await this.deliver(category, formatted, decision, settings, deliveryData);
 
             if (__DEV__) {
                 logger.info(`✅ [${category}] Delivered: "${formatted.title}" (${decision.priority}) src: ${source || 'N/A'}`);
@@ -1064,6 +1072,22 @@ class NotificationCenter {
             const pushPriority = decision.priority === 'critical' ? 'max' as const
                 : decision.priority === 'high' ? 'high' as const
                     : 'default' as const;
+            const isLifeSafetyCategory =
+                category === 'earthquake'
+                || category === 'eew'
+                || category === 'sos'
+                || category === 'sos_received'
+                || category === 'family_sos';
+            const shouldPlaySound =
+                decision.priority !== 'low'
+                && (
+                    isLifeSafetyCategory
+                    || (
+                        settings.notificationSound !== false
+                        && settings.alarmSoundEnabled !== false
+                        && settings.notificationMode !== 'vibrate'
+                    )
+                );
 
             // Build contextual data for tap navigation
             // CRITICAL FIX: Spread originalData FIRST, then set type/priority AFTER
@@ -1079,7 +1103,7 @@ class NotificationCenter {
                     {
                         title: formatted.title,
                         body: formatted.body,
-                        sound: decision.priority === 'low' ? false : 'default',
+                        sound: shouldPlaySound ? 'default' : false,
                         priority: pushPriority,
                         data: tapData,
                         categoryIdentifier: category,
@@ -1102,7 +1126,7 @@ class NotificationCenter {
         }
 
         // === HAPTIC FEEDBACK ===
-        this.deliverHaptic(decision.priority, category);
+        this.deliverHaptic(decision.priority, category, settings);
 
         // === EMERGENCY MODE (earthquake M5+) ===
         // NOTE: Skip for 'eew' category — the foreground notification listener already handles
@@ -1169,8 +1193,28 @@ class NotificationCenter {
         }
     }
 
-    private deliverHaptic(priority: NotificationPriority, category: NotificationCategory): void {
+    private deliverHaptic(priority: NotificationPriority, category: NotificationCategory, settings: any): void {
         try {
+            const isLifeSafetyCritical =
+                priority === 'critical'
+                && (
+                    category === 'earthquake'
+                    || category === 'eew'
+                    || category === 'sos'
+                    || category === 'sos_received'
+                    || category === 'family_sos'
+                );
+            if (
+                !isLifeSafetyCritical
+                && (
+                    settings.notificationVibration === false
+                    || settings.vibrationEnabled === false
+                    || settings.notificationMode === 'sound'
+                    || settings.notificationMode === 'silent'
+                )
+            ) {
+                return;
+            }
             if (priority === 'critical') {
                 haptics.impactHeavy();
                 haptics.impactHeavy();
@@ -1215,6 +1259,26 @@ class NotificationCenter {
     // SETTINGS
     // ===========================================================================
 
+    private parseQuietHourMinutes(value: unknown): number | null {
+        if (typeof value !== 'string') return null;
+        const match = /^([0-1]\d|2[0-3]):([0-5]\d)$/.exec(value);
+        if (!match) return null;
+        return Number(match[1]) * 60 + Number(match[2]);
+    }
+
+    private isQuietHoursActive(settings: any): boolean {
+        if (!settings?.quietHoursEnabled) return false;
+        const start = this.parseQuietHourMinutes(settings.quietHoursStart);
+        const end = this.parseQuietHourMinutes(settings.quietHoursEnd);
+        if (start === null || end === null || start === end) return false;
+
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return start < end
+            ? nowMinutes >= start && nowMinutes < end
+            : nowMinutes >= start || nowMinutes < end;
+    }
+
     private async getSettings(): Promise<any> {
         const now = Date.now();
         if (this.settingsCache && now - this.settingsCacheTime < this.SETTINGS_CACHE_TTL) {
@@ -1222,14 +1286,23 @@ class NotificationCenter {
         }
 
         try {
-            const { useSettingsStore } = await import('../../stores/settingsStore');
+            const { useSettingsStore } = require('../../stores/settingsStore');
             const s = useSettingsStore.getState();
             this.settingsCache = {
                 notificationsEnabled: s.notificationsEnabled as boolean,
                 notificationPush: s.notificationPush as boolean,
+                notificationSound: s.notificationSound as boolean,
+                notificationVibration: s.notificationVibration as boolean,
+                alarmSoundEnabled: s.alarmSoundEnabled as boolean,
+                vibrationEnabled: s.vibrationEnabled as boolean,
                 notificationMode: s.notificationMode as string,
                 notificationSoundVolume: (s.notificationSoundVolume as number) || 80,
                 notificationSoundRepeat: (s.notificationSoundRepeat as number) || 3,
+                notificationShowPreview: s.notificationShowPreview as boolean,
+                quietHoursEnabled: s.quietHoursEnabled as boolean,
+                quietHoursStart: s.quietHoursStart as string,
+                quietHoursEnd: s.quietHoursEnd as string,
+                quietHoursCriticalOnly: s.quietHoursCriticalOnly as boolean,
             };
             this.settingsCacheTime = now;
             return this.settingsCache;
@@ -1237,9 +1310,18 @@ class NotificationCenter {
             return {
                 notificationsEnabled: true,
                 notificationPush: true,
+                notificationSound: true,
+                notificationVibration: true,
+                alarmSoundEnabled: true,
+                vibrationEnabled: true,
                 notificationMode: 'sound+vibrate',
                 notificationSoundVolume: 80,
                 notificationSoundRepeat: 3,
+                notificationShowPreview: true,
+                quietHoursEnabled: false,
+                quietHoursStart: '22:00',
+                quietHoursEnd: '07:00',
+                quietHoursCriticalOnly: true,
             };
         }
     }
@@ -1290,6 +1372,9 @@ class NotificationCenter {
             // PRODUCTION LOGGING: Log raw notification structure for delivery debugging
             const notifTitle = notification?.notification?.request?.content?.title
                 || notification?.request?.content?.title
+                || '';
+            const notifBody = notification?.notification?.request?.content?.body
+                || notification?.request?.content?.body
                 || '';
             logger.info(`📱 handleNotificationTap: title="${notifTitle}"`);
 
@@ -1355,7 +1440,8 @@ class NotificationCenter {
             }
             if (actionId === 'reply' && userText.length > 0) {
                 const convId = toNonEmptyString(data.conversationId) || toNonEmptyString(data.threadId);
-                if (convId) {
+                const queuePendingReply = async () => {
+                    if (!convId) return;
                     try {
                         const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
                         await AsyncStorage.setItem(`pending_reply_${convId}`, userText);
@@ -1363,7 +1449,75 @@ class NotificationCenter {
                     } catch (e) {
                         logger.warn('Failed to queue pending reply:', e);
                     }
+                };
+
+                const isGroupQuickReply =
+                    !!convId
+                    && (
+                        convId.startsWith('grp_')
+                        || toNonEmptyString(data.conversationType) === 'group'
+                        || toNonEmptyString(data.chatType) === 'group'
+                        || data.isGroup === true
+                        || data.isGroup === 'true'
+                    );
+
+                if (isGroupQuickReply && convId) {
+                    try {
+                        const { groupChatService } = require('../GroupChatService');
+                        const sent = await groupChatService.sendMessage(convId, userText);
+                        if (!sent) {
+                            await queuePendingReply();
+                        }
+                    } catch (e) {
+                        logger.warn('Group quick reply send failed, queued for foreground composer:', e);
+                        await queuePendingReply();
+                    }
+                    return;
                 }
+
+                let quickReplyRecipient =
+                    toNonEmptyString(data.senderUid)
+                    || toNonEmptyString(data.userId)
+                    || toNonEmptyString(data.senderId)
+                    || toNonEmptyString(data.senderDeviceId);
+
+                if (!quickReplyRecipient && convId) {
+                    try {
+                        const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                        const { doc, getDoc } = await import('firebase/firestore');
+                        const { identityService } = await import('../IdentityService');
+                        const db = await getFirestoreInstanceAsync();
+                        if (db) {
+                            const convDoc = await getDoc(doc(db, 'conversations', convId));
+                            if (convDoc.exists()) {
+                                const convData = convDoc.data();
+                                const myUid = identityService.getUid();
+                                const participants = Array.isArray(convData.participants) ? convData.participants : [];
+                                quickReplyRecipient = participants.find((p: string) => p !== myUid);
+                            }
+                        }
+                    } catch (e) {
+                        logger.warn('Quick reply participant lookup failed:', e);
+                    }
+                }
+
+                if (quickReplyRecipient) {
+                    try {
+                        const { hybridMessageService } = require('../HybridMessageService');
+                        await hybridMessageService.initialize();
+                        await hybridMessageService.sendMessage(userText, quickReplyRecipient, {
+                            priority: 'normal',
+                            type: 'CHAT',
+                            ...(convId ? { conversationId: convId } : {}),
+                        });
+                    } catch (e) {
+                        logger.warn('Quick reply send failed, queued for foreground composer:', e);
+                        await queuePendingReply();
+                    }
+                } else {
+                    await queuePendingReply();
+                }
+                return;
             }
 
             const toFiniteNumber = (value: unknown): number | null => {
@@ -1896,14 +2050,40 @@ class NotificationCenter {
 
                 // ═══ NEWS ═══
                 case 'news': {
-                    if (data.url || data.newsUrl || data.articleId) {
+                    const cleanNotificationTitle = notifTitle.replace(/^📰\s*/, '').trim();
+                    const newsUrl = toNonEmptyString(data.url) || toNonEmptyString(data.newsUrl);
+                    const newsTitle =
+                        toNonEmptyString(data.title)
+                        || toNonEmptyString(data.newsTitle)
+                        || cleanNotificationTitle;
+                    const newsSummary =
+                        toNonEmptyString(data.summary)
+                        || toNonEmptyString(data.message)
+                        || toNonEmptyString(data.body)
+                        || toNonEmptyString(notifBody)
+                        || newsTitle;
+                    const newsSource = toNonEmptyString(data.source) || 'AfetNet';
+                    const articleId =
+                        toNonEmptyString(data.articleId)
+                        || toNonEmptyString(data.newsId)
+                        || toNonEmptyString(data.id);
+                    const publishedAt = toFiniteNumber(data.publishedAt ?? data.timestamp ?? data.eventTimestamp) ?? Date.now();
+                    const combinedNewsText = `${newsTitle || ''} ${newsSummary || ''}`.toLocaleLowerCase('tr-TR');
+                    const category = combinedNewsText.includes('deprem') || combinedNewsText.includes('sarsıntı') || combinedNewsText.includes('afad')
+                        ? 'earthquake'
+                        : 'general';
+
+                    if (newsTitle || newsSummary || newsUrl) {
                         navigateTo('NewsDetail', {
                             article: {
-                                title: data.title || data.newsTitle || '',
-                                url: data.url || data.newsUrl,
-                                source: data.source,
+                                id: articleId || `notification-news-${publishedAt}`,
+                                title: newsTitle || 'AfetNet haber bildirimi',
+                                summary: newsSummary || 'Haber detayları için dokunun.',
+                                url: newsUrl || '#',
+                                source: newsSource,
                                 imageUrl: data.imageUrl,
-                                id: data.articleId,
+                                publishedAt,
+                                category,
                             },
                         });
                     } else {

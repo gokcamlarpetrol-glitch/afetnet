@@ -3,11 +3,22 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { eliteStorage } from '../../utils/storage';
 import { preparednessPlanService } from '../services/PreparednessPlanService';
-import { PreparednessPlan, PlanItem, PlanSection } from '../types/ai.types';
+import { PreparednessPlan } from '../types/ai.types';
 import { createLogger } from '../../utils/logger';
+import { useAIAssistantStore } from './aiAssistantStore';
 
 const logger = createLogger('PreparednessStore');
 const planService = preparednessPlanService;
+
+function syncAIAssistantPlan(plan: PreparednessPlan | null) {
+  try {
+    if (plan) {
+      useAIAssistantStore.getState().setPreparednessPlan(plan);
+    }
+  } catch (error) {
+    logger.debug('AI assistant plan sync skipped:', error);
+  }
+}
 
 interface PreparednessState {
   plan: PreparednessPlan | null;
@@ -49,6 +60,7 @@ export const usePreparednessStore = create<PreparednessState>()(
             const existingPlan = await planService.loadPlanById(currentPlanId);
             if (existingPlan) {
               set({ plan: existingPlan, loading: false });
+              syncAIAssistantPlan(existingPlan);
               return;
             }
           } catch (err) {
@@ -67,7 +79,7 @@ export const usePreparednessStore = create<PreparednessState>()(
           // Generate new plan (Service handles AI vs Rule fallback & Caching)
           const newPlan = await planService.generatePlan({
             familySize: params.familySize || 4,
-            locationName: params.locationName || 'İstanbul',
+            locationName: params.locationName || 'Türkiye',
             // ... pass other params from user profile store if available
             ...params,
           });
@@ -79,6 +91,7 @@ export const usePreparednessStore = create<PreparednessState>()(
           });
 
           logger.info('✅ Plan refreshed and stored in state');
+          syncAIAssistantPlan(newPlan);
         } catch (error: unknown) {
           logger.error('❌ Failed to refresh plan:', error);
           set({
@@ -124,6 +137,7 @@ export const usePreparednessStore = create<PreparednessState>()(
         };
 
         set({ plan: updatedPlan });
+        syncAIAssistantPlan(updatedPlan);
 
         // Sync to backend asynchronously (Optimistic Update)
         try {

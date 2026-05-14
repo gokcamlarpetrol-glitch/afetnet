@@ -28,6 +28,10 @@ import { styles } from './NotificationSettingsScreen.styles';
 import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useEarthquakeAlert } from '../../hooks/useEarthquakeAlert';
+import {
+  CRITICAL_EEW_NOTIFICATION_DEFAULT_LABEL,
+  GENERAL_EARTHQUAKE_NOTIFICATION_DEFAULT_LABEL,
+} from '../../config/earthquakeDefaults';
 import type { StackNavigationProp } from '@react-navigation/stack';
 
 const SOUND_TYPES = [
@@ -140,16 +144,26 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
 
   const handleQuietHoursStartChange = (value: string) => {
     setQuietStartInput(value);
-    // Validate HH:mm format
+    // Validate HH:mm format. Reject when equal to current end (zero-duration window).
     if (/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+      if (value === quietHoursEnd) {
+        Alert.alert('Geçersiz Saat', 'Başlangıç ve bitiş saatleri aynı olamaz.', [{ text: 'Tamam' }]);
+        setQuietStartInput(quietHoursStart);
+        return;
+      }
       setQuietHoursStart(value);
     }
   };
 
   const handleQuietHoursEndChange = (value: string) => {
     setQuietEndInput(value);
-    // Validate HH:mm format
+    // Validate HH:mm format. Reject when equal to current start (zero-duration window).
     if (/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+      if (value === quietHoursStart) {
+        Alert.alert('Geçersiz Saat', 'Başlangıç ve bitiş saatleri aynı olamaz.', [{ text: 'Tamam' }]);
+        setQuietEndInput(quietHoursEnd);
+        return;
+      }
       setQuietHoursEnd(value);
     }
   };
@@ -511,8 +525,9 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
           <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={20} color={colors.status.info} />
             <Text style={styles.infoBoxText}>
-              Minimum bildirim büyüklüğü: {minMagnitudeForNotification.toFixed(1)} M{'\n'}
-              Kritik büyüklük eşiği: {criticalMagnitudeThreshold.toFixed(1)} M
+              Varsayılan genel deprem bildirimi: {GENERAL_EARTHQUAKE_NOTIFICATION_DEFAULT_LABEL}{'\n'}
+              Aktif bildirim eşiği: {minMagnitudeForNotification.toFixed(1)} M{'\n'}
+              Kritik alarm varsayılanı: {CRITICAL_EEW_NOTIFICATION_DEFAULT_LABEL} ({criticalMagnitudeThreshold.toFixed(1)} M)
             </Text>
           </View>
 
@@ -553,7 +568,7 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
             </View>
             <View style={styles.magnitudeInfoRow}>
               <Text style={styles.magnitudeInfoText}>
-                🟠 Büyük (5.0-6.0 M): Orta sesli alarm + Orta titreşim
+                🟠 Büyük (5.0-{criticalMagnitudeThreshold.toFixed(1)} M): Orta sesli alarm + Orta titreşim
               </Text>
             </View>
             <View style={styles.magnitudeInfoRow}>
@@ -758,4 +773,3 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
     </SafeAreaView>
   );
 }
-

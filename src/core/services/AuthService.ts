@@ -40,7 +40,7 @@ import {
   signOut as firebaseSignOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { deleteField, doc, setDoc, getDoc } from 'firebase/firestore';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { createLogger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
@@ -77,8 +77,8 @@ interface AppleFullName {
 
 /** User Profile Update Data for Firestore */
 interface UserProfileUpdate {
-  email: string | null;
-  lastLoginAt: Date;
+  email?: ReturnType<typeof deleteField>;
+  lastLoginAt?: ReturnType<typeof deleteField>;
   photoURL: string | null;
   displayName?: string;
   qrId?: string;
@@ -689,8 +689,10 @@ export const AuthService = {
     const qrId = `AFN-${user.uid.substring(0, 8).toUpperCase()}`;
 
     const dataToUpdate: UserProfileUpdate = {
-      email: user.email,
-      lastLoginAt: new Date(),
+      // users/{uid} is searchable/readable for contact discovery, so never store
+      // private email/activity here. Auth remains the source of truth for account email.
+      email: deleteField(),
+      lastLoginAt: deleteField(),
       photoURL: user.photoURL,
       qrId: qrId,
     };
@@ -701,11 +703,7 @@ export const AuthService = {
     const currentDeviceId = await getDeviceId();
     const normalizedCurrentId = currentDeviceId?.toUpperCase() || '';
     const normalizedQrId = qrId.toUpperCase();
-
-    if (normalizedCurrentId !== normalizedQrId) {
-      await setDeviceId(qrId);
-      logger.info(`Device ID re-linked to Account: ${qrId}`);
-    }
+    const needsDeviceIdRelink = normalizedCurrentId !== normalizedQrId;
 
     dataToUpdate.deviceId = qrId;
 
@@ -714,7 +712,18 @@ export const AuthService = {
       dataToUpdate.createdAt = new Date();
     }
 
+    // Write Firestore FIRST, then update local device ID. If Firestore write fails,
+    // the local deviceId stays in its old state so a subsequent retry can detect the
+    // mismatch and re-attempt. Reversing this order would leave the device with a
+    // new ID while the server still has the old one, causing the next sync to skip
+    // (currentDeviceId === qrId) and the profile to remain unsynced forever.
     await setDoc(userRef, dataToUpdate, { merge: true });
+
+    if (needsDeviceIdRelink) {
+      await setDeviceId(qrId);
+      logger.info(`Device ID re-linked to Account: ${qrId}`);
+    }
+
     logger.info(`✅ Kullanıcı profili senkronize edildi: ${user.uid} (QR: ${qrId})`);
   },
 };

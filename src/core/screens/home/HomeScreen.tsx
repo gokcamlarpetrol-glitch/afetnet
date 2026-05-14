@@ -125,10 +125,23 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
         }
         style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
       >
+        {/* P0-8: Crisis priority — SOS button now sits ABOVE secondary
+            content (news, AI card). Order:
+              1. Header
+              2. Emergency SOS button (always in first viewport)
+              3. FamilyStatus-style: latest earthquake card
+              4. News
+              5. AI guardian
+              6. Tools grid
+            This puts the life-safety action where a panicked user looks first. */}
+
         {/* 1. Header - Identity & Status */}
         <HomeHeader />
 
-        {/* 2. Modern Earthquake Card with Map Preview */}
+        {/* 2. Emergency Action - The "Red Button" (hero, above the fold) */}
+        <EmergencyButton onPress={handleSOSPress} />
+
+        {/* 3. Modern Earthquake Card with Map Preview */}
         {dataStatusText && (
           <View style={styles.dataStatusBanner}>
             <Ionicons name="alert-circle-outline" size={16} color="#92400e" />
@@ -153,20 +166,13 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           />
         )}
 
-        {/* 3. Family Check-In moved to Family Screen */}
-
         {/* 4. Editorial News Carousel */}
         {newsEnabled && <NewsCard />}
 
         {/* 5. AI Guardian - Premium Feature */}
         <AIAssistantCard navigation={navigation} />
 
-        {/* 6. REMOVED: Preparedness Checklist (Redundant with AI Assistant) */}
-
-        {/* 7. Emergency Action - The "Red Button" */}
-        <EmergencyButton onPress={handleSOSPress} />
-
-        {/* 8. Tools & Features Grid */}
+        {/* 6. Tools & Features Grid */}
         <FeatureGrid navigation={navigation} />
 
         {/* 9. Footer removed - info in onboarding */}
@@ -185,7 +191,6 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
       <SOSModal
         visible={showSOSModal}
         onClose={() => setShowSOSModal(false)}
-        onConfirm={() => setShowSOSModal(false)}
       />
     </PaperBackground>
   );

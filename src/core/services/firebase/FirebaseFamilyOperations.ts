@@ -420,6 +420,7 @@ export async function saveFamilyMember(
           location: locationPayload,
           approvalState,
           batteryLevel: typeof member.batteryLevel === 'number' ? member.batteryLevel : null,
+          batteryUpdatedAt: normalizeTimestampMs(member.batteryUpdatedAt, 0) || null,
           isOnline: typeof member.isOnline === 'boolean'
             ? member.isOnline
             : (lastSeen > 0 ? now - lastSeen < 10 * 60 * 1000 : false),
@@ -605,6 +606,7 @@ export async function loadFamilyMembers(
           }
           : undefined,
         batteryLevel: toNullableFiniteNumber(data.batteryLevel) ?? undefined,
+        batteryUpdatedAt: normalizeTimestampMs(data.batteryUpdatedAt, 0) || undefined,
         isOnline: typeof data.isOnline === 'boolean'
           ? data.isOnline
           : (lastSeen > 0 ? Date.now() - lastSeen < 10 * 60 * 1000 : false),
@@ -781,6 +783,7 @@ export async function subscribeToFamilyMembers(
                   }
                   : undefined,
                 batteryLevel: toNullableFiniteNumber(data.batteryLevel) ?? undefined,
+                batteryUpdatedAt: normalizeTimestampMs(data.batteryUpdatedAt, 0) || undefined,
                 isOnline: typeof data.isOnline === 'boolean'
                   ? data.isOnline
                   : (lastSeen > 0 ? Date.now() - lastSeen < 10 * 60 * 1000 : false),

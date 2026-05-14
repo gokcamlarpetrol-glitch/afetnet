@@ -111,6 +111,7 @@ export interface UserInboxThread {
  */
 export interface LocationUpdateData {
   userId: string;
+  deviceId?: string;
   latitude: number;
   longitude: number;
   accuracy?: number;
@@ -119,7 +120,11 @@ export interface LocationUpdateData {
   heading?: number;
   /** Battery percent (0-100) */
   battery?: number;
+  /** Backward-compatible battery percent alias (0-100) */
+  batteryLevel?: number;
+  batteryUpdatedAt?: number;
   timestamp: number;
+  updatedAt?: number;
   source?: 'gps' | 'network' | 'manual';
   /** Which families this location is shared with */
   sharingTo?: string[];

@@ -2,11 +2,13 @@ const mockNetInfoFetch = jest.fn();
 const mockMeshBroadcast = jest.fn();
 const mockMeshStart = jest.fn();
 const mockMeshIsRunning = jest.fn();
+let mockMeshPeers: Array<{ id: string }> = [{ id: 'peer-1' }];
 
 jest.mock('@react-native-community/netinfo', () => ({
   __esModule: true,
   default: {
     fetch: (...args: unknown[]) => mockNetInfoFetch(...args),
+    addEventListener: jest.fn(() => jest.fn()),
   },
 }));
 
@@ -15,6 +17,12 @@ jest.mock('expo-battery', () => ({
   getBatteryStateAsync: jest.fn(async () => 1),
   BatteryState: {
     CHARGING: 1,
+  },
+}));
+
+jest.mock('../mesh/MeshStore', () => ({
+  useMeshStore: {
+    getState: jest.fn(() => ({ peers: mockMeshPeers })),
   },
 }));
 
@@ -70,24 +78,27 @@ describe('SOSChannelRouter channel behavior', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
+    mockMeshPeers = [{ id: 'peer-1' }];
     mockMeshIsRunning.mockReturnValue(false);
     mockMeshStart.mockResolvedValue(undefined);
     mockMeshBroadcast.mockResolvedValue(undefined);
   });
 
-  it('attempts firebase write even when offline (offline persistence queues it)', async () => {
+  it('does not mark firebase sent while offline', async () => {
     mockNetInfoFetch.mockResolvedValue({
       isConnected: false,
       type: 'none',
     });
 
     const updateStatus = jest.fn();
-    await (sosChannelRouter as any).broadcastViaFirebase(signal, updateStatus);
+    await expect((sosChannelRouter as any).broadcastViaFirebase(signal, updateStatus))
+      .rejects
+      .toThrow(/offline/i);
 
-    // Firebase channel should attempt write (Firestore offline persistence queues it).
-    // It will either succeed (queued) or fail (Firestore unavailable), but never skip.
+    // Firestore is not a durable SOS outbox in this app; cloud retry handles reconnect.
     expect(updateStatus).toHaveBeenNthCalledWith(1, 'firebase', 'pending');
     expect(updateStatus).toHaveBeenNthCalledWith(2, 'firebase', 'sending');
+    expect(updateStatus).toHaveBeenLastCalledWith('firebase', 'failed');
   });
 
   it('broadcasts SOS over mesh with installation-scoped sender id', async () => {
@@ -95,6 +106,9 @@ describe('SOSChannelRouter channel behavior', () => {
     jest
       .spyOn(sosChannelRouter as any, 'loadMeshDependencies')
       .mockResolvedValue(buildMeshDependencies());
+    jest
+      .spyOn(sosChannelRouter as any, 'getVisibleMeshPeerCount')
+      .mockResolvedValue(1);
 
     await (sosChannelRouter as any).broadcastViaMesh(signal, updateStatus);
 
@@ -108,5 +122,24 @@ describe('SOSChannelRouter channel behavior', () => {
     expect(parsed.senderUid).toBe(signal.userId);
     expect(updateStatus).toHaveBeenNthCalledWith(1, 'mesh', 'sending');
     expect(updateStatus).toHaveBeenLastCalledWith('mesh', 'sent');
+  });
+
+  it('does not mark mesh as sent when no peer is visible after queueing', async () => {
+    mockMeshPeers = [];
+    const updateStatus = jest.fn();
+    jest
+      .spyOn(sosChannelRouter as any, 'loadMeshDependencies')
+      .mockResolvedValue(buildMeshDependencies());
+    jest
+      .spyOn(sosChannelRouter as any, 'getVisibleMeshPeerCount')
+      .mockResolvedValue(0);
+
+    await expect((sosChannelRouter as any).broadcastViaMesh(signal, updateStatus))
+      .rejects
+      .toThrow(/no visible peers/i);
+
+    expect(mockMeshBroadcast).toHaveBeenCalledTimes(1);
+    expect(updateStatus).toHaveBeenNthCalledWith(1, 'mesh', 'sending');
+    expect(updateStatus).toHaveBeenLastCalledWith('mesh', 'failed');
   });
 });

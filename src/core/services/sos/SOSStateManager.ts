@@ -121,6 +121,7 @@ interface SOSState {
     countdownSeconds: number;
     isCountingDown: boolean;
     countdownStartedAt: number | null; // FIX 18: absolute timestamp for background-safe countdown
+    countdownTotalSeconds: number;     // P0-4: snapshot of the originally requested duration (5s manual / 30s auto)
 
     // History
     signalHistory: SOSSignal[];
@@ -136,7 +137,11 @@ interface SOSState {
     };
 
     // Actions
-    startCountdown: (reason: EmergencyReason, userId: string, message?: string, isSilent?: boolean) => void;
+    // P0-4: countdownSeconds parameter — manual SOS = 5s (user-conscious),
+    // automatic SOS (fall/crash) = 30s (Apple Watch standard, life-safety
+    // best practice; user may be unconscious or disoriented and need a
+    // longer cancel window). Defaults to DEFAULT_COUNTDOWN when omitted.
+    startCountdown: (reason: EmergencyReason, userId: string, message?: string, isSilent?: boolean, countdownSeconds?: number) => void;
     cancelCountdown: () => void;
     setSilentMode: (isSilent: boolean) => void;
     decrementCountdown: () => number;
@@ -158,7 +163,12 @@ interface SOSState {
 // DEFAULT VALUES
 // ============================================================================
 
-const DEFAULT_COUNTDOWN = 3;
+// P0-4: 5s for manual SOS — long enough to cancel an accidental tap but
+// short enough that a genuine emergency is broadcast quickly.
+// Automatic triggers (fall/crash) override this to 30s via startCountdown's
+// optional `countdownSeconds` parameter.
+const DEFAULT_COUNTDOWN = 5;
+const AUTO_TRIGGER_COUNTDOWN = 30;
 
 const createEmptySignal = (
     userId: string,
@@ -205,6 +215,7 @@ export const useSOSStore = create<SOSState>()(
             countdownSeconds: DEFAULT_COUNTDOWN,
             isCountingDown: false,
             countdownStartedAt: null,
+            countdownTotalSeconds: DEFAULT_COUNTDOWN,
             signalHistory: [],
             incomingSOSAlerts: [],
             stats: {
@@ -214,17 +225,27 @@ export const useSOSStore = create<SOSState>()(
             },
 
             // Start Countdown
-            startCountdown: (reason, userId, message = 'Acil yardım gerekiyor!', isSilent = false) => {
+            startCountdown: (reason, userId, message = 'Acil yardım gerekiyor!', isSilent = false, countdownSeconds) => {
                 const signal = createEmptySignal(userId, reason, message, isSilent);
+
+                // P0-4: Clamp explicit override; default to 5s manual / 30s auto.
+                const isAutoTrigger =
+                    reason === EmergencyReason.IMPACT_DETECTED ||
+                    reason === EmergencyReason.INACTIVITY_TIMEOUT ||
+                    reason === EmergencyReason.TRAPPED_DETECTED;
+                const requestedSeconds = typeof countdownSeconds === 'number' && countdownSeconds > 0 && countdownSeconds <= 60
+                    ? Math.round(countdownSeconds)
+                    : (isAutoTrigger ? AUTO_TRIGGER_COUNTDOWN : DEFAULT_COUNTDOWN);
 
                 set({
                     currentSignal: signal,
                     isCountingDown: true,
-                    countdownSeconds: DEFAULT_COUNTDOWN,
+                    countdownSeconds: requestedSeconds,
+                    countdownTotalSeconds: requestedSeconds, // P0-4: snapshot for decrement/recalculate
                     countdownStartedAt: Date.now(), // FIX 18: store absolute start time
                 });
 
-                logger.info(`🆘 SOS countdown started: ${reason}`);
+                logger.info(`🆘 SOS countdown started: ${reason} (${requestedSeconds}s)`);
             },
 
             // Cancel Countdown
@@ -238,6 +259,7 @@ export const useSOSStore = create<SOSState>()(
                         currentSignal: null,
                         isCountingDown: false,
                         countdownSeconds: DEFAULT_COUNTDOWN,
+                        countdownTotalSeconds: DEFAULT_COUNTDOWN, // P0-4: reset snapshot
                         countdownStartedAt: null,
                     });
 
@@ -256,11 +278,15 @@ export const useSOSStore = create<SOSState>()(
             },
 
             // Decrement Countdown — FIX 18: Use absolute timestamp for background-safe accuracy
+            // P0-4: derive from countdownTotalSeconds snapshot (5s manual / 30s auto)
             decrementCountdown: () => {
-                const { countdownStartedAt } = get();
+                const { countdownStartedAt, countdownTotalSeconds } = get();
+                const total = typeof countdownTotalSeconds === 'number' && countdownTotalSeconds > 0
+                    ? countdownTotalSeconds
+                    : DEFAULT_COUNTDOWN;
                 if (countdownStartedAt && typeof countdownStartedAt === 'number' && countdownStartedAt > 0 && countdownStartedAt <= Date.now()) {
                     const elapsed = Math.floor((Date.now() - countdownStartedAt) / 1000);
-                    const newCount = Math.max(0, DEFAULT_COUNTDOWN - elapsed);
+                    const newCount = Math.max(0, total - elapsed);
                     set({ countdownSeconds: newCount });
                     return newCount;
                 }
@@ -273,10 +299,13 @@ export const useSOSStore = create<SOSState>()(
 
             // FIX 18: Recalculate countdown from absolute timestamp (called on AppState 'active')
             recalculateCountdown: () => {
-                const { countdownStartedAt, isCountingDown } = get();
+                const { countdownStartedAt, isCountingDown, countdownTotalSeconds } = get();
                 if (!isCountingDown || !countdownStartedAt) return get().countdownSeconds;
+                const total = typeof countdownTotalSeconds === 'number' && countdownTotalSeconds > 0
+                    ? countdownTotalSeconds
+                    : DEFAULT_COUNTDOWN;
                 const elapsed = Math.floor((Date.now() - countdownStartedAt) / 1000);
-                const newCount = Math.max(0, DEFAULT_COUNTDOWN - elapsed);
+                const newCount = Math.max(0, total - elapsed);
                 set({ countdownSeconds: newCount });
                 return newCount;
             },
@@ -430,6 +459,7 @@ export const useSOSStore = create<SOSState>()(
                         isActive: false,
                         isCountingDown: false,
                         countdownSeconds: DEFAULT_COUNTDOWN,
+                        countdownTotalSeconds: DEFAULT_COUNTDOWN, // P0-4: reset snapshot
                         countdownStartedAt: null,
                         signalHistory: [finalSignal, ...signalHistory].slice(0, 50),
                     });
@@ -448,6 +478,7 @@ export const useSOSStore = create<SOSState>()(
                     isActive: false,
                     isCountingDown: false,
                     countdownSeconds: DEFAULT_COUNTDOWN,
+                    countdownTotalSeconds: DEFAULT_COUNTDOWN, // P0-4: reset snapshot
                     countdownStartedAt: null,
                     signalHistory: [],
                     incomingSOSAlerts: [],
@@ -483,6 +514,7 @@ export const useSOSStore = create<SOSState>()(
                 countdownStartedAt: state.countdownStartedAt,
                 isCountingDown: state.isCountingDown,
                 countdownSeconds: state.countdownSeconds,
+                countdownTotalSeconds: state.countdownTotalSeconds, // P0-4: must survive crash so resume uses correct duration
                 // Persist incoming SOS alerts so rescuers don't lose map markers on restart
                 incomingSOSAlerts: state.incomingSOSAlerts,
             }),

@@ -4,12 +4,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/core';
-import { useRiskStore } from '../../stores/riskStore';
+import { useAIAssistantStore } from '../../ai/stores/aiAssistantStore';
+import { aiAssistantCoordinator } from '../../ai/services/AIAssistantCoordinator';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { firebaseAnalyticsService } from '../../services/FirebaseAnalyticsService';
 import * as haptics from '../../utils/haptics';
 import * as Location from 'expo-location';
 import Svg, { Circle as SvgCircle, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
+import type { RiskFactor, RiskLevel } from '../../ai/types/ai.types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GAUGE_SIZE = 180;
@@ -94,7 +96,7 @@ const CircularGauge = ({ score, color }: { score: number; color: string }) => {
       {/* Center score */}
       <View style={gaugeStyles.center}>
         <Text style={[gaugeStyles.score, { color }]}>{displayScore}</Text>
-        <Text style={gaugeStyles.label}>GÜVENLİK SKORU</Text>
+        <Text style={gaugeStyles.label}>RİSK SKORU</Text>
         <Text style={gaugeStyles.outOf}>/100</Text>
       </View>
     </View>
@@ -113,7 +115,9 @@ const gaugeStyles = StyleSheet.create({
 export default function RiskScoreScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { riskAssessment, loading, error, refreshRiskAssessment } = useRiskStore();
+  const riskScore = useAIAssistantStore((state) => state.riskScore);
+  const loading = useAIAssistantStore((state) => state.riskScoreLoading);
+  const error = useAIAssistantStore((state) => state.riskScoreError);
   const earthquakes = useEarthquakeStore(state => state.items);
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -132,7 +136,7 @@ export default function RiskScoreScreen() {
   }, []);
 
   useEffect(() => {
-    refreshRiskAssessment();
+    aiAssistantCoordinator.ensureRiskScore().catch(() => {});
     fetchLocation();
     calculateRecentActivity();
   }, []);
@@ -177,7 +181,7 @@ export default function RiskScoreScreen() {
   const handleDeepAnalysis = () => {
     haptics.impactHeavy();
     setAnalyzing(true);
-    refreshRiskAssessment();
+    aiAssistantCoordinator.ensureRiskScore(true).catch(() => {});
     fetchLocation();
     calculateRecentActivity();
     analyzeTimerRef.current = setTimeout(() => {
@@ -190,33 +194,58 @@ export default function RiskScoreScreen() {
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 80) return '#34d399';
-    if (score >= 60) return '#22c55e';
+    if (score >= 80) return '#ef4444';
+    if (score >= 60) return '#f97316';
     if (score >= 40) return '#fbbf24';
-    if (score >= 20) return '#f97316';
-    return '#ef4444';
+    if (score >= 20) return '#22c55e';
+    return '#34d399';
   };
 
   const getRiskColor = (level: string) => {
     switch (level) {
+      case 'critical':
       case 'Kritik': return '#dc2626';
+      case 'high':
       case 'Çok Yüksek': return '#ef4444';
       case 'Yüksek': return '#f59e0b';
+      case 'medium':
       case 'Orta': return '#eab308';
+      case 'low':
       case 'Düşük': return '#22c55e';
       default: return '#64748b';
     }
   };
 
   const getScoreLabel = (score: number) => {
-    if (score >= 80) return 'Güvenli';
-    if (score >= 60) return 'İyi';
-    if (score >= 40) return 'Orta';
-    if (score >= 20) return 'Riskli';
-    return 'Yüksek Risk';
+    if (score >= 80) return 'Kritik Risk';
+    if (score >= 60) return 'Yüksek Risk';
+    if (score >= 40) return 'Orta Risk';
+    if (score >= 20) return 'Düşük-Orta Risk';
+    return 'Düşük Risk';
   };
 
-  if (loading) {
+  const getRiskLabel = (level?: RiskLevel) => {
+    switch (level) {
+      case 'critical': return 'KRİTİK';
+      case 'high': return 'YÜKSEK';
+      case 'medium': return 'ORTA';
+      case 'low': return 'DÜŞÜK';
+      default: return regionData.riskLevel.toUpperCase();
+    }
+  };
+
+  const getFactorPresentation = (factor: RiskFactor) => {
+    const severity = factor.severity || 'medium';
+    if (severity === 'critical' || severity === 'high') {
+      return { icon: 'warning' as const, color: '#ef4444', bg: 'rgba(239,68,68,0.15)' };
+    }
+    if (severity === 'medium') {
+      return { icon: 'information-circle' as const, color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' };
+    }
+    return { icon: 'shield-checkmark' as const, color: '#22c55e', bg: 'rgba(34,197,94,0.15)' };
+  };
+
+  if (loading && !riskScore) {
     return (
       <LinearGradient colors={['#0c1222', '#1a2744', '#0c1222']} style={styles.loadingContainer}>
         <StatusBar barStyle="light-content" />
@@ -226,9 +255,9 @@ export default function RiskScoreScreen() {
     );
   }
 
-  const score = riskAssessment?.overallScore ?? 0;
+  const score = riskScore?.score ?? 0;
   const scoreColor = getScoreColor(score);
-  const riskColor = getRiskColor(regionData.riskLevel);
+  const riskColor = getRiskColor(riskScore?.level || regionData.riskLevel);
 
   return (
     <LinearGradient colors={['#0c1222', '#162039', '#0f1729']} style={styles.container}>
@@ -259,7 +288,7 @@ export default function RiskScoreScreen() {
           {/* Risk level chip below gauge */}
           <View style={[styles.riskChip, { backgroundColor: riskColor + '20', borderColor: riskColor + '40' }]}>
             <View style={[styles.riskDot, { backgroundColor: riskColor }]} />
-            <Text style={[styles.riskChipText, { color: riskColor }]}>{regionData.riskLevel.toUpperCase()}</Text>
+	            <Text style={[styles.riskChipText, { color: riskColor }]}>{getRiskLabel(riskScore?.level)}</Text>
           </View>
           <Text style={styles.scoreDescription}>{getScoreLabel(score)}</Text>
         </View>
@@ -316,31 +345,39 @@ export default function RiskScoreScreen() {
         </View>
 
         {/* Risk Factors */}
-        {riskAssessment && riskAssessment.factors.length > 0 && (
+        {error && (
+          <View style={styles.alertCard}>
+            <View style={styles.alertIcon}>
+              <Ionicons name="warning" size={18} color="#ef4444" />
+            </View>
+            <Text style={styles.alertText}>{error}</Text>
+          </View>
+        )}
+
+        {riskScore && riskScore.factors.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>ETKİLEYEN FAKTÖRLER</Text>
-            {riskAssessment.factors.map((factor, index) => (
-              <View key={index} style={styles.factorCard}>
-                <View style={[styles.factorIcon, {
-                  backgroundColor: factor.status === 'positive' ? 'rgba(34,197,94,0.15)' : factor.status === 'negative' ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
-                }]}>
+            {riskScore.factors.map((factor, index) => {
+              const presentation = getFactorPresentation(factor);
+              return (
+              <View key={factor.id || index} style={styles.factorCard}>
+                <View style={[styles.factorIcon, { backgroundColor: presentation.bg }]}>
                   <Ionicons
-                    name={factor.status === 'positive' ? 'shield-checkmark' : factor.status === 'negative' ? 'warning' : 'information-circle'}
+                    name={presentation.icon}
                     size={18}
-                    color={factor.status === 'positive' ? '#22c55e' : factor.status === 'negative' ? '#ef4444' : '#94a3b8'}
+                    color={presentation.color}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.factorName}>{factor.name}</Text>
                   <Text style={styles.factorDesc}>{factor.description}</Text>
                 </View>
-                <Text style={[styles.factorImpact, {
-                  color: factor.impact > 0 ? '#22c55e' : factor.impact < 0 ? '#ef4444' : '#64748b',
-                }]}>
-                  {factor.impact > 0 ? `+${factor.impact}` : factor.impact}
+                <Text style={[styles.factorImpact, { color: presentation.color }]}>
+                  {Math.round(factor.value)}
                 </Text>
               </View>
-            ))}
+              );
+            })}
           </View>
         )}
 

@@ -198,7 +198,72 @@ class MeshMessageBridge {
             return;
         }
 
-        // Create bridged message
+        // P0-12: Detect group messages so they route to the group store rather
+        // than being mis-routed as direct messages.
+        //
+        // GroupChatService.sendGroupMessage broadcasts with:
+        //   • `to: 'group:${groupId}'`   ← mesh transport metadata
+        //   • payload JSON containing    `groupId: <string>`
+        //
+        // We accept either signal (mesh 'to' field OR parsed payload groupId)
+        // and route accordingly. If neither is present, this is a DM and the
+        // existing bridged-message flow takes over.
+        let parsedGroupId: string | null = null;
+        try {
+            // Mesh-level metadata first — cheapest path.
+            const rawTo = (message as unknown as { to?: string }).to;
+            if (typeof rawTo === 'string' && rawTo.startsWith('group:')) {
+                parsedGroupId = rawTo.slice('group:'.length).trim() || null;
+            }
+            // Otherwise try parsing the payload — GroupChatService stamps a
+            // top-level `groupId` field inside the JSON it broadcasts.
+            if (!parsedGroupId && typeof message.content === 'string' && message.content.startsWith('{')) {
+                const obj = JSON.parse(message.content) as { groupId?: unknown };
+                if (typeof obj.groupId === 'string' && obj.groupId.trim().length > 0) {
+                    parsedGroupId = obj.groupId.trim();
+                }
+            }
+        } catch { /* not a JSON payload — treat as DM */ }
+
+        if (parsedGroupId) {
+            try {
+                // Route via GroupChatService.ingestMeshMessage if present,
+                // otherwise fall back to directly inserting into the group store.
+                let routed = false;
+                try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { groupChatService } = require('../GroupChatService');
+                    if (groupChatService && typeof groupChatService.ingestMeshMessage === 'function') {
+                        await groupChatService.ingestMeshMessage(parsedGroupId, message);
+                        routed = true;
+                    }
+                } catch { /* fall through */ }
+                if (!routed) {
+                    try {
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        const { useGroupChatStore } = require('../../stores/groupChatStore');
+                        const store = useGroupChatStore?.getState?.();
+                        if (store && typeof store.addIncomingMeshMessage === 'function') {
+                            store.addIncomingMeshMessage(parsedGroupId, message);
+                            routed = true;
+                        }
+                    } catch { /* groupChatStore not available — give up gracefully */ }
+                }
+                if (routed) {
+                    logger.debug(`Routed mesh message to group ${parsedGroupId}: ${message.id}`);
+                    return;
+                }
+                logger.warn(`Group mesh message received but no group router available — dropping group:${parsedGroupId}`);
+                return;
+            } catch (groupErr) {
+                logger.error('Group mesh routing failed:', groupErr);
+                // Don't fall through to DM bridge — a group message routed to a
+                // 1:1 conversation creates confusing UX. Just log + drop.
+                return;
+            }
+        }
+
+        // Create bridged message (DM path)
         // FIX: Set recipientId to local user UID so syncToCloud creates
         // the correct DM conversation (sender ↔ local user), not 'mesh_broadcast'.
         let localUid: string | undefined;

@@ -19,6 +19,7 @@ import { useEarthquakeStore } from '../stores/earthquakeStore';
 import { notificationCenter } from '../services/notifications/NotificationCenter';
 import { firebaseAnalyticsService } from '../services/FirebaseAnalyticsService';
 import { createLogger } from '../utils/logger';
+import { GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE } from '../config/earthquakeDefaults';
 
 const logger = createLogger('EarthquakeAlertHook');
 
@@ -28,7 +29,7 @@ const ALERT_SETTINGS_KEY = '@afetnet_earthquake_alert_settings';
 // ELITE: Alert settings interface
 export interface EarthquakeAlertSettings {
     enabled: boolean;
-    minMagnitude: number;          // Minimum magnitude to alert (default: 4.0)
+    minMagnitude: number;          // Minimum magnitude to alert (default: 5.0)
     maxDistanceKm: number;         // Maximum distance for alerts (default: 500km)
     criticalMagnitude: number;     // Magnitude that bypasses DND (default: 5.5)
     silentHoursEnabled: boolean;   // Enable quiet hours
@@ -37,12 +38,13 @@ export interface EarthquakeAlertSettings {
     vibrationEnabled: boolean;
     soundEnabled: boolean;
     ttsEnabled: boolean;           // Text-to-speech for critical alerts
+    defaultMigratedToM5?: boolean; // One-time migration from legacy 4.0 default
 }
 
 // ELITE: Default settings (conservative but life-saving)
 const DEFAULT_SETTINGS: EarthquakeAlertSettings = {
     enabled: true,
-    minMagnitude: 4.0,
+    minMagnitude: GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE,
     maxDistanceKm: 500,
     criticalMagnitude: 5.5,
     silentHoursEnabled: false,
@@ -51,7 +53,22 @@ const DEFAULT_SETTINGS: EarthquakeAlertSettings = {
     vibrationEnabled: true,
     soundEnabled: true,
     ttsEnabled: true,
+    defaultMigratedToM5: true,
 };
+
+function migrateLegacyAlertSettings(saved: Partial<EarthquakeAlertSettings>): Partial<EarthquakeAlertSettings> {
+    if (saved.defaultMigratedToM5 === true) {
+        return saved;
+    }
+
+    return {
+        ...saved,
+        minMagnitude: saved.minMagnitude === 4.0
+            ? GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE
+            : saved.minMagnitude,
+        defaultMigratedToM5: true,
+    };
+}
 
 // ELITE: Calculate distance between two coordinates (Haversine formula)
 const calculateDistance = (
@@ -154,7 +171,13 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         try {
             const saved = DirectStorage.getString(ALERT_SETTINGS_KEY);
             if (saved) {
-                setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
+                const parsed = JSON.parse(saved);
+                const migrated = migrateLegacyAlertSettings(parsed);
+                const nextSettings = { ...DEFAULT_SETTINGS, ...migrated };
+                setSettings(nextSettings);
+                if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
+                    DirectStorage.setString(ALERT_SETTINGS_KEY, JSON.stringify(nextSettings));
+                }
             }
         } catch (e) {
             logger.error('Failed to load alert settings:', e);

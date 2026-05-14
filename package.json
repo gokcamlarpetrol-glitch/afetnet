@@ -41,6 +41,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "jest",
+    "preflight": "npm run typecheck && npm run lint && npm test && node scripts/preflight-check.js",
     "test:critical": "jest --watchman=false --runInBand src/core/stores/__tests__/onboardingAuthPersistence.test.ts src/core/stores/__tests__/settingsStorePersistence.test.ts src/core/ble/__tests__/HighPerformanceBle.test.ts src/core/services/__tests__/HybridMessageDeliveryMatrix.test.ts src/core/services/__tests__/SOSChannelRouter.test.ts src/core/services/__tests__/MessagingReliability.test.ts src/core/services/__tests__/NotificationPermissionPromptSafety.test.ts src/core/services/__tests__/GroupChatService.test.ts src/core/services/__tests__/IdentityService.test.ts src/core/utils/__tests__/familyLocation.test.ts src/core/utils/__tests__/dateUtils.test.ts",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

@@ -8,6 +8,7 @@ import { createLogger } from '../../utils/logger';
 import { getNotificationsAsync } from './NotificationModuleLoader';
 
 const logger = createLogger('NotificationChannelManager');
+const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
 
 // Channel definitions
 export interface ChannelConfig {
@@ -29,7 +30,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'Deprem Uyarıları',
     importance: 'MAX',
     description: 'Acil deprem uyarı bildirimleri',
-    sound: 'default',
+    sound: EMERGENCY_NOTIFICATION_SOUND,
     vibrationPattern: [0, 500, 200, 500, 200, 500],
     bypassDnd: true,
     enableLights: true,
@@ -40,7 +41,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'Erken Uyarı (Kritik)',
     importance: 'MAX',
     description: 'P-Dalga tespit kritik uyarıları',
-    sound: 'default',
+    sound: EMERGENCY_NOTIFICATION_SOUND,
     vibrationPattern: [0, 1000, 500, 1000],
     bypassDnd: true,
     enableLights: true,
@@ -51,7 +52,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     name: 'SOS Bildirimleri',
     importance: 'MAX',
     description: 'Aile üyelerinden SOS bildirimleri',
-    sound: 'default',
+    sound: EMERGENCY_NOTIFICATION_SOUND,
     vibrationPattern: [0, 500, 200, 500, 200, 500],
     bypassDnd: true,
     enableLights: true,

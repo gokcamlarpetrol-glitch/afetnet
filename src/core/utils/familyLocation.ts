@@ -67,18 +67,6 @@ export const resolveFamilyMemberLocation = (
     };
   }
 
-  const legacyLatitude = member.latitude;
-  const legacyLongitude = member.longitude;
-  if (isValidCoordinatePair(legacyLatitude, legacyLongitude)) {
-    const lat = toNumber(legacyLatitude) ?? (legacyLatitude as number);
-    const lon = toNumber(legacyLongitude) ?? (legacyLongitude as number);
-    return {
-      latitude: lat as number,
-      longitude: lon as number,
-      source: 'legacy',
-    };
-  }
-
   const lastKnownLatitude = member.lastKnownLocation?.latitude;
   const lastKnownLongitude = member.lastKnownLocation?.longitude;
   if (isValidCoordinatePair(lastKnownLatitude, lastKnownLongitude)) {
@@ -89,6 +77,18 @@ export const resolveFamilyMemberLocation = (
       longitude: lon as number,
       ...(member.lastKnownLocation?.timestamp ? { timestamp: member.lastKnownLocation.timestamp } : {}),
       source: 'lastKnown',
+    };
+  }
+
+  const legacyLatitude = member.latitude;
+  const legacyLongitude = member.longitude;
+  if (isValidCoordinatePair(legacyLatitude, legacyLongitude)) {
+    const lat = toNumber(legacyLatitude) ?? (legacyLatitude as number);
+    const lon = toNumber(legacyLongitude) ?? (legacyLongitude as number);
+    return {
+      latitude: lat as number,
+      longitude: lon as number,
+      source: 'legacy',
     };
   }
 

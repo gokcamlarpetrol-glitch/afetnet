@@ -106,6 +106,35 @@ export type DeliveryCallback = (messageId: string, status: DeliveryStatus) => vo
 export type TypingCallback = (userId: string, userName: string | undefined, isTyping: boolean) => void;
 export type ConnectionCallback = (state: 'online' | 'mesh' | 'offline') => void;
 
+/**
+ * Raw Firestore cloud message payload. All fields are optional because they
+ * originate from untrusted server data — every consumer must defensively guard
+ * with typeof / Array.isArray / null-checks. The index signature retains
+ * forward compatibility with new schema fields without TS errors.
+ *
+ * NOTE: `timestamp` is typed as number to match downstream consumer expectations
+ * (arithmetic, comparison). Firestore Timestamp objects must be normalized via
+ * .toMillis() at the boundary before assignment.
+ */
+type CloudMessagePayload = {
+  id?: string;
+  localId?: string;
+  senderUid?: string;
+  fromDeviceId?: string;
+  toDeviceId?: string;
+  read?: boolean;
+  delivered?: boolean;
+  status?: string;
+  type?: string;
+  content?: string;
+  priority?: string;
+  timestamp?: number;
+  metadata?: Record<string, unknown>;
+  readBy?: string | string[] | Record<string, number | string | boolean>;
+  deliveredTo?: string | string[] | Record<string, number | string | boolean>;
+  [key: string]: unknown;
+};
+
 class HybridMessageService {
   // State
   private queue: HybridMessage[] = [];
@@ -301,9 +330,12 @@ class HybridMessageService {
 
       logger.info(`Cloud sync: Found ${threads.length} active conversations. Hydrating...`);
 
-      // 2. Fetch last 20 messages for each thread
+      // 2. Fetch last 20 messages for each thread.
+      // Type is `any[]` here because importing the Message shape from messageStore
+      // creates a runtime circular dependency (messageStore → HybridMessageService
+      // → messageStore). The objects pushed below conform to Message at runtime.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const messagesToImport: any[] = []; // Using any[] to avoid circular dependency issues
+      const messagesToImport: any[] = [];
 
       // Limit parallelism to prevent network flooding
       const chunks = [];
@@ -332,8 +364,7 @@ class HybridMessageService {
               recentMessages.forEach(msg => {
                 // Convert Firestore data to Store Message format
                 // Handle senderUid (V3) or senderId (legacy)
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const rawMsg = msg as any;
+                const rawMsg = msg as CloudMessagePayload & { senderId?: string };
                 const senderId = rawMsg.senderUid || rawMsg.senderId || 'unknown';
 
                 const isFromMe = senderId === identityService.getUid?.() || selfIds.has(senderId);
@@ -661,6 +692,18 @@ class HybridMessageService {
         if (mediaType === 'location' || hasLocation) return 'LOCATION';
         return 'CHAT';
     }
+  }
+
+  private formatConversationPreview(message: Pick<HybridMessage, 'content' | 'type' | 'mediaType'>): string {
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content) return content.substring(0, 100);
+
+    if (message.mediaType === 'image' || message.type === 'IMAGE') return 'Fotoğraf';
+    if (message.mediaType === 'voice' || message.type === 'VOICE') return 'Sesli mesaj';
+    if (message.mediaType === 'location' || message.type === 'LOCATION') return 'Konum paylaşıldı';
+    if (message.type === 'SOS') return 'Acil durum mesajı';
+
+    return 'Mesaj';
   }
 
   /** Delegates to shared getEnvelopeTypeFromContent from messaging/filters */
@@ -1187,8 +1230,27 @@ class HybridMessageService {
       // Previously, `from` was always set to 'me', which made incoming messages
       // appear as outgoing — corrupting the conversation index and hiding them.
       const isFromMe = selfIds.has(message.senderId);
+
+      // P0-11: UI status mapping — distinguish "waiting for network" from
+      // "actively sending". Previously every pending message rendered as
+      // 'sending' which gave a false "Gönderiliyor…" UX even though the
+      // device was offline with no mesh peer in range — a critical trust
+      // issue. Now:
+      //   • offline AND no mesh peer in range → 'pending'  (UI: "Bekliyor")
+      //   • online OR mesh peer in range      → 'sending'  (UI: "Gönderiliyor")
+      //   • cloud/mesh delivery confirmed     → 'sent'     (UI: "Gönderildi")
+      const isOnline = connectionManager.isOnline;
+      const hasMeshPeer = (() => {
+        try { return this.hasVisibleMeshPeerForRecipient(message); }
+        catch { return false; }
+      })();
+      const canActivelySend = isOnline || hasMeshPeer;
       const normalizedStatus: DeliveryStatus = isFromMe
-        ? (message.status === 'pending' ? 'sending' : (message.status || 'sent'))
+        ? (
+            message.status === 'pending'
+              ? (canActivelySend ? 'sending' : 'pending')
+              : (message.status || 'sent')
+          )
         : (message.status === 'read' ? 'read' : 'delivered');
       const delivered = isFromMe
         ? (normalizedStatus === 'delivered' || normalizedStatus === 'read')
@@ -1257,6 +1319,7 @@ class HybridMessageService {
       if (targetIdValid) {
         const conversations = useMessageStore.getState().conversations;
         const existingConv = conversations.find((c: { userId: string }) => c.userId === conversationTargetId);
+        const conversationPreview = this.formatConversationPreview(message);
 
         if (!existingConv) {
           // Look up contact display name before falling back to generic name
@@ -1274,7 +1337,7 @@ class HybridMessageService {
           useMessageStore.getState().addConversation({
             userId: conversationTargetId,
             userName: displayName || `Cihaz ${conversationTargetId.slice(0, 8)}...`,
-            lastMessage: (message.content || 'Yeni Medya/Konum').substring(0, 100),
+            lastMessage: conversationPreview,
             lastMessageTime: message.timestamp,
             unreadCount: isFromMe ? 0 : 1,
             ...(conversationId ? { conversationId } : {}),
@@ -1284,7 +1347,7 @@ class HybridMessageService {
           useMessageStore.getState().addConversation({
             ...existingConv,
             conversationId: conversationId || existingConv.conversationId,
-            lastMessage: (message.content || 'Yeni Medya/Konum').substring(0, 100),
+            lastMessage: conversationPreview,
             lastMessageTime: Math.max(existingConv.lastMessageTime || 0, message.timestamp),
             // NOTE: Do NOT increment unreadCount client-side — CF onNewConversationMessageV3
             // already increments it server-side. Client increment + CF increment = double count.
@@ -1313,7 +1376,7 @@ class HybridMessageService {
               userId: message.senderId,
               senderUid: message.senderId,
               senderName: existingConv?.userName || message.senderName || `Cihaz ${message.senderId.slice(0, 8)}...`,
-              message: message.content || 'Yeni Medya/Konum',
+              message: conversationPreview,
               conversationId: conversationId || existingConv?.conversationId,
               timestamp: message.timestamp
             }).catch((err: any) => logger.debug('Local notify failed:', err));
@@ -2458,7 +2521,7 @@ class HybridMessageService {
       return this.getSelfIdentityIds();
     };
 
-    const processCloudMessage = (msg: any, conversationId?: string) => {
+    const processCloudMessage = (msg: CloudMessagePayload, conversationId?: string) => {
       const selfIds = getSelfIds();
       const fromDeviceId = typeof msg.fromDeviceId === 'string' ? msg.fromDeviceId.trim() : '';
       const senderUid = typeof msg.senderUid === 'string' ? msg.senderUid.trim() : '';

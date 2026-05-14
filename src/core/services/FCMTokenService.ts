@@ -19,6 +19,7 @@ import { createLogger } from '../utils/logger';
 // firebaseDataService import removed — direct Firestore ops used instead
 
 const logger = createLogger('FCMTokenService');
+const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
 
 // Lazy load expo-notifications
 let Notifications: typeof import('expo-notifications') | null = null;
@@ -119,12 +120,9 @@ class FCMTokenService {
             // Register with server
             await this.registerTokenWithServer();
 
-            // Get native device push token and subscribe to FCM topics.
-            // Expo Push Tokens (ExponentPushToken[xxx]) can NOT be used for FCM
-            // topic subscriptions — only native FCM/APNS tokens work.
-            // We retrieve the native token and send it to the server, which
-            // subscribes it to broadcast topics (eew-turkey, earthquake-alerts, etc.).
-            // This enables O(1) topic sends instead of iterating all tokens.
+            // Get native device push token and subscribe Android FCM tokens to topics.
+            // iOS returns an APNs token here; APNs tokens are not FCM registration tokens.
+            // Critical iOS/Expo coverage is handled by the backend per-token safety net.
             await this.registerNativeTokenAndSubscribeTopics();
 
             // Setup notification handlers
@@ -158,9 +156,6 @@ class FCMTokenService {
             enableLights: true,
             lightColor: '#FF0000',
             lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
-            // CRITICAL FIX: earthquake_alarm.wav dosyasi assets/sounds/ veya android/res/raw/'da YOK.
-            // Android channel WAV bulamayinca sessize duser → M6+ deprem sessiz! 'default' OS alarmiyla calar.
-            // ileride profesyonel alarm sesi assets'e eklenince burayi guncellenmeli.
             sound: 'default',
         });
 
@@ -171,7 +166,7 @@ class FCMTokenService {
             importance: Notif.AndroidImportance.HIGH,
             enableVibrate: true,
             vibrationPattern: [0, 250, 250, 250],
-            sound: 'default',
+            sound: EMERGENCY_NOTIFICATION_SOUND,
         });
 
         // EEW countdown channel
@@ -193,7 +188,7 @@ class FCMTokenService {
             enableVibrate: true,
             vibrationPattern: [0, 1000, 500, 1000],
             lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
-            sound: 'default',
+            sound: EMERGENCY_NOTIFICATION_SOUND,
         });
 
         await Notif.setNotificationChannelAsync('earthquake_alerts', {
@@ -203,7 +198,7 @@ class FCMTokenService {
             bypassDnd: true,
             enableVibrate: true,
             vibrationPattern: [0, 500, 200, 500, 200, 500],
-            sound: 'default',
+            sound: EMERGENCY_NOTIFICATION_SOUND,
         });
 
         await Notif.setNotificationChannelAsync('sos_alerts', {
@@ -216,7 +211,7 @@ class FCMTokenService {
             enableLights: true,
             lightColor: '#FF0000',
             lockscreenVisibility: Notif.AndroidNotificationVisibility.PUBLIC,
-            sound: 'default',
+            sound: EMERGENCY_NOTIFICATION_SOUND,
         });
 
         await Notif.setNotificationChannelAsync('family_updates', {
@@ -452,8 +447,8 @@ class FCMTokenService {
     // ==================== FCM TOPIC SUBSCRIPTION ====================
 
     /**
-     * Get native device push token (FCM on Android, APNS on iOS) and
-     * subscribe it to FCM broadcast topics via the server.
+     * Get native device push token and subscribe Android FCM registration tokens
+     * to FCM broadcast topics via the server.
      *
      * WHY SERVER-SIDE: Expo SDK does not expose `messaging().subscribeToTopic()`.
      * Only @react-native-firebase/messaging provides that API, and this project
@@ -465,12 +460,20 @@ class FCMTokenService {
      */
     private async registerNativeTokenAndSubscribeTopics(): Promise<void> {
         try {
+            if (Platform.OS !== 'android') {
+                // iOS uses location-scoped per-token send (CF eew.ts) for M4.0-5.4 EEW alerts,
+                // and per-token critical fan-out for M5.5+ via getAllTokensMerged(). No topic
+                // subscription needed because APNs/Expo tokens are not topic-capable through
+                // Firebase Admin SDK.
+                logger.info('FCM topic subscription skipped on iOS (per-token send path used instead)');
+                return;
+            }
+
             const Notif = await getNotifications();
 
             // getDevicePushTokenAsync() returns the RAW platform token:
-            //   Android → native FCM registration token
-            //   iOS → native APNS device token
-            // Both can be subscribed to FCM topics via Admin SDK.
+            //   Android → native FCM registration token (topic-capable)
+            //   iOS → native APNS device token (not topic-capable via Firebase Admin)
             const deviceTokenData = await Notif.getDevicePushTokenAsync();
             const nativeToken = deviceTokenData.data;
 

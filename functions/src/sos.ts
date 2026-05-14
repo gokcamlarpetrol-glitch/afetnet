@@ -19,6 +19,7 @@ import {
     collectPushTokensForUid,
     resolveAndroidChannelId,
     haversineDistance,
+    EMERGENCY_NOTIFICATION_SOUND,
 } from './utils';
 
 // ============================================================
@@ -735,7 +736,7 @@ export const onSOSBroadcast = functions
                     title,
                     body,
                     data: pushData,
-                    sound: 'default' as const,
+                    sound: EMERGENCY_NOTIFICATION_SOUND,
                     priority: 'high' as const,
                     channelId: resolveAndroidChannelId(pushData),
                 }));

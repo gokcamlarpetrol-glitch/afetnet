@@ -490,16 +490,26 @@ export const onContactRequest = functions
                 return;
             }
 
-            const title = `👋 ${senderName}`;
-            const body = requestData.message
-                ? `Kişi ekleme isteği: "${requestData.message}"`
-                : `${senderName} sizi kişi olarak eklemek istiyor`;
+            // ELITE F3: Make body clearer for family invites — recipients must understand
+            // this is a life-safety opt-in (without acceptance, location sharing is blocked).
+            // requestData.familyId being set indicates the sender is inviting into a family group.
+            const isFamilyInvite = typeof requestData.familyId === 'string' && requestData.familyId.length > 0;
+            const title = isFamilyInvite
+                ? `👨‍👩‍👧 ${senderName} sizi aile listesine ekledi`
+                : `👋 ${senderName}`;
+            const body = isFamilyInvite
+                ? `Kabul ederek karşılıklı konum, durum ve şarj seviyesi paylaşımını açın.`
+                : (requestData.message
+                    ? `Kişi ekleme isteği: "${requestData.message}"`
+                    : `${senderName} sizi kişi olarak eklemek istiyor`);
 
             const pushData: Record<string, string> = {
                 type: 'contact_request',
                 fromUserId: requestData.fromUserId || '',
                 fromName: senderName,
                 requestId: context.params.requestId,
+                isFamilyInvite: String(isFamilyInvite),
+                familyId: typeof requestData.familyId === 'string' ? requestData.familyId : '',
             };
 
             let totalSent = 0;

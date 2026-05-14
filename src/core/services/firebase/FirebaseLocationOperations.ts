@@ -29,6 +29,24 @@ export function resetLocationThrottle(): void {
   lastHistoryWriteTime = 0;
 }
 
+const isValidCoordinatePair = (latitude: unknown, longitude: unknown): boolean => (
+  typeof latitude === 'number'
+  && typeof longitude === 'number'
+  && Number.isFinite(latitude)
+  && Number.isFinite(longitude)
+  && latitude >= -90
+  && latitude <= 90
+  && longitude >= -180
+  && longitude <= 180
+  && !(latitude === 0 && longitude === 0)
+);
+
+const normalizeBatteryPercent = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value < 0 || value > 100) return null;
+  return Math.round(value);
+};
+
 async function withTimeout<T>(
   operation: () => Promise<T>,
   operationName: string,
@@ -72,19 +90,36 @@ export async function saveLocationUpdate(
     }
 
     const now = Date.now();
+    const timestamp = typeof location.timestamp === 'number' && Number.isFinite(location.timestamp)
+      ? location.timestamp
+      : now;
+    if (!isValidCoordinatePair(location.latitude, location.longitude)) {
+      logger.warn('saveLocationUpdate: invalid coordinates, skipping', {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      });
+      return false;
+    }
+    const battery = normalizeBatteryPercent(location.battery ?? location.batteryLevel);
     const currentRef = doc(db, 'locations_current', uid);
 
     const locationPayload = {
+      userId: uid,
+      deviceId: typeof location.deviceId === 'string' && location.deviceId.trim().length > 0
+        ? location.deviceId.trim()
+        : uid,
       latitude: location.latitude,
       longitude: location.longitude,
       accuracy: location.accuracy ?? null,
       altitude: location.altitude ?? null,
       speed: location.speed ?? null,
       heading: location.heading ?? null,
-      battery: location.battery ?? null,
+      battery,
+      batteryLevel: battery,
+      batteryUpdatedAt: battery !== null ? timestamp : null,
       source: location.source || 'gps',
       updatedAt: now,
-      timestamp: location.timestamp || now,
+      timestamp,
     };
 
     await withTimeout(

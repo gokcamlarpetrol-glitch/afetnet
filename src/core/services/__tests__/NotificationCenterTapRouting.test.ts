@@ -4,8 +4,15 @@ describe('NotificationCenter tap routing', () => {
     jest.clearAllMocks();
   });
 
-  const loadNotificationCenter = () => {
+  const loadNotificationCenter = (
+    settingsOverrides: Record<string, unknown> = {},
+    aiDecisionOverrides: Record<string, unknown> = {},
+  ) => {
     const navigateTo = jest.fn();
+    const scheduleNotification = jest.fn(async () => 'notif-1');
+    const hybridInitialize = jest.fn(async () => undefined);
+    const hybridSendMessage = jest.fn(async () => ({ id: 'reply-1' }));
+    const groupSendMessage = jest.fn(async () => ({ id: 'group-reply-1' }));
     const navigationModule = {
       __esModule: true,
       navigateTo,
@@ -33,14 +40,38 @@ describe('NotificationCenter tap routing', () => {
         reason: 'ok',
         priority: 'normal',
         isAftershock: false,
+        ...aiDecisionOverrides,
       })),
       resetAIState: jest.fn(),
       getAIStats: jest.fn(() => ({})),
     }));
 
     jest.doMock('../notifications/NotificationScheduler', () => ({
-      scheduleNotification: jest.fn(async () => 'notif-1'),
+      scheduleNotification,
       cancelAllNotifications: jest.fn(async () => undefined),
+    }));
+
+    jest.doMock('../../stores/settingsStore', () => ({
+      __esModule: true,
+      useSettingsStore: {
+        getState: jest.fn(() => ({
+          notificationsEnabled: true,
+          notificationPush: true,
+          notificationSound: true,
+          notificationVibration: true,
+          alarmSoundEnabled: true,
+          vibrationEnabled: true,
+          notificationMode: 'sound+vibrate',
+          notificationSoundVolume: 80,
+          notificationSoundRepeat: 3,
+          notificationShowPreview: true,
+          quietHoursEnabled: false,
+          quietHoursStart: '22:00',
+          quietHoursEnd: '07:00',
+          quietHoursCriticalOnly: true,
+          ...settingsOverrides,
+        })),
+      },
     }));
 
     jest.doMock('../notifications/NotificationChannelManager', () => ({
@@ -67,9 +98,20 @@ describe('NotificationCenter tap routing', () => {
     }));
 
     jest.doMock('../../navigation/navigationRef', () => navigationModule);
+    jest.doMock('../HybridMessageService', () => ({
+      hybridMessageService: {
+        initialize: hybridInitialize,
+        sendMessage: hybridSendMessage,
+      },
+    }));
+    jest.doMock('../GroupChatService', () => ({
+      groupChatService: {
+        sendMessage: groupSendMessage,
+      },
+    }));
 
     const module = require('../notifications/NotificationCenter') as typeof import('../notifications/NotificationCenter');
-    return { notificationCenter: module.notificationCenter, navigateTo };
+    return { notificationCenter: module.notificationCenter, navigateTo, scheduleNotification, hybridInitialize, hybridSendMessage, groupSendMessage };
   };
 
   it('opens the direct conversation when a message notification is tapped', async () => {
@@ -96,6 +138,99 @@ describe('NotificationCenter tap routing', () => {
       userName: 'Ahmet',
       conversationId: 'conv-direct-1',
     });
+  });
+
+  it('hides local message notification body when preview setting is disabled', async () => {
+    const { notificationCenter, scheduleNotification } = loadNotificationCenter({
+      notificationShowPreview: false,
+    });
+
+    await notificationCenter.notify('message', {
+      senderName: 'Ahmet',
+      message: 'Gizli operasyon mesajı',
+      messageId: 'msg-private-1',
+      senderUid: 'uid-peer-2',
+      conversationId: 'conv-direct-1',
+    }, 'test');
+
+    expect(scheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: 'Yeni mesajı açmak için dokunun.',
+        data: expect.objectContaining({
+          showPreview: false,
+          conversationId: 'conv-direct-1',
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('blocks non-critical notifications during quiet hours', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-14T12:00:00+03:00'));
+    try {
+      const { notificationCenter, scheduleNotification } = loadNotificationCenter({
+        quietHoursEnabled: true,
+        quietHoursStart: '00:00',
+        quietHoursEnd: '23:59',
+        quietHoursCriticalOnly: true,
+      });
+
+      const result = await notificationCenter.notify('message', {
+        senderName: 'Ahmet',
+        message: 'Sonra bakılabilir',
+      }, 'test');
+
+      expect(result.delivered).toBe(false);
+      expect(result.reason).toBe('Quiet hours active');
+      expect(scheduleNotification).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('critical-only mode blocks high-priority non-critical notifications', async () => {
+    const { notificationCenter, scheduleNotification } = loadNotificationCenter(
+      { notificationMode: 'critical-only' },
+      { priority: 'high' },
+    );
+
+    const result = await notificationCenter.notify('message', {
+      senderName: 'Ahmet',
+      message: 'Yüksek ama kritik değil',
+    }, 'test');
+
+    expect(result.delivered).toBe(false);
+    expect(result.reason).toBe('Critical-only mode active');
+    expect(scheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('sends iOS quick replies directly instead of only opening the conversation', async () => {
+    const { notificationCenter, navigateTo, hybridInitialize, hybridSendMessage } = loadNotificationCenter();
+
+    await notificationCenter.handleNotificationTap({
+      actionIdentifier: 'reply',
+      userText: 'Tamam, yoldayım.',
+      notification: {
+        request: {
+          content: {
+            title: 'Yeni mesaj',
+            data: {
+              type: 'message',
+              senderUid: 'uid-peer-2',
+              conversationId: 'conv-direct-1',
+            },
+          },
+        },
+      },
+    });
+
+    expect(hybridInitialize).toHaveBeenCalledTimes(1);
+    expect(hybridSendMessage).toHaveBeenCalledWith('Tamam, yoldayım.', 'uid-peer-2', {
+      priority: 'normal',
+      type: 'CHAT',
+      conversationId: 'conv-direct-1',
+    });
+    expect(navigateTo).not.toHaveBeenCalled();
   });
 
   it('opens the family group chat when a group message notification is tapped', async () => {
@@ -279,10 +414,12 @@ describe('NotificationCenter tap routing', () => {
             data: {
               type: 'news',
               title: 'Yeni Duyuru',
+              summary: 'AFAD deprem duyurusu yayınlandı.',
               source: 'AFAD',
               newsUrl: 'https://example.com/haber',
               imageUrl: 'https://example.com/image.png',
               articleId: 'news-123',
+              publishedAt: 1778749200000,
             },
           },
         },
@@ -292,11 +429,35 @@ describe('NotificationCenter tap routing', () => {
     expect(navigateTo).toHaveBeenCalledWith('NewsDetail', {
       article: {
         title: 'Yeni Duyuru',
+        summary: 'AFAD deprem duyurusu yayınlandı.',
         url: 'https://example.com/haber',
         source: 'AFAD',
         imageUrl: 'https://example.com/image.png',
         id: 'news-123',
+        publishedAt: 1778749200000,
+        category: 'earthquake',
       },
     });
+  });
+
+  it('opens all news instead of a blank detail screen when news tap has only an id', async () => {
+    const { notificationCenter, navigateTo } = loadNotificationCenter();
+
+    await notificationCenter.handleNotificationTap({
+      notification: {
+        request: {
+          content: {
+            title: '',
+            body: '',
+            data: {
+              type: 'news',
+              articleId: 'news-id-only',
+            },
+          },
+        },
+      },
+    });
+
+    expect(navigateTo).toHaveBeenCalledWith('AllNews');
   });
 });

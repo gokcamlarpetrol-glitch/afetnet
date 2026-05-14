@@ -61,19 +61,29 @@ async function checkRateLimitPersistent(uid: string): Promise<boolean> {
     // Also check Firestore for cross-instance consistency
     try {
         const rateLimitRef = db.collection('rate_limits').doc(uid);
-        const rateLimitDoc = await rateLimitRef.get();
-        if (rateLimitDoc.exists) {
-            const data = rateLimitDoc.data()!;
-            if (data.resetAt > now && data.count >= RATE_LIMIT_MAX) {
-                return false;
+        let firestoreAllowed = true;
+        await db.runTransaction(async (tx) => {
+            const rateLimitDoc = await tx.get(rateLimitRef);
+            const data = rateLimitDoc.exists ? rateLimitDoc.data() : undefined;
+            const resetAt = typeof data?.resetAt === 'number' ? data.resetAt : 0;
+            const count = typeof data?.count === 'number' ? data.count : 0;
+
+            if (resetAt > now && count >= RATE_LIMIT_MAX) {
+                firestoreAllowed = false;
+                return;
             }
-            if (data.resetAt <= now) {
-                await rateLimitRef.set({ count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+
+            if (!rateLimitDoc.exists || resetAt <= now) {
+                tx.set(rateLimitRef, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS }, { merge: true });
             } else {
-                await rateLimitRef.update({ count: admin.firestore.FieldValue.increment(1) });
+                tx.set(rateLimitRef, {
+                    count: admin.firestore.FieldValue.increment(1),
+                    resetAt,
+                }, { merge: true });
             }
-        } else {
-            await rateLimitRef.set({ count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        });
+        if (!firestoreAllowed) {
+            return false;
         }
     } catch {
         // If Firestore check fails, fall back to in-memory only
@@ -100,21 +110,32 @@ function resolveOpenAIKey(): string {
     return '';
 }
 
+function escapeHtml(value: unknown): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // ============================================================
 // PREMIUM EMAIL TEMPLATES
 // ============================================================
 
 function getVerificationEmailHTML(displayName: string, link: string): string {
+    const safeDisplayName = escapeHtml(displayName);
+    const safeLink = escapeHtml(link);
     return `<div style="max-width:600px;margin:0 auto;font-family:'Helvetica Neue',Arial,sans-serif;background:#ffffff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;">
 <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:32px 24px;text-align:center;">
 <h1 style="color:#ffffff;font-size:24px;margin:0;font-weight:700;letter-spacing:-0.5px;">AfetNet</h1>
 <p style="color:#94a3b8;font-size:13px;margin:8px 0 0;font-weight:400;">Afet Bilgi ve Koordinasyon Platformu</p>
 </div>
 <div style="padding:32px 28px;">
-<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${displayName},</p>
+<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${safeDisplayName},</p>
 <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet ailesine hoşgeldiniz! Hesabınızı aktif hale getirmek için aşağıdaki butona tıklayarak e-posta adresinizi doğrulayın.</p>
 <div style="text-align:center;margin:28px 0;">
-<a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Hesabımı Doğrula</a>
+<a href="${safeLink}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Hesabımı Doğrula</a>
 </div>
 <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Bu bağlantı 24 saat geçerlidir. Eğer bu hesabı siz oluşturmadıysanız, bu e-postayı görmezden gelebilirsiniz.</p>
 </div>
@@ -126,16 +147,19 @@ function getVerificationEmailHTML(displayName: string, link: string): string {
 }
 
 function getEmailChangeHTML(displayName: string, newEmail: string, link: string): string {
+    const safeDisplayName = escapeHtml(displayName);
+    const safeNewEmail = escapeHtml(newEmail);
+    const safeLink = escapeHtml(link);
     return `<div style="max-width:600px;margin:0 auto;font-family:'Helvetica Neue',Arial,sans-serif;background:#ffffff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;">
 <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:32px 24px;text-align:center;">
 <h1 style="color:#ffffff;font-size:24px;margin:0;font-weight:700;letter-spacing:-0.5px;">AfetNet</h1>
 <p style="color:#94a3b8;font-size:13px;margin:8px 0 0;font-weight:400;">Afet Bilgi ve Koordinasyon Platformu</p>
 </div>
 <div style="padding:32px 28px;">
-<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${displayName},</p>
-<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet hesabınızın e-posta adresi <strong>${newEmail}</strong> olarak değiştirildi. Eğer bu değişikliği siz yapmadıysanız, aşağıdaki butona tıklayarak geri alabilirsiniz.</p>
+<p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${safeDisplayName},</p>
+<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet hesabınızın e-posta adresi <strong>${safeNewEmail}</strong> olarak değiştirildi. Eğer bu değişikliği siz yapmadıysanız, aşağıdaki butona tıklayarak geri alabilirsiniz.</p>
 <div style="text-align:center;margin:28px 0;">
-<a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Değişikliği Geri Al</a>
+<a href="${safeLink}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Değişikliği Geri Al</a>
 </div>
 <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Eğer bu değişikliği siz yaptıysanız, bu e-postayı görmezden gelebilirsiniz.</p>
 </div>
@@ -300,34 +324,57 @@ export const registerFCMToken = functions
 
         const { token, platform, latitude, longitude, installationId } = data;
 
-        if (!token || !platform) {
+        const normalizedToken = typeof token === 'string' ? token.trim() : '';
+        const normalizedPlatform = typeof platform === 'string' ? platform.trim().toLowerCase() : '';
+
+        if (!normalizedToken || !normalizedPlatform) {
             throw new functions.https.HttpsError('invalid-argument', 'Token and platform required');
         }
+
+        if (normalizedToken.length < 10 || normalizedToken.length > 4096 || normalizedToken.includes('/')) {
+            throw new functions.https.HttpsError('invalid-argument', 'Invalid push token');
+        }
+
+        if (normalizedPlatform !== 'ios' && normalizedPlatform !== 'android') {
+            throw new functions.https.HttpsError('invalid-argument', 'platform must be ios or android');
+        }
+
+        const latNum = typeof latitude === 'number' ? latitude : Number(latitude);
+        const lonNum = typeof longitude === 'number' ? longitude : Number(longitude);
+        const hasValidLocation = Number.isFinite(latNum) &&
+            Number.isFinite(lonNum) &&
+            latNum >= -90 &&
+            latNum <= 90 &&
+            lonNum >= -180 &&
+            lonNum <= 180;
 
         // CANONICAL: uid (from Firebase Auth context) is THE primary key.
         const uid = context.auth.uid;
 
         const tokenDoc: FCMToken = {
-            token,
+            token: normalizedToken,
             userId: uid,
-            platform,
+            platform: normalizedPlatform,
             lastUpdated: Date.now(),
-            location: latitude && longitude ? { latitude, longitude } : undefined,
+            location: hasValidLocation ? { latitude: latNum, longitude: lonNum } : undefined,
         };
 
         // CANONICAL: Use installationId from client when provided (matches client-side
         // write path: push_tokens/{uid}/devices/{installationId}).
         // Fall back to tokenHash for backward compatibility with older clients.
-        const tokenHash = token.substring(token.length - 16);
-        const deviceKey = (typeof installationId === 'string' && installationId.trim().length > 0)
+        const tokenHash = normalizedToken.substring(normalizedToken.length - 16).replace(/[\/#?\[\]]/g, '_');
+        const normalizedInstallationId = typeof installationId === 'string'
             ? installationId.trim()
+            : '';
+        const deviceKey = /^[A-Za-z0-9_.:-]{8,128}$/.test(normalizedInstallationId)
+            ? normalizedInstallationId
             : tokenHash;
 
         // Also add installationId to the doc for traceability
         const tokenDocWithInstallation = {
             ...tokenDoc,
-            ...(typeof installationId === 'string' && installationId.trim().length > 0
-                ? { installationId: installationId.trim() }
+            ...(deviceKey !== tokenHash
+                ? { installationId: deviceKey }
                 : {}),
         };
 
@@ -764,7 +811,11 @@ export const onSeismicReportCreated = functions
     .database.ref('seismic_reports/{reportId}')
     .onCreate(async (snapshot, _context) => {
         const report = snapshot.val();
-        functions.logger.info('📱 New seismic report from device:', report);
+        functions.logger.info('📱 New seismic report received', {
+            hasLocation: Boolean(report?.location),
+            confidence: report?.detection?.confidence,
+            platform: report?.deviceInfo?.platform,
+        });
 
         if (!report.location || !report.detection) {
             functions.logger.warn('Invalid report format');
@@ -877,7 +928,12 @@ export const subscribeToTopics = functions
             throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
         }
 
-        const { nativeToken, topics } = data;
+        const { nativeToken, topics, platform } = data;
+
+        if (platform && platform !== 'android') {
+            functions.logger.info(`Skipping FCM topic subscription for non-Android platform (${platform}); APNs/Expo tokens are covered by per-token fan-out.`);
+            return { success: false, skipped: true, reason: 'platform-not-topic-capable' };
+        }
 
         if (!nativeToken || typeof nativeToken !== 'string' || nativeToken.length < 10) {
             throw new functions.https.HttpsError('invalid-argument', 'Valid nativeToken required');

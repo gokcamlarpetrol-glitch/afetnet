@@ -96,7 +96,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     const soundRef = useRef<AudioPlayer | null>(null);
     const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
     const firestoreUnsubRef = useRef<(() => void) | null>(null);
-    const audioUnsubRef = useRef<(() => void) | null>(null);
+    const audioUnsubRef = useRef<Array<() => void>>([]);
     const audioListenerSubRef = useRef<{ remove: () => void } | null>(null);
 
     // Pulse animation for SOS marker
@@ -206,7 +206,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                             });
                         }
                     },
-                    () => { /* permission errors are non-critical */ },
+                    (err) => { logger.debug('SOS location listener error (non-critical):', err); },
                 );
 
                 if (cancelled) {
@@ -244,7 +244,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         setDistance(R * c);
     }, [myLocation, senderLocation]);
 
-    // Listen for audio_url from sos_signals/{signalId}
+    // Listen for consent-gated audio_url from the recipient's SOS alert path.
     useEffect(() => {
         if (!signalId) return;
 
@@ -257,20 +257,36 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                 const db = await getFirestoreInstanceAsync();
                 if (!db || cancelled) return;
 
+                const targetIds = new Set<string>();
+                try {
+                    const { getFirebaseAuth } = await import('../../../lib/firebase');
+                    const uid = getFirebaseAuth()?.currentUser?.uid;
+                    if (uid) targetIds.add(uid);
+                } catch { /* best-effort */ }
+                try {
+                    const { getDeviceId } = await import('../../utils/device');
+                    const currentDeviceId = await getDeviceId();
+                    if (currentDeviceId) targetIds.add(currentDeviceId);
+                } catch { /* best-effort */ }
+
                 const { doc, onSnapshot } = await import('firebase/firestore');
-                const sigRef = doc(db, 'sos_signals', signalId);
-                const unsub = onSnapshot(
-                    sigRef,
-                    (snap) => {
-                        if (cancelled || !snap.exists()) return;
-                        const data = snap.data();
-                        if (data?.audio_url && typeof data.audio_url === 'string') {
-                            setAudioUrl(data.audio_url);
-                        }
-                    },
-                    () => { /* offline/permission errors are non-critical */ },
-                );
-                audioUnsubRef.current = unsub;
+                const unsubs: Array<() => void> = [];
+                targetIds.forEach((targetId) => {
+                    const alertRef = doc(db, 'sos_alerts', targetId, 'items', signalId);
+                    const unsub = onSnapshot(
+                        alertRef,
+                        (snap) => {
+                            if (cancelled || !snap.exists()) return;
+                            const data = snap.data();
+                            if (data?.audio_url && typeof data.audio_url === 'string') {
+                                setAudioUrl(data.audio_url);
+                            }
+                        },
+                        (err) => { logger.debug('SOS audio listener error (non-critical):', err); },
+                    );
+                    unsubs.push(unsub);
+                });
+                audioUnsubRef.current = unsubs;
             } catch {
                 // Offline — audio feature degrades gracefully
             }
@@ -279,7 +295,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         listenAudio();
         return () => {
             cancelled = true;
-            audioUnsubRef.current?.();
+            audioUnsubRef.current.forEach((unsub) => {
+                try { unsub(); } catch { /* no-op */ }
+            });
+            audioUnsubRef.current = [];
         };
     }, [signalId]);
 
@@ -359,7 +378,7 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                 }
             });
         } catch {
-            Alert.alert('Hata', 'Ses dosyası oynatılamadı.');
+            Alert.alert('Hata', 'Ses dosyası oynatılamadı.', [{ text: 'Tamam' }]);
             setIsPlayingAudio(false);
         }
     }, [audioUrl, isPlayingAudio]);
@@ -382,10 +401,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
             });
             setAckSent(true);
             haptics.notificationSuccess();
-            Alert.alert('Bildirildi', `${senderName} kişisine yardıma geldiğiniz bildirildi.`);
+            Alert.alert('Bildirildi', `${senderName} kişisine yardıma geldiğiniz bildirildi.`, [{ text: 'Tamam' }]);
         } catch (err) {
             logger.error('ACK failed:', err);
-            Alert.alert('Hata', 'Bildirim gönderilemedi. Tekrar deneyin.');
+            Alert.alert('Hata', 'Bildirim gönderilemedi. Tekrar deneyin.', [{ text: 'Tamam' }]);
         } finally {
             setAckSending(false);
         }

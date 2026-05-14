@@ -8,9 +8,12 @@ export const auditFirestore = functions
         if (!context.auth?.token?.admin) {
             throw new functions.https.HttpsError('permission-denied', 'Admin only');
         }
+        if (process.env.ENABLE_FIRESTORE_AUDIT !== 'true') {
+            throw new functions.https.HttpsError('failed-precondition', 'Firestore audit is disabled');
+        }
 
         const db = admin.firestore();
-        const result: any = {};
+        const result: Record<string, Array<{ id: string; [key: string]: unknown }>> = {};
 
         try {
             const convSnap = await db.collection('conversations').limit(5).get();
@@ -29,7 +32,8 @@ export const auditFirestore = functions
             result.push_tokens = tokenSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
             return { success: true, data: result };
-        } catch (err: any) {
-            return { success: false, error: err.message };
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { success: false, error: message };
         }
     });

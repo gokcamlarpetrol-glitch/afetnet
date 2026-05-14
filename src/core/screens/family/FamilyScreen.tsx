@@ -28,82 +28,86 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FamilyMember } from '../../types/family';
 
-// ===== DIAGNOSTIC IMPORTS: Catch which module crashes at import time =====
+// Pure-JS / framework imports — no native bridge, safe to import statically.
+import GlassButton from '../../components/buttons/GlassButton';
+import { useFamilyStore } from '../../stores/familyStore';
+import { useMeshStore } from '../../services/mesh/MeshStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { MeshMessageType } from '../../services/mesh/MeshProtocol';
+import { getDeviceId as getDeviceIdFromLib } from '../../utils/device';
+import { MemberCard } from '../../components/family/MemberCard';
+import { colors, typography, spacing } from '../../theme';
+import { styles } from './FamilyScreen.styles';
+import { createLogger } from '../../utils/logger';
+import ErrorBoundary from '../../components/ErrorBoundary';
+import { resolveFamilyMemberLocation } from '../../utils/familyLocation';
+
+// Native-bridge dependencies guarded with require/catch. Past production crashes
+// originated from native modules failing to initialize on certain device/OS
+// combinations (MMKV, expo-haptics, expo-location, react-native-maps, BLE).
+// Keeping these defensive maintains screen renderability even when one native
+// dep fails. Errors are surfaced via console.error so the issue is never silent.
 const IMPORT_ERRORS: string[] = [];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Location: any = null;
 try { Location = require('expo-location'); } catch (e: any) { IMPORT_ERRORS.push('expo-location: ' + e?.message); }
 
-let GlassButton: any = ({ title, onPress, ...rest }: any) => <Pressable onPress={onPress} style={{ padding: 12, backgroundColor: '#3b82f6', borderRadius: 12, margin: 4 }}><Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>{title}</Text></Pressable>;
-try { GlassButton = require('../../components/buttons/GlassButton').default; } catch (e: any) { IMPORT_ERRORS.push('GlassButton: ' + e?.message); }
-
-
-let useFamilyStore: any = () => ({ members: [], addMember: () => { }, removeMember: () => { }, updateMember: () => { }, loadFromStorage: () => { } });
-try { const mod = require('../../stores/familyStore'); useFamilyStore = mod.useFamilyStore; } catch (e: any) { IMPORT_ERRORS.push('familyStore: ' + e?.message); }
-
-let useMeshStore: any = () => ({ connectedPeers: [] });
-try { useMeshStore = require('../../services/mesh/MeshStore').useMeshStore; } catch (e: any) { IMPORT_ERRORS.push('MeshStore: ' + e?.message); }
-
-let useSettingsStore: any = () => ({ locationEnabled: false, vibrationEnabled: true });
-try { useSettingsStore = require('../../stores/settingsStore').useSettingsStore; } catch (e: any) { IMPORT_ERRORS.push('settingsStore: ' + e?.message); }
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let bleMeshService: any = null;
 try { bleMeshService = require('../../services/BLEMeshService').bleMeshService; } catch (e: any) { IMPORT_ERRORS.push('BLEMeshService: ' + e?.message); }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let meshNetworkService: any = null;
 try { meshNetworkService = require('../../services/mesh/MeshNetworkService').meshNetworkService; } catch (e: any) { IMPORT_ERRORS.push('MeshNetworkService: ' + e?.message); }
 
-let MeshMessageType: any = {};
-try { MeshMessageType = require('../../services/mesh/MeshProtocol').MeshMessageType; } catch (e: any) { IMPORT_ERRORS.push('MeshProtocol: ' + e?.message); }
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let familyTrackingService: any = null;
 try { familyTrackingService = require('../../services/FamilyTrackingService').familyTrackingService; } catch (e: any) { IMPORT_ERRORS.push('FamilyTrackingService: ' + e?.message); }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let multiChannelAlertService: any = null;
 try { multiChannelAlertService = require('../../services/MultiChannelAlertService').multiChannelAlertService; } catch (e: any) { IMPORT_ERRORS.push('MultiChannelAlertService: ' + e?.message); }
 
+// IdentityService → transitively MMKV + Firebase Auth. Native bridge risk.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let identityService: any = { getUid: () => null, getAfetNetId: () => null };
 try { identityService = require('../../services/IdentityService').identityService; } catch (e: any) { IMPORT_ERRORS.push('IdentityService: ' + e?.message); }
 
-let getDeviceIdFromLib: any = async () => 'unknown';
-try { getDeviceIdFromLib = require('../../utils/device').getDeviceId; } catch (e: any) { IMPORT_ERRORS.push('device utils: ' + e?.message); }
+// MMKV via DirectStorage — native module
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let DirectStorageRef: any = { getString: () => null, setString: () => { } };
+try { DirectStorageRef = require('../../utils/storage').DirectStorage; } catch (e: any) { IMPORT_ERRORS.push('DirectStorage: ' + e?.message); }
 
-let MemberCard: any = () => null;
-try { MemberCard = require('../../components/family/MemberCard').MemberCard; } catch (e: any) { IMPORT_ERRORS.push('MemberCard: ' + e?.message); }
-
-let FamilyMapView: any = () => null;
-try { FamilyMapView = require('../../components/family/FamilyMapView').FamilyMapView; } catch (e: any) { IMPORT_ERRORS.push('FamilyMapView: ' + e?.message); }
-
-let themeColors: any = {}; let themeTypography: any = {}; let themeSpacing: any = {};
-try { const t = require('../../theme'); themeColors = t.colors; themeTypography = t.typography; themeSpacing = t.spacing; } catch (e: any) { IMPORT_ERRORS.push('theme: ' + e?.message); }
-const colors = themeColors;
-const typography = themeTypography;
-const spacing = themeSpacing;
-
-let styles: any = {};
-try { styles = require('./FamilyScreen.styles').styles; } catch (e: any) { IMPORT_ERRORS.push('FamilyScreen.styles: ' + e?.message); }
-
-let createLogger: any = (name: string) => ({ info: console.log, error: console.error, warn: console.warn, debug: console.log });
-try { createLogger = require('../../utils/logger').createLogger; } catch (e: any) { IMPORT_ERRORS.push('logger: ' + e?.message); }
-
-let ErrorBoundary: any = ({ children }: any) => children;
-try { ErrorBoundary = require('../../components/ErrorBoundary').default; } catch (e: any) { IMPORT_ERRORS.push('ErrorBoundary: ' + e?.message); }
-
+// expo-haptics native module
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let haptics: any = { impactLight: () => { }, impactMedium: () => { }, impactHeavy: () => { }, notificationSuccess: () => { }, notificationError: () => { }, notificationWarning: () => { }, selectionChanged: () => { } };
 try { haptics = require('../../utils/haptics'); } catch (e: any) { IMPORT_ERRORS.push('haptics: ' + e?.message); }
 
-let resolveFamilyMemberLocation: any = (m: any) => ({ latitude: m?.latitude || 0, longitude: m?.longitude || 0 });
-try { resolveFamilyMemberLocation = require('../../utils/familyLocation').resolveFamilyMemberLocation; } catch (e: any) { IMPORT_ERRORS.push('familyLocation: ' + e?.message); }
-
-let DirectStorageRef: any = { getString: () => null, setString: () => { } };
-try { DirectStorageRef = require('../../utils/storage').DirectStorage; } catch (e: any) { IMPORT_ERRORS.push('DirectStorage: ' + e?.message); }
+// react-native-maps native module — heaviest crash risk for FamilyMapView
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let FamilyMapView: any = () => null;
+try { FamilyMapView = require('../../components/family/FamilyMapView').FamilyMapView; } catch (e: any) { IMPORT_ERRORS.push('FamilyMapView: ' + e?.message); }
 
 // Extracted sub-components
 import { FamilyStatusSection } from './FamilyStatusSection';
 import { IdShareModal } from './IdShareModal';
 import { EditMemberModal } from './EditMemberModal';
 
-// CRITICAL: Log import errors in ALL builds — not just __DEV__.
+// ELITE F3: Contact-request service for inline accept/reject UI.
+// Defensive import — ContactRequestService transitively depends on Firebase Auth,
+// which can fail to load on cold start before identity is restored. Keep family
+// screen renderable even if requests can't be subscribed.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let contactRequestService: any = null;
+try {
+  contactRequestService = require('../../services/ContactRequestService').contactRequestService;
+} catch (e: any) {
+  IMPORT_ERRORS.push('ContactRequestService: ' + e?.message);
+}
+import type { ContactRequest } from '../../services/ContactRequestService';
+
+// CRITICAL: Log native-bridge import errors in ALL builds — not just __DEV__.
 // Silent import failures cause family safety features to degrade without any indication.
 if (IMPORT_ERRORS.length > 0) {
   console.error('[FamilyScreen] IMPORT ERRORS:', JSON.stringify(IMPORT_ERRORS));
@@ -119,7 +123,7 @@ const getMyStatusStorageKey = (): string => {
 type FamilyStatusUpdate = Extract<FamilyMember['status'], 'safe' | 'need-help' | 'critical' | 'unknown'>;
 type PendingFamilyUpdate = {
   status?: FamilyStatusUpdate;
-  location?: { latitude: number; longitude: number };
+  location?: { latitude: number; longitude: number; timestamp?: number; batteryLevel?: number };
 };
 
 const VALID_FAMILY_STATUSES: ReadonlySet<FamilyStatusUpdate> = new Set([
@@ -137,12 +141,40 @@ const parseIncomingFamilyStatus = (value: unknown): FamilyStatusUpdate | null =>
 
 const parseIncomingFamilyLocation = (value: unknown): PendingFamilyUpdate['location'] | null => {
   if (!value || typeof value !== 'object') return null;
-  const candidate = value as { latitude?: unknown; longitude?: unknown };
+  const candidate = value as { latitude?: unknown; longitude?: unknown; timestamp?: unknown; battery?: unknown; batteryLevel?: unknown };
   const latitude = typeof candidate.latitude === 'number' ? candidate.latitude : NaN;
   const longitude = typeof candidate.longitude === 'number' ? candidate.longitude : NaN;
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null;
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
-  return { latitude, longitude };
+  const timestamp = normalizeIncomingTimestamp(candidate.timestamp);
+  const batteryLevel = normalizeIncomingBattery(candidate.battery ?? candidate.batteryLevel);
+  return {
+    latitude,
+    longitude,
+    ...(timestamp > 0 ? { timestamp } : {}),
+    ...(batteryLevel !== undefined ? { batteryLevel } : {}),
+  };
+};
+
+const normalizeIncomingTimestamp = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value < 1e11 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === 'string') {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      return asNumber < 1e11 ? Math.round(asNumber * 1000) : Math.round(asNumber);
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const normalizeIncomingBattery = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (value < 0 || value > 100) return undefined;
+  return Math.round(value);
 };
 
 // ELITE: Type-safe navigation props
@@ -297,6 +329,13 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ELITE F3: Pending contact requests (someone wants to add me as family).
+  // Subscribed via ContactRequestService listener — also primes from existing pending state.
+  const [pendingRequests, setPendingRequests] = useState<ContactRequest[]>(() => {
+    try { return contactRequestService?.getPendingRequests?.() || []; } catch { return []; }
+  });
+  const [requestActionInFlight, setRequestActionInFlight] = useState<Record<string, 'accept' | 'decline' | null>>({});
+
   // Batch update mechanism to prevent subscription loops
   const pendingUpdatesRef = useRef<Map<string, PendingFamilyUpdate>>(new Map());
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -334,6 +373,10 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           updateData.location.latitude,
           updateData.location.longitude,
           'remote',
+          updateData.location.timestamp,
+          updateData.location.batteryLevel !== undefined
+            ? { batteryLevel: updateData.location.batteryLevel }
+            : undefined,
         ).catch((error: unknown) => {
           logger.error(`Failed to update member location (${source}):`, error);
         });
@@ -349,6 +392,71 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     if (myStatus === 'critical') return 'ACİL Durum Bildirildi';
     return 'Durum Bekleniyor';
   }, [myStatus]);
+
+  // ELITE F3: Subscribe to incoming contact requests (someone added me as family).
+  // ContactRequestService.addListener fires immediately with current pending list,
+  // then again whenever Firestore listener delivers updates.
+  useEffect(() => {
+    if (!contactRequestService?.addListener) {
+      logger.warn('ContactRequestService unavailable — skip pending request subscription');
+      return;
+    }
+    const unsubscribe = contactRequestService.addListener((requests: ContactRequest[]) => {
+      setPendingRequests(requests);
+    });
+    return () => {
+      try { unsubscribe(); } catch (e) { logger.debug('CR listener cleanup error:', e); }
+    };
+  }, []);
+
+  // ELITE F3: Accept/decline pending request handlers
+  const handleAcceptRequest = useCallback(async (request: ContactRequest) => {
+    if (!contactRequestService?.acceptRequest) {
+      Alert.alert('Hata', 'Kişi servisi yüklenemedi. Uygulamayı yeniden başlatın.');
+      return;
+    }
+    setRequestActionInFlight((prev) => ({ ...prev, [request.id]: 'accept' }));
+    try {
+      const success = await contactRequestService.acceptRequest(request);
+      if (success) {
+        haptics.notificationSuccess?.();
+        showToast(`${request.fromName} kabul edildi`);
+      } else {
+        Alert.alert('Hata', 'Kabul başarısız. İnternet bağlantınızı kontrol edip tekrar deneyin.');
+      }
+    } catch (err) {
+      logger.error('Accept request failed:', err);
+      Alert.alert('Hata', 'Kabul sırasında bir sorun oluştu.');
+    } finally {
+      setRequestActionInFlight((prev) => {
+        const next = { ...prev };
+        delete next[request.id];
+        return next;
+      });
+    }
+  }, [showToast]);
+
+  const handleDeclineRequest = useCallback(async (request: ContactRequest) => {
+    if (!contactRequestService?.declineRequest) return;
+    setRequestActionInFlight((prev) => ({ ...prev, [request.id]: 'decline' }));
+    try {
+      const success = await contactRequestService.declineRequest(request);
+      if (success) {
+        haptics.impactLight?.();
+        showToast(`${request.fromName} reddedildi`);
+      } else {
+        Alert.alert('Hata', 'Reddetme başarısız. Tekrar deneyin.');
+      }
+    } catch (err) {
+      logger.error('Decline request failed:', err);
+    } finally {
+      setRequestActionInFlight((prev) => {
+        const next = { ...prev };
+        delete next[request.id];
+        return next;
+      });
+    }
+  }, [showToast]);
 
   // Initialize on mount
   useEffect(() => {
@@ -511,7 +619,15 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
               }
             }
 
-            const parsedLocation = parseIncomingFamilyLocation(messageData.location);
+            const locationPayload = messageData.location && typeof messageData.location === 'object'
+              ? {
+                ...(messageData.location as Record<string, unknown>),
+                timestamp: (messageData.location as Record<string, unknown>).timestamp ?? messageData.timestamp,
+                battery: (messageData.location as Record<string, unknown>).battery ?? messageData.battery,
+                batteryLevel: (messageData.location as Record<string, unknown>).batteryLevel ?? messageData.batteryLevel,
+              }
+              : messageData.location;
+            const parsedLocation = parseIncomingFamilyLocation(locationPayload);
             if (parsedLocation) {
               existing.location = parsedLocation;
               if (__DEV__) {
@@ -856,6 +972,90 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
           </View>
         ) : (
           <>
+            {/* ELITE F3: Pending contact requests (incoming family invites) */}
+            {pendingRequests.length > 0 && (
+              <View style={{
+                marginBottom: 16,
+                backgroundColor: '#fef3c7',
+                borderRadius: 16,
+                borderWidth: 1.5,
+                borderColor: '#f59e0b',
+                padding: 14,
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <Ionicons name="person-add" size={20} color="#b45309" />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#78350f', flex: 1 }}>
+                    Bekleyen Kişi İstekleri ({pendingRequests.length})
+                  </Text>
+                </View>
+                {pendingRequests.map((req) => {
+                  const inFlight = requestActionInFlight[req.id];
+                  return (
+                    <View
+                      key={req.id}
+                      style={{
+                        backgroundColor: '#fff',
+                        borderRadius: 12,
+                        padding: 12,
+                        marginTop: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#0f172a' }}>
+                        {req.fromName || 'Bilinmeyen kişi'}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>
+                        {req.message || `${req.fromName} sizi aile listesine eklemek istiyor.`}
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${req.fromName} isteğini kabul et`}
+                          disabled={!!inFlight}
+                          onPress={() => handleAcceptRequest(req)}
+                          style={{
+                            flex: 1,
+                            backgroundColor: inFlight === 'accept' ? '#86efac' : '#22c55e',
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            alignItems: 'center',
+                            opacity: inFlight ? 0.6 : 1,
+                          }}
+                        >
+                          {inFlight === 'accept' ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Kabul Et</Text>
+                          )}
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${req.fromName} isteğini reddet`}
+                          disabled={!!inFlight}
+                          onPress={() => handleDeclineRequest(req)}
+                          style={{
+                            flex: 1,
+                            backgroundColor: inFlight === 'decline' ? '#fca5a5' : '#fff',
+                            borderWidth: 1.5,
+                            borderColor: '#ef4444',
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            alignItems: 'center',
+                            opacity: inFlight ? 0.6 : 1,
+                          }}
+                        >
+                          {inFlight === 'decline' ? (
+                            <ActivityIndicator size="small" color="#ef4444" />
+                          ) : (
+                            <Text style={{ color: '#ef4444', fontWeight: '700', fontSize: 13 }}>Reddet</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             {/* Status Section — extracted to FamilyStatusSection */}
             <FamilyStatusSection
               myStatus={myStatus}

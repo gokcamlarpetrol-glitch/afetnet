@@ -44,7 +44,6 @@ import { emergencyHealthSharingService } from '../services/EmergencyHealthSharin
 interface SOSModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm?: () => void;
   reason?: EmergencyReason;
   message?: string;
 }
@@ -56,7 +55,6 @@ interface SOSModalProps {
 export default function SOSModal({
   visible,
   onClose,
-  onConfirm: _onConfirm,
   reason = EmergencyReason.MANUAL_SOS,
   message = 'Acil yardım gerekiyor!',
 }: SOSModalProps) {
@@ -77,6 +75,10 @@ export default function SOSModal({
 
   // CRITICAL: Ref guard to prevent duplicate SOS triggers
   const hasFiredRef = useRef(false);
+
+  // P0-9: Channel/device details start collapsed so the human action
+  // (STOP, 112, ÇÖK-KAPAN-TUTUN) is what the user sees first.
+  const [showChannelDetails, setShowChannelDetails] = useState(false);
 
   // ============================================================================
   // EFFECTS
@@ -323,8 +325,16 @@ export default function SOSModal({
       onRequestClose={handleCancel}
     >
       <View style={styles.overlay}>
-        {!isSurvivalMode && <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />}
-        {isSurvivalMode && <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />}
+        {/* BlurView stays mounted across mode switches; survival mode overlays an
+            opaque OLED-black layer on top instead of unmounting the blur. This
+            avoids native-view churn on the (rare) survival-mode transition. */}
+        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        {isSurvivalMode && (
+          <View
+            style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]}
+            pointerEvents="none"
+          />
+        )}
         <LinearGradient
           colors={bgColors}
           style={styles.gradient}
@@ -390,7 +400,11 @@ export default function SOSModal({
               </View>
             )}
 
-            {/* Active State */}
+            {/* Active State — P0-9: Human-first layout.
+                Survival instruction + Stop + 112 buttons are at the TOP.
+                Channel statuses move into a collapsible section below so the
+                user is never staring at "Push: pending" when they need to
+                actually do something. */}
             {isActive && currentSignal && (
               <View style={styles.stateContainer}>
                 {isSurvivalMode && (
@@ -400,71 +414,39 @@ export default function SOSModal({
                   </View>
                 )}
 
+                {/* P0-9: Top life-safety instruction (Çök-Kapan-Tutun) */}
                 <Text style={[styles.activeTitle, isSurvivalMode && { color: '#fbbf24', fontSize: 28 }]}>
-                  {isSurvivalMode ? '⚠️ OFFLINE SOS YAYINI' : '🆘 SOS AKTİF'}
+                  ÇÖK • KAPAN • TUTUN
                 </Text>
-                <Text style={[styles.subtitle, isSurvivalMode && { color: '#ef4444', fontWeight: '800' }]}>
-                  {isSurvivalMode
-                    ? `OLED Güç Tasarrufu • Beacon #${currentSignal.beaconCount}`
-                    : `Yayın yapılıyor • Beacon #${currentSignal.beaconCount}`
-                  }
+                <Text style={[styles.subtitle, { marginTop: 4 }, isSurvivalMode && { color: '#ef4444', fontWeight: '800' }]}>
+                  {isSurvivalMode ? 'Offline SOS yayını' : 'SOS aktif — yayında'}
                 </Text>
 
-                {/* Channel Status */}
-                <BlurView intensity={30} tint="light" style={styles.channelContainer}>
-                  <Text style={styles.sectionTitle}>Yayın Kanalları</Text>
+                {/* P0-9: STOP first, then 112 — both in first viewport. */}
+                <TouchableOpacity
+                  style={[styles.stopButton, { marginTop: 24 }, isSurvivalMode && styles.stopButtonSurvival]}
+                  onPress={handleStop}
+                  accessibilityLabel="SOS'u Durdur"
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.stopButtonText, isSurvivalMode && { color: '#000' }]}>SOS&apos;U DURDUR</Text>
+                </TouchableOpacity>
 
-                  <View style={styles.channelRow}>
-                    <ChannelItem
-                      icon="bluetooth"
-                      label="Mesh (BLE)"
-                      status={currentSignal.channels.mesh}
-                    />
-                    <ChannelItem
-                      icon="cloud"
-                      label="Firebase"
-                      status={currentSignal.channels.firebase}
-                    />
-                  </View>
+                <TouchableOpacity
+                  style={[styles.call112Button, { marginTop: 12 }]}
+                  onPress={handleCall112}
+                  accessibilityLabel="112 Acil Ara"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="call" size={22} color="#fff" />
+                  <Text style={styles.call112ButtonText}>112 ACİL ARA</Text>
+                </TouchableOpacity>
 
-                  <View style={styles.channelRow}>
-                    <ChannelItem
-                      icon="server"
-                      label="Backend"
-                      status={currentSignal.channels.backend}
-                    />
-                    <ChannelItem
-                      icon="notifications"
-                      label="Push"
-                      status={currentSignal.channels.push}
-                    />
-                  </View>
-                </BlurView>
-
-                {/* Device Status */}
-                <BlurView intensity={30} tint="light" style={styles.statusContainer}>
-                  <StatusItem
-                    icon="location"
-                    label="Konum"
-                    value={getLocationAccuracyText()}
-                  />
-                  <StatusItem
-                    icon="battery-half"
-                    label="Pil"
-                    value={`${currentSignal.device.batteryLevel}%`}
-                  />
-                  <StatusItem
-                    icon={currentSignal.device.networkStatus === 'offline' ? 'cloud-offline' : 'wifi'}
-                    label="Ağ"
-                    value={getNetworkStatusText()}
-                  />
-                </BlurView>
-
-                {/* ACKs */}
+                {/* ACKs — surface immediately when a rescuer responds */}
                 {currentSignal.acks.length > 0 && (
                   <BlurView intensity={isSurvivalMode ? 10 : 30} tint="light" style={[styles.ackContainer, isSurvivalMode && { borderColor: '#ef4444', borderWidth: 1 }]}>
                     <Text style={[styles.sectionTitle, isSurvivalMode && { color: '#fbbf24' }]}>
-                      ✅ Yanıt Alındı ({currentSignal.acks.length})
+                      Yanıt Alındı ({currentSignal.acks.length})
                     </Text>
                     {currentSignal.acks.slice(0, 3).map((ack, index) => (
                       <View key={ack.id} style={styles.ackItem}>
@@ -482,27 +464,74 @@ export default function SOSModal({
                   </BlurView>
                 )}
 
-                {/* Stop Button */}
+                {/* P0-9: Collapsible technical detail. Default collapsed.
+                    The full channel/device status shows on tap so the user
+                    isn't drowning in "Mesh: sending… Push: pending…" lines
+                    when they need to take action. */}
                 <TouchableOpacity
-                  style={[styles.stopButton, isSurvivalMode && styles.stopButtonSurvival]}
-                  onPress={handleStop}
-                  accessibilityLabel="SOS'u Durdur"
+                  style={[styles.detailsToggle, { marginTop: 20 }]}
+                  onPress={() => setShowChannelDetails(v => !v)}
                   accessibilityRole="button"
+                  accessibilityLabel={showChannelDetails ? 'Yayın detaylarını gizle' : 'Yayın detaylarını göster'}
                 >
-                  <Text style={[styles.stopButtonText, isSurvivalMode && { color: '#000' }]}>SOS'U DURDUR</Text>
+                  <Ionicons name={showChannelDetails ? 'chevron-up' : 'chevron-down'} size={16} color="#fff" />
+                  <Text style={styles.detailsToggleText}>
+                    Yayın detayları • Beacon #{currentSignal.beaconCount}
+                  </Text>
                 </TouchableOpacity>
 
-                {/* 112 Emergency Call Button (Only if not in Survival Mode, because survival usually implies no network/cell coverage) */}
-                {!isSurvivalMode && (
-                  <TouchableOpacity
-                    style={styles.call112Button}
-                    onPress={handleCall112}
-                    accessibilityLabel="112 Acil Ara"
-                    accessibilityRole="button"
-                  >
-                    <Ionicons name="call" size={22} color="#fff" />
-                    <Text style={styles.call112ButtonText}>112 ACİL ARA</Text>
-                  </TouchableOpacity>
+                {showChannelDetails && (
+                  <>
+                    {/* Channel Status */}
+                    <BlurView intensity={30} tint="light" style={styles.channelContainer}>
+                      <Text style={styles.sectionTitle}>Yayın Kanalları</Text>
+
+                      <View style={styles.channelRow}>
+                        <ChannelItem
+                          icon="bluetooth"
+                          label="Mesh (BLE)"
+                          status={currentSignal.channels.mesh}
+                        />
+                        <ChannelItem
+                          icon="cloud"
+                          label="Firebase"
+                          status={currentSignal.channels.firebase}
+                        />
+                      </View>
+
+                      <View style={styles.channelRow}>
+                        <ChannelItem
+                          icon="server"
+                          label="Backend"
+                          status={currentSignal.channels.backend}
+                        />
+                        <ChannelItem
+                          icon="notifications"
+                          label="Push"
+                          status={currentSignal.channels.push}
+                        />
+                      </View>
+                    </BlurView>
+
+                    {/* Device Status */}
+                    <BlurView intensity={30} tint="light" style={styles.statusContainer}>
+                      <StatusItem
+                        icon="location"
+                        label="Konum"
+                        value={getLocationAccuracyText()}
+                      />
+                      <StatusItem
+                        icon="battery-half"
+                        label="Pil"
+                        value={`${currentSignal.device.batteryLevel}%`}
+                      />
+                      <StatusItem
+                        icon={currentSignal.device.networkStatus === 'offline' ? 'cloud-offline' : 'wifi'}
+                        label="Ağ"
+                        value={getNetworkStatusText()}
+                      />
+                    </BlurView>
+                  </>
                 )}
               </View>
             )}
@@ -802,6 +831,25 @@ const styles = StyleSheet.create({
   },
   stopButtonSurvival: {
     backgroundColor: '#ef4444',
+  },
+  // P0-9
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  detailsToggleText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.9,
   },
   survivalBadge: {
     flexDirection: 'row',

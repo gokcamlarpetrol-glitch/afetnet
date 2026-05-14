@@ -39,6 +39,20 @@ const BEACON_CONFIG = {
     CRITICAL_BATTERY_THRESHOLD: 10,
 };
 
+function isValidBeaconLocation(location: SOSLocation): boolean {
+    return Number.isFinite(location.latitude)
+        && Number.isFinite(location.longitude)
+        && location.latitude >= -90
+        && location.latitude <= 90
+        && location.longitude >= -180
+        && location.longitude <= 180
+        && Number.isFinite(location.accuracy)
+        && location.accuracy >= 0
+        && location.accuracy <= 5000
+        && Number.isFinite(location.timestamp)
+        && location.timestamp <= Date.now() + 60_000;
+}
+
 // ============================================================================
 // BEACON SERVICE CLASS
 // ============================================================================
@@ -287,6 +301,11 @@ class SOSBeaconService {
                 timestamp: Date.now(),
                 source: 'gps',
             };
+
+            if (!isValidBeaconLocation(sosLocation)) {
+                logger.warn('SOS beacon location rejected because it is invalid');
+                return;
+            }
 
             useSOSStore.getState().updateLocation(sosLocation);
             logger.debug('📍 Location updated');

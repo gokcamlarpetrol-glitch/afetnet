@@ -12,7 +12,7 @@
  */
 
 import { getErrorMessage } from '../../utils/errorUtils';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -83,6 +83,19 @@ const CATEGORIES = [
   { id: 'emergencycard', title: 'Acil Durum Kartı', icon: 'card', color: '#8b5cf6' },
 ] as const;
 
+type HealthProfileCategoryId = typeof CATEGORIES[number]['id'];
+type SaveScope = HealthProfileCategoryId | 'all';
+
+const SAVE_SCOPE_LABELS: Record<SaveScope, string> = {
+  all: 'Sağlık profili',
+  personal: 'Kişisel bilgiler',
+  medical: 'Tıbbi bilgiler',
+  contacts: 'Acil durum yakınları',
+  emergency: 'Acil durum notları',
+  firstaid: 'İlk yardım rehberi',
+  emergencycard: 'Acil durum kartı',
+};
+
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { ParamListBase } from '@react-navigation/native';
 
@@ -116,10 +129,17 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
     notes: '',
   });
 
-  const [isSaving, setIsSaving] = useState(false);
+  const [savingScope, setSavingScope] = useState<SaveScope | null>(null);
+  const isSaving = savingScope !== null;
+  const [saveFeedback, setSaveFeedback] = useState('');
+  const saveFeedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [allergyInput, setAllergyInput] = useState('');
   const [conditionInput, setConditionInput] = useState('');
   const [medicationInput, setMedicationInput] = useState('');
+
+  useEffect(() => () => {
+    if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
+  }, []);
 
   // BMI Calculation Helper
   const calculateBMI = useCallback((height: string, weight: string) => {
@@ -355,9 +375,16 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
     );
   }, []);
 
-  const handleSave = useCallback(async () => {
-    haptics.impactMedium();
+  const showSaveFeedback = useCallback((message: string) => {
+    setSaveFeedback(message);
+    if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
+    saveFeedbackTimerRef.current = setTimeout(() => {
+      setSaveFeedback('');
+      saveFeedbackTimerRef.current = null;
+    }, 2200);
+  }, []);
 
+  const getValidEmergencyContacts = useCallback((): EmergencyContact[] | null => {
     const validContacts = formData.emergencyContacts.filter(c => {
       if (!c.name || !c.phone) return false;
       return validatePhoneNumber(c.phone);
@@ -374,56 +401,113 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
         `Lütfen geçerli telefon numaraları girin:\n${invalidContacts.map(c => c.name || 'İsimsiz').join(', ')}`,
         [{ text: 'Tamam' }],
       );
-      return;
+      return null;
     }
 
-    setIsSaving(true);
+    return validContacts.map(c => ({
+      id: sanitizeString(c.id),
+      name: sanitizeString(c.name),
+      relationship: sanitizeString(c.relationship),
+      phone: sanitizeString(c.phone),
+    }));
+  }, [formData.emergencyContacts, validatePhoneNumber]);
+
+  const buildProfileUpdate = useCallback((scope: SaveScope): Partial<HealthProfile> | null => {
+    const includeAll = scope === 'all' || scope === 'emergencycard';
+    const profileUpdate: Partial<HealthProfile> = {
+      lastUpdated: Date.now(),
+    };
+
+    if (includeAll || scope === 'personal') {
+      profileUpdate.firstName = sanitizeString(formData.firstName);
+      profileUpdate.lastName = sanitizeString(formData.lastName);
+      profileUpdate.dateOfBirth = sanitizeString(formData.dateOfBirth);
+      profileUpdate.gender = formData.gender as any;
+      profileUpdate.height = sanitizeString(formData.height);
+      profileUpdate.weight = sanitizeString(formData.weight);
+    }
+
+    if (includeAll || scope === 'medical') {
+      profileUpdate.bloodType = formData.bloodType;
+      profileUpdate.allergies = formData.allergies.map(a => sanitizeString(a));
+      profileUpdate.chronicConditions = formData.chronicConditions.map(c => sanitizeString(c));
+      profileUpdate.chronicDiseases = formData.chronicConditions.map(c => sanitizeString(c));
+      profileUpdate.medications = formData.medications.map(m => sanitizeString(m));
+      profileUpdate.emergencyMedications = formData.medications.map(m => sanitizeString(m));
+      profileUpdate.medicalHistory = sanitizeString(formData.medicalHistory);
+    }
+
+    if (includeAll || scope === 'contacts') {
+      const contacts = getValidEmergencyContacts();
+      if (!contacts) return null;
+      profileUpdate.emergencyContacts = contacts;
+    }
+
+    if (includeAll || scope === 'emergency') {
+      profileUpdate.insuranceProvider = sanitizeString(formData.insuranceProvider);
+      profileUpdate.insuranceNumber = sanitizeString(formData.insuranceNumber);
+      profileUpdate.organDonorStatus = formData.organDonorStatus as any;
+      profileUpdate.notes = sanitizeString(formData.notes);
+    }
+
+    return profileUpdate;
+  }, [formData, getValidEmergencyContacts]);
+
+  const handleSave = useCallback(async (scope: SaveScope = 'all') => {
+    haptics.impactMedium();
+
+    const profileUpdate = buildProfileUpdate(scope);
+    if (!profileUpdate) return;
+
+    setSavingScope(scope);
 
     try {
-      const profileUpdate: Partial<HealthProfile> = {
-        firstName: sanitizeString(formData.firstName),
-        lastName: sanitizeString(formData.lastName),
-        dateOfBirth: sanitizeString(formData.dateOfBirth),
-        gender: formData.gender as any,
-        height: sanitizeString(formData.height),
-        weight: sanitizeString(formData.weight),
-        bloodType: formData.bloodType,
-        allergies: formData.allergies.map(a => sanitizeString(a)),
-        chronicConditions: formData.chronicConditions.map(c => sanitizeString(c)),
-        chronicDiseases: formData.chronicConditions.map(c => sanitizeString(c)),
-        medications: formData.medications.map(m => sanitizeString(m)),
-        emergencyMedications: formData.medications.map(m => sanitizeString(m)),
-        medicalHistory: sanitizeString(formData.medicalHistory),
-        insuranceProvider: sanitizeString(formData.insuranceProvider),
-        insuranceNumber: sanitizeString(formData.insuranceNumber),
-        organDonorStatus: formData.organDonorStatus as any,
-        emergencyContacts: validContacts.map(c => ({
-          id: sanitizeString(c.id),
-          name: sanitizeString(c.name),
-          relationship: sanitizeString(c.relationship),
-          phone: sanitizeString(c.phone),
-        })),
-        notes: sanitizeString(formData.notes),
-        lastUpdated: Date.now(),
-      };
-
       await updateProfile(profileUpdate);
-      Alert.alert('Başarılı', 'Sağlık profiliniz kaydedildi.', [{ text: 'Tamam' }]);
-      logger.info('Health profile saved successfully');
+      showSaveFeedback(`${SAVE_SCOPE_LABELS[scope]} kaydedildi`);
+      logger.info(`Health profile saved successfully: ${scope}`);
     } catch (error: unknown) {
       logger.error('Failed to save health profile:', error);
       Alert.alert(
         'Kayıt Hatası',
         'Sağlık profiliniz kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.',
         [
-          { text: 'Tekrar Dene', onPress: handleSave },
+          { text: 'Tekrar Dene', onPress: () => handleSave(scope) },
           { text: 'Tamam', style: 'cancel' },
         ],
       );
     } finally {
-      setIsSaving(false);
+      setSavingScope(null);
     }
-  }, [formData, validatePhoneNumber, updateProfile]);
+  }, [buildProfileUpdate, showSaveFeedback, updateProfile]);
+
+  const renderSectionSaveButton = useCallback((scope: HealthProfileCategoryId, color: string) => {
+    if (scope === 'firstaid') return null;
+    const savingThisSection = savingScope === scope;
+
+    return (
+      <Pressable
+        onPress={() => handleSave(scope)}
+        disabled={isSaving}
+        accessibilityRole="button"
+        accessibilityLabel={`${SAVE_SCOPE_LABELS[scope]} kaydet`}
+        style={({ pressed }) => [
+          styles.sectionSaveButton,
+          { borderColor: `${color}55`, backgroundColor: `${color}12` },
+          pressed && !isSaving && styles.sectionSaveButtonPressed,
+          isSaving && !savingThisSection && styles.sectionSaveButtonDisabled,
+        ]}
+      >
+        {savingThisSection ? (
+          <ActivityIndicator size="small" color={color} />
+        ) : (
+          <Ionicons name="checkmark" size={16} color={color} />
+        )}
+        <Text style={[styles.sectionSaveButtonText, { color }]}>
+          {savingThisSection ? 'Kaydediliyor' : 'Kaydet'}
+        </Text>
+      </Pressable>
+    );
+  }, [handleSave, isSaving, savingScope]);
 
   const renderCategory = useCallback((category: typeof CATEGORIES[number], index: number) => {
     const delay = index * 100;
@@ -440,6 +524,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
             </View>
 
             <View style={styles.categoryContent}>
@@ -558,6 +643,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
             </View>
 
             <View style={styles.categoryContent}>
@@ -739,6 +825,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
             </View>
 
             <View style={styles.categoryContent}>
@@ -806,6 +893,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
               <Pressable onPress={handleAddEmergencyContact} style={styles.addContactButton}>
                 <LinearGradient
                   colors={[category.color, `${category.color}CC`]}
@@ -930,6 +1018,7 @@ export default function HealthProfileScreen({ navigation }: HealthProfileScreenP
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
             </View>
 
             <View style={styles.categoryContent}>
@@ -1083,6 +1172,7 @@ AfetNet - Hayat Kurtaran Teknoloji
                 <Ionicons name={category.icon as any} size={24} color="#ffffff" />
               </LinearGradient>
               <Text style={styles.categoryTitle}>{category.title}</Text>
+              {renderSectionSaveButton(category.id, category.color)}
             </View>
 
             <View style={styles.categoryContent}>
@@ -1178,7 +1268,7 @@ AfetNet - Hayat Kurtaran Teknoloji
       default:
         return null;
     }
-  }, [formData, allergyInput, conditionInput, medicationInput, handleAddAllergy, handleRemoveAllergy, handleAddCondition, handleRemoveCondition, handleAddMedication, handleRemoveMedication, handleAddEmergencyContact, handleUpdateEmergencyContact, handleRemoveEmergencyContact, formatPhoneNumber]);
+  }, [formData, allergyInput, conditionInput, medicationInput, handleAddAllergy, handleRemoveAllergy, handleAddCondition, handleRemoveCondition, handleAddMedication, handleRemoveMedication, handleAddEmergencyContact, handleUpdateEmergencyContact, handleRemoveEmergencyContact, formatPhoneNumber, renderSectionSaveButton]);
 
   return (
     <KeyboardAvoidingView
@@ -1187,6 +1277,17 @@ AfetNet - Hayat Kurtaran Teknoloji
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+
+      {saveFeedback ? (
+        <Animated.View
+          pointerEvents="none"
+          entering={FadeInDown.duration(180)}
+          style={[styles.saveFeedbackToast, { top: insets.top + 64 }]}
+        >
+          <Ionicons name="checkmark-circle" size={18} color="#5A9F68" />
+          <Text style={styles.saveFeedbackText}>{saveFeedback}</Text>
+        </Animated.View>
+      ) : null}
 
       {/* Modern Calm Trust: Cream gradient background */}
       <LinearGradient
@@ -1288,7 +1389,7 @@ AfetNet - Hayat Kurtaran Teknoloji
         <Animated.View entering={FadeInDown.delay(500)} style={styles.saveContainer}>
           <Pressable
             style={styles.saveButton}
-            onPress={handleSave}
+            onPress={() => handleSave('all')}
             disabled={isSaving}
           >
             <LinearGradient
@@ -1312,4 +1413,3 @@ AfetNet - Hayat Kurtaran Teknoloji
     </KeyboardAvoidingView>
   );
 }
-

@@ -18,6 +18,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/core';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { MainStackParamList } from '../../types/navigation';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography } from '../../theme';
 import { newsAggregatorService } from '../../ai/services/NewsAggregatorService';
@@ -27,20 +29,28 @@ import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('AllNewsScreen');
 
+type AllNewsNavigationProp = StackNavigationProp<MainStackParamList, 'AllNews'>;
+
 export default function AllNewsScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AllNewsNavigationProp>();
   const insets = useSafeAreaInsets();
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchNews = useCallback(async () => {
+  const fetchNews = useCallback(async (isRefresh = false) => {
     try {
+      setError(null);
+      if (!isRefresh) {
+        setLoading(true);
+      }
       const news = await newsAggregatorService.fetchLatestNews();
       setArticles(news);
     } catch (error) {
       logger.error('Failed to fetch news:', error);
+      setError('Deprem haberleri yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -53,15 +63,13 @@ export default function AllNewsScreen() {
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchNews();
+    fetchNews(true);
   }, [fetchNews]);
 
   const handleArticlePress = useCallback((article: NewsArticle) => {
     haptics.impactLight();
     try {
-      if (navigation && 'navigate' in navigation) {
-        (navigation as any).navigate('NewsDetail', { article });
-      }
+      navigation.navigate('NewsDetail', { article });
     } catch (error) {
       logger.error('Navigation failed:', error);
     }
@@ -118,14 +126,7 @@ export default function AllNewsScreen() {
     </TouchableOpacity>
   ), [handleArticlePress]);
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={colors.accent.primary} />
-        <Text style={styles.loadingText}>Haberler yükleniyor...</Text>
-      </View>
-    );
-  }
+  const isInitialLoading = loading && articles.length === 0;
 
   return (
     <View style={styles.container}>
@@ -168,39 +169,46 @@ export default function AllNewsScreen() {
         </View>
       </View>
 
-      {/* ELITE: News List */}
-      <FlatList
-        data={filteredArticles}
-        renderItem={renderNewsItem}
-        keyExtractor={(item, index) => item.id || `news-${item.title?.substring(0, 20) || index}`}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        // ELITE: Performance optimizations
-        initialNumToRender={10}
-        maxToRenderPerBatch={5}
-        windowSize={5}
-        removeClippedSubviews={true}
-        getItemLayout={(data, index) => ({
-          length: 100, // Approximate item height
-          offset: 100 * index,
-          index,
-        })}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.accent.primary}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="newspaper-outline" size={48} color={colors.text.tertiary} />
-            <Text style={styles.emptyText}>
-              {searchQuery ? 'Arama sonucu bulunamadı' : 'Haber bulunamadı'}
-            </Text>
-          </View>
-        }
-      />
+      {/* ELITE: Content area — keep header always visible during loading */}
+      {isInitialLoading ? (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator size="large" color={colors.accent.primary} />
+          <Text style={styles.loadingText}>Haberler yükleniyor...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredArticles}
+          renderItem={renderNewsItem}
+          keyExtractor={(item, index) => item.id || `news-${item.title?.substring(0, 20) || index}`}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={10}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          removeClippedSubviews={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.accent.primary}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name={error ? 'cloud-offline-outline' : 'newspaper-outline'} size={48} color={colors.text.tertiary} />
+              <Text style={styles.emptyText}>
+                {error || (searchQuery ? 'Arama sonucu bulunamadı' : 'Haber bulunamadı')}
+              </Text>
+              {error && (
+                <TouchableOpacity style={styles.retryButton} onPress={handleRefresh} activeOpacity={0.8}>
+                  <Ionicons name="refresh" size={16} color={colors.accent.primary} />
+                  <Text style={styles.retryText}>Tekrar dene</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }
@@ -210,14 +218,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background.primary,
   },
-  loadingContainer: {
+  inlineLoading: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
   loadingText: {
     ...typography.body,
     color: colors.text.secondary,
-    marginTop: spacing.md,
   },
   header: {
     flexDirection: 'row',
@@ -324,5 +333,20 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.tertiary,
     textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 10,
+    backgroundColor: colors.accent.primary + '15',
+  },
+  retryText: {
+    ...typography.caption,
+    color: colors.accent.primary,
+    fontWeight: '700',
   },
 });

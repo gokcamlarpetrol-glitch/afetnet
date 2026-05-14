@@ -1,5 +1,6 @@
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { StackNavigationProp } from '@react-navigation/stack';
+import type { NewsArticle } from '../ai/types/news.types';
 
 // Bottom Tab Navigator Param List
 export type TabParamList = {
@@ -62,7 +63,7 @@ export type MainStackParamList = {
         battery?: number;
         healthInfo?: Record<string, string>;
     } | undefined;
-    NewsDetail: { newsId?: string; article?: Record<string, unknown> } | undefined;
+    NewsDetail: { newsId?: string; article?: NewsArticle } | undefined;
     AllNews: undefined;
     PreparednessPlan: undefined;
     PanicAssistant: undefined;

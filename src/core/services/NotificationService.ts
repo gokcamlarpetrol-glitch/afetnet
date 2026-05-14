@@ -29,6 +29,7 @@ import {
 import { scheduleNotification } from './notifications/NotificationScheduler';
 
 const logger = createLogger('NotificationService');
+const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
 
 // ============================================================================
 // TYPES
@@ -77,13 +78,25 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsSnapshot = {
 // ============================================================================
 
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;
+const DEDUP_CLEANUP_THRESHOLD = 50;
 const _recentKeys = new Map<string, number>();
+
+/**
+ * Clear notification dedup state — must be called on logout/account-switch.
+ * Without this, the previous user's earthquake/SOS fingerprints leak into
+ * the next user's session for up to 10 minutes (TTL window).
+ */
+export function clearNotificationDedup(): void {
+  _recentKeys.clear();
+}
 
 function isDuplicate(key: string, windowMs: number = DEDUP_WINDOW_MS): boolean {
   const now = Date.now();
 
-  // Lazy cleanup
-  if (_recentKeys.size > 100) {
+  // Lazy cleanup — sweep stale entries when the map crosses the threshold.
+  // 50 is enough to absorb earthquake bursts (typically <20 alerts in 10min)
+  // while keeping memory pressure low.
+  if (_recentKeys.size > DEDUP_CLEANUP_THRESHOLD) {
     for (const [k, ts] of _recentKeys) {
       if (now - ts > DEDUP_WINDOW_MS) _recentKeys.delete(k);
     }
@@ -186,6 +199,7 @@ class NotificationService {
     };
     const start = parse(settings.quietHoursStart);
     const end = parse(settings.quietHoursEnd);
+    // Invalid or zero-duration window → treat as disabled. UI also blocks start===end.
     if (start === null || end === null || start === end) return false;
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -330,7 +344,7 @@ class NotificationService {
         : `${time ? time.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : 'Şimdi'} - Detay için dokunun.`;
 
       const channelType = priority === 'critical' ? 'eew' as const : 'earthquake' as const;
-      const sound = this.resolveSound(settings, priority, isEEW ? 'siren.wav' : 'default');
+      const sound = this.resolveSound(settings, priority, isEEW ? EMERGENCY_NOTIFICATION_SOUND : 'default');
 
       await scheduleNotification(
         {
@@ -366,7 +380,7 @@ class NotificationService {
           title: `🆘 ACİL DURUM: ${sender}`,
           body: message || 'Acil yardım çağrısı alındı. Konumu görmek için dokunun.',
           data: { type: 'sos', from: sender, location },
-          sound: 'siren.wav',
+          sound: EMERGENCY_NOTIFICATION_SOUND,
           priority: 'max',
           categoryIdentifier: 'sos',
         },
@@ -432,7 +446,7 @@ class NotificationService {
   // ==================== NEWS ====================
 
   async showNewsNotification(data: {
-    title: string; summary: string; source: string; url?: string; articleId?: string;
+    title: string; summary: string; source: string; url?: string; articleId?: string; publishedAt?: number;
   }): Promise<void> {
     try {
       const { allowed, settings } = await this.shouldDeliver('normal');
@@ -451,7 +465,15 @@ class NotificationService {
         {
           title: `📰 ${title}`,
           body,
-          data: { type: 'news', source: data.source, url: data.url, articleId: data.articleId },
+          data: {
+            type: 'news',
+            title: data.title,
+            summary: data.summary,
+            source: data.source,
+            url: data.url,
+            articleId: data.articleId,
+            publishedAt: data.publishedAt || Date.now(),
+          },
           priority: 'default',
           categoryIdentifier: 'news',
         },

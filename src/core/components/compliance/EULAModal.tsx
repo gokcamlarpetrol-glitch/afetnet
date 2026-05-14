@@ -89,186 +89,186 @@ export const EULAModal = () => {
             <View style={styles.emergencyBanner}>
               <Ionicons name="warning" size={24} color="#dc2626" />
               <Text style={styles.emergencyBannerTitle}>
-                ACIL DURUM HIZMETLERI UYARISI
+                ACİL DURUM HİZMETLERİ UYARISI
               </Text>
               <Text style={styles.emergencyBannerText}>
-                AfetNet, resmi bir acil durum servisi DEGILDIR.{'\n'}
-                Hayati tehlike durumunda DERHAL 112'yi arayin.
+                AfetNet, resmi bir acil durum servisi DEĞİLDİR.{'\n'}
+                Hayati tehlike durumunda DERHAL 112&apos;yi arayın.
               </Text>
             </View>
 
             <Text style={styles.sectionTitle}>1. Acil Durum Hizmetleri Sorumluluk Reddi</Text>
             <Text style={styles.text}>
-              <Text style={styles.bold}>ONEMLI — LUTFEN DIKKATLE OKUYUNUZ:</Text>
+              <Text style={styles.bold}>ÖNEMLİ — LÜTFEN DİKKATLE OKUYUNUZ:</Text>
             </Text>
             <Text style={styles.text}>
-              AfetNet bir topluluk guvenlik ve afet iletisim uygulamasidir. Asagidaki hususlari acikca anlayip kabul etmeniz gerekmektedir:
-            </Text>
-
-            <Text style={styles.subSectionTitle}>1.1. AfetNet Resmi Acil Servis DEGILDIR</Text>
-            <Text style={styles.text}>
-              AfetNet; 112 Acil Cagri Merkezi, itfaiye, ambulans, polis, jandarma, AFAD, Kizilay
-              veya herhangi bir resmi acil servis birimiyle dogrudan entegre degildir ve bu kurumlara
-              bagli degildir. Uygulama, acil cagri merkezlerine bildirim gondermez, acil servislere
-              cagri iletmez ve resmi kurtarma operasyonlari baslatamaz.
+              AfetNet bir topluluk güvenliği ve afet iletişim uygulamasıdır. Aşağıdaki hususları açıkça anlayıp kabul etmeniz gerekmektedir:
             </Text>
 
-            <Text style={styles.subSectionTitle}>1.2. Uygulamanin Sundugu Acil Durum Ozellikleri</Text>
+            <Text style={styles.subSectionTitle}>1.1. AfetNet Resmi Acil Servis DEĞİLDİR</Text>
             <Text style={styles.text}>
-              AfetNet'in SOS ve acil durum ozellikleri yalnizca asagidaki islevleri saglar:
-            </Text>
-            <View style={styles.bulletPoint}>
-              <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Konum ve durum bilginizi uygulama icerisinde belirlediginiz aile uyeleri ve yakin cevre kisilerine iletir.</Text>
-            </View>
-            <View style={styles.bulletPoint}>
-              <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Bluetooth Low Energy (BLE) mesh agi uzerinden internet kesintisi sirasinda yakin cevredeki diger AfetNet kullanicilarina mesaj iletir.</Text>
-            </View>
-            <View style={styles.bulletPoint}>
-              <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Deprem erken uyari bildirimlerini iletir (uygulama icerisinde, resmi uyari sistemlerinden bagimsiz).</Text>
-            </View>
-            <View style={styles.bulletPoint}>
-              <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Afet hazirligi, ilk yardim rehberligi ve toplanma noktasi bilgisi saglar.</Text>
-            </View>
-            <Text style={styles.text}>
-              Bu ozellikler topluluk temelli iletisim araclaridir; resmi acil mudahale hizmetlerinin yerini tutmaz ve tutamaz.
+              AfetNet; 112 Acil Çağrı Merkezi, itfaiye, ambulans, polis, jandarma, AFAD, Kızılay
+              veya herhangi bir resmi acil servis birimiyle doğrudan entegre değildir ve bu kurumlara
+              bağlı değildir. Uygulama, acil çağrı merkezlerine bildirim göndermez, acil servislere
+              çağrı iletmez ve resmi kurtarma operasyonları başlatamaz.
             </Text>
 
-            <Text style={styles.subSectionTitle}>1.3. Acil Servis Sevk ve Mudahale Garantisi Yoktur</Text>
+            <Text style={styles.subSectionTitle}>1.2. Uygulamanın Sunduğu Acil Durum Özellikleri</Text>
             <Text style={styles.text}>
-              AfetNet, herhangi bir acil servis biriminin SOS sinyalinizi alacagini, konumunuzu tespit edecegini
-              veya size mudahale edecegini garanti etmez ve edemez. Uygulama uzerinden gonderilen SOS sinyalleri
-              YALNIZCA uygulama icerisinde kayitli diger kullanicilara (aile, yakinlar) iletilir. Resmi acil
+              AfetNet&apos;in SOS ve acil durum özellikleri yalnızca aşağıdaki işlevleri sağlar:
+            </Text>
+            <View style={styles.bulletPoint}>
+              <Text style={styles.bullet}>•</Text>
+              <Text style={styles.text}>Konum ve durum bilginizi uygulama içerisinde belirlediğiniz aile üyeleri ve yakın çevre kişilerine iletir.</Text>
+            </View>
+            <View style={styles.bulletPoint}>
+              <Text style={styles.bullet}>•</Text>
+              <Text style={styles.text}>Bluetooth Low Energy (BLE) mesh ağı üzerinden internet kesintisi sırasında yakın çevredeki diğer AfetNet kullanıcılarına mesaj iletir.</Text>
+            </View>
+            <View style={styles.bulletPoint}>
+              <Text style={styles.bullet}>•</Text>
+              <Text style={styles.text}>Deprem erken uyarı bildirimlerini iletir (uygulama içerisinde, resmi uyarı sistemlerinden bağımsız).</Text>
+            </View>
+            <View style={styles.bulletPoint}>
+              <Text style={styles.bullet}>•</Text>
+              <Text style={styles.text}>Afet hazırlığı, ilk yardım rehberliği ve toplanma noktası bilgisi sağlar.</Text>
+            </View>
+            <Text style={styles.text}>
+              Bu özellikler topluluk temelli iletişim araçlarıdır; resmi acil müdahale hizmetlerinin yerini tutmaz ve tutamaz.
+            </Text>
+
+            <Text style={styles.subSectionTitle}>1.3. Acil Servis Sevk ve Müdahale Garantisi Yoktur</Text>
+            <Text style={styles.text}>
+              AfetNet, herhangi bir acil servis biriminin SOS sinyalinizi alacağını, konumunuzu tespit edeceğini
+              veya size müdahale edeceğini garanti etmez ve edemez. Uygulama üzerinden gönderilen SOS sinyalleri
+              YALNIZCA uygulama içerisinde kayıtlı diğer kullanıcılara (aile, yakınlar) iletilir. Resmi acil
               servisler bu sinyalleri almaz.
             </Text>
 
-            <Text style={styles.subSectionTitle}>1.4. Konum Dogrulugu Sinirlamalari</Text>
+            <Text style={styles.subSectionTitle}>1.4. Konum Doğruluğu Sınırlamaları</Text>
             <Text style={styles.text}>
-              Uygulamanin iletecegi konum bilgisinin dogrulugu asagidaki faktorlere baglidir ve garanti edilemez:
+              Uygulamanın ileteceği konum bilgisinin doğruluğu aşağıdaki faktörlere bağlıdır ve garanti edilemez:
             </Text>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>GPS sinyal kalitesi (acik alan, kapali alan, bodrum kat, tunel, enkaz alti vb.)</Text>
+              <Text style={styles.text}>GPS sinyal kalitesi (açık alan, kapalı alan, bodrum kat, tünel, enkaz altı vb.)</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Internet ve mobil ag baglantisi durumu</Text>
+              <Text style={styles.text}>Internet ve mobil ağ bağlantısı durumu</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Cihaz sensorunun hassasiyeti ve yazilim surumu</Text>
+              <Text style={styles.text}>Cihaz sensörünün hassasiyeti ve yazılım sürümü</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Hava kosullari ve cevresel engeller</Text>
+              <Text style={styles.text}>Hava koşulları ve çevresel engeller</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Kullanici tarafindan verilen konum izni seviyesi (on plan / arka plan)</Text>
+              <Text style={styles.text}>Kullanıcı tarafından verilen konum izni seviyesi (ön plan / arka plan)</Text>
             </View>
             <Text style={styles.text}>
-              Enkaz alti, kapali yapi ve GPS sinyalinin zayif oldugu ortamlarda konum dogrulugu onemli olcude
-              dusebilir, gecikebilir veya konum hic iletilmeyebilir. Gelistirici, iletilen konum bilgisinin
-              dogrulugunu, zamanliligini veya eksiksizligini garanti etmez.
+              Enkaz altı, kapalı yapı ve GPS sinyalinin zayıf olduğu ortamlarda konum doğruluğu önemli ölçüde
+              düşebilir, gecikebilir veya konum hiç iletilmeyebilir. Geliştirici, iletilen konum bilgisinin
+              doğruluğunu, zamanlılığını veya eksiksizliğini garanti etmez.
             </Text>
 
-            <Text style={styles.subSectionTitle}>1.5. Kullanici Sorumlulugu</Text>
+            <Text style={styles.subSectionTitle}>1.5. Kullanıcı Sorumluluğu</Text>
             <Text style={styles.text}>
-              Bu uygulamayi kullanarak asagidakileri acikca kabul etmis olursunuz:
+              Bu uygulamayı kullanarak aşağıdakileri açıkça kabul etmiş olursunuz:
             </Text>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Hayati tehlike iceren her turlu acil durumda DERHAL 112'yi arayacaginizi.</Text>
+              <Text style={styles.text}>Hayati tehlike içeren her türlü acil durumda DERHAL 112&apos;yi arayacağınızı.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>AfetNet'in 112 veya diger resmi acil servislerin yerini tutmadigini ve ASLA onlarin ikamesi olarak kullanilmayacagini.</Text>
+              <Text style={styles.text}>AfetNet&apos;in 112 veya diğer resmi acil servislerin yerini tutmadığını ve ASLA onların ikamesi olarak kullanılmayacağını.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>SOS ve konum paylasimi ozelliklerinin yalnizca uygulama icerisindeki kullanicilara (aile, yakinlar) bildirim yaptigini; resmi acil servislere HICBIR bildirim gondermedigini.</Text>
+              <Text style={styles.text}>SOS ve konum paylaşımı özelliklerinin yalnızca uygulama içerisindeki kullanıcılara (aile, yakınlar) bildirim yaptığını; resmi acil servislere HİÇBİR bildirim göndermediğini.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Konum bilgisinin hatali, gecikmeli veya eksik olabilecegini ve bunun sonucu olarak konumunuzun tespit edilemeyebilecegini.</Text>
+              <Text style={styles.text}>Konum bilgisinin hatalı, gecikmeli veya eksik olabileceğini ve bunun sonucu olarak konumunuzun tespit edilemeyebileceğini.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Uygulamanin internet, Bluetooth veya cihaz ariza durumlarinda calismayabilecegini.</Text>
+              <Text style={styles.text}>Uygulamanın internet, Bluetooth veya cihaz arıza durumlarında çalışmayabileceğini.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Gelistiricinin, uygulamanin kullanimindan veya kullanilamamisindan kaynaklanan hicbir dogrudan, dolayli, ozel veya sonucsal zarardan sorumlu tutulamayacagini.</Text>
+              <Text style={styles.text}>Geliştiricinin, uygulamanın kullanımından veya kullanılamamasından kaynaklanan hiçbir doğrudan, dolaylı, özel veya sonuçsal zarardan sorumlu tutulamayacağını.</Text>
             </View>
 
             <View style={styles.emergencyCallout}>
               <Ionicons name="call" size={20} color="#dc2626" />
               <Text style={styles.emergencyCalloutText}>
-                HAYATI TEHLIKE DURUMLARINDA DERHAL 112'YI ARAYIN.{'\n'}
-                AfetNet, resmi acil servislerin yerine gecmez.
+                HAYATİ TEHLİKE DURUMLARINDA DERHAL 112&apos;Yİ ARAYIN.{'\n'}
+                AfetNet, resmi acil servislerin yerine geçmez.
               </Text>
             </View>
 
-            <Text style={styles.sectionTitle}>2. Kullanici Icerigi (UGC)</Text>
+            <Text style={styles.sectionTitle}>2. Kullanıcı İçeriği (UGC)</Text>
             <Text style={styles.text}>
-              AfetNet, kullanicilarin mesajlasmasina ve harita uzerinde isaretleme yapmasina olanak tanir.
-              Asagidaki davranislara <Text style={styles.bold}>KESINLIKLE TOLERANS GOSTERILMEZ</Text>:
+              AfetNet, kullanıcıların mesajlaşmasına ve harita üzerinde işaretleme yapmasına olanak tanır.
+              Aşağıdaki davranışlara <Text style={styles.bold}>KESİNLİKLE TOLERANS GÖSTERİLMEZ</Text>:
             </Text>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Hakaret, kufur, nefret soylemi veya taciz edici icerikler.</Text>
+              <Text style={styles.text}>Hakaret, küfür, nefret söylemi veya taciz edici içerikler.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Yasa disi aktiviteleri tesvik eden veya pornografik materyaller.</Text>
+              <Text style={styles.text}>Yasa dışı aktiviteleri teşvik eden veya pornografik materyaller.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Yanlis ihbarlar veya panik yaratmayi amaclayan dezenformasyon.</Text>
+              <Text style={styles.text}>Yanlış ihbarlar veya panik yaratmayı amaçlayan dezenformasyon.</Text>
             </View>
 
-            <Text style={styles.sectionTitle}>3. Yaptirimlar</Text>
+            <Text style={styles.sectionTitle}>3. Yaptırımlar</Text>
             <Text style={styles.text}>
-              Bu kurallari ihlal eden kullanicilar:
+              Bu kuralları ihlal eden kullanıcılar:
             </Text>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Hesaplari askiya alinabilir veya kalici olarak kapatilabilir.</Text>
+              <Text style={styles.text}>Hesapları askıya alınabilir veya kalıcı olarak kapatılabilir.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Ilgili icerikler kaldirmaya tabi tutulabilir.</Text>
+              <Text style={styles.text}>İlgili içerikler kaldırmaya tabi tutulabilir.</Text>
             </View>
             <View style={styles.bulletPoint}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.text}>Gerektiginde yasal mercilere bildirilecektir.</Text>
+              <Text style={styles.text}>Gerektiğinde yasal mercilere bildirilecektir.</Text>
             </View>
 
             <Text style={styles.sectionTitle}>4. Raporlama</Text>
             <Text style={styles.text}>
-              Rahatsiz edici bir icerik veya kullanici gordugunuzde support@afetnet.app adresine bildirimde bulunabilirsiniz.
-              Uygunsuz icerik bildirimleriniz tarafimiza iletilir ve en kisa surede degerlendirilir.
+              Rahatsız edici bir içerik veya kullanıcı gördüğünüzde support@afetnet.app adresine bildirimde bulunabilirsiniz.
+              Uygunsuz içerik bildirimleriniz tarafımıza iletilir ve en kısa sürede değerlendirilir.
             </Text>
 
             <Text style={styles.sectionTitle}>5. Lisans ve Kapsam</Text>
             <Text style={styles.text}>
-              AfetNet size kisisel, devredilemez ve ticari olmayan kullanim lisansi verir.
-              Uygulama kullanimi, bu sozlesmeye ek olarak Apple Standart Son Kullanici Lisans Sozlesmesi (EULA) kosullarina da tabidir.
+              AfetNet size kişisel, devredilemez ve ticari olmayan kullanım lisansı verir.
+              Uygulama kullanımı, bu sözleşmeye ek olarak Apple Standart Son Kullanıcı Lisans Sözleşmesi (EULA) koşullarına da tabidir.
             </Text>
 
-            <Text style={styles.sectionTitle}>6. Veri Guvenligi</Text>
+            <Text style={styles.sectionTitle}>6. Veri Güvenliği</Text>
             <Text style={styles.text}>
-              AfetNet, aktarilan verileri guvenli sekilde islemeye calisir; ancak ag kesintisi, cihaz arizasi veya ucuncu taraf altyapi sorunlarinda
-              iletimin kesintisiz olacagi garanti edilmez.
+              AfetNet, aktarılan verileri güvenli şekilde işlemeye çalışır; ancak ağ kesintisi, cihaz arızası veya üçüncü taraf altyapı sorunlarında
+              iletimin kesintisiz olacağı garanti edilmez.
             </Text>
 
-            <Text style={styles.sectionTitle}>7. Iletisim</Text>
+            <Text style={styles.sectionTitle}>7. İletişim</Text>
             <Text style={styles.text}>
-              Sorulariniz icin: support@afetnet.app{'\n'}
-              Gelistirici: Gokhan Camci — Istanbul, Turkiye
+              Sorularınız için: support@afetnet.app{'\n'}
+              Geliştirici: Gökhan Çamcı — İstanbul, Türkiye
             </Text>
 
             <View style={{ height: 100 }} />

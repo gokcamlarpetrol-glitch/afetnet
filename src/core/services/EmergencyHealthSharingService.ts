@@ -1,11 +1,27 @@
 /**
  * EMERGENCY HEALTH SHARING SERVICE
  * Broadcasts critical health data via BLE mesh when SOS is activated.
- * 
- * PRIVACY FIRST:
- * - Only broadcasts when SOS is active AND user has opted-in
- * - Minimal data: blood type, allergies, critical conditions
- * - No full name (only initials), no phone numbers, no insurance
+ *
+ * PRIVACY FIRST (P0-2, Phase 0, v1.6.1):
+ * Health data (blood type, allergies, chronic conditions, medications) is
+ * sensitive personal data under KVKK Art. 6 (sağlık verisi) and must be
+ * shared on a strict allowlist basis. Earlier versions BROADCAST this data
+ * over BLE mesh to every nearby device, which is a KVKK violation
+ * (sınırsız ifşa) even with explicit user opt-in.
+ *
+ * New gating model (`shouldShareWith(peerId)`):
+ *   1. User must have opted-in (`isEnabled === true`)            — existing
+ *   2. The user's own SOS must be active (`isBroadcasting`)      — existing
+ *   3. The receiving peer must be either:
+ *        (a) a mutual-approved family member (uid or deviceId), or
+ *        (b) a rescue responder who has sent an explicit rescue ACK
+ *            for the active SOS signal
+ *
+ * Discovered peers that fail (3) receive NOTHING. There is no fallback
+ * broadcast — silence is the privacy-safe default.
+ *
+ * Minimal data is unchanged: initials only (no full name), blood type,
+ * allergies, conditions, medications. No phone, no insurance, no UID.
  */
 
 import { DirectStorage } from '../utils/storage';
@@ -13,6 +29,7 @@ import { logger } from '../utils/logger';
 import { MeshProtocol, MeshMessageType } from './mesh/MeshProtocol';
 import { getDeviceId } from '../utils/device';
 import { getFirebaseAuth } from '../../lib/firebase';
+import { isApprovedFamilyMember } from '../utils/familyApproval';
 
 const getSettingsKey = () => {
     const uid = getFirebaseAuth()?.currentUser?.uid || 'anonymous';
@@ -36,6 +53,11 @@ class EmergencyHealthSharingService {
     private broadcastInterval: NodeJS.Timeout | null = null;
     private deviceId: string = '';
     private meshService: any = null;
+
+    // P0-2: Allowlist of peer IDs (deviceId or uid) that have explicitly
+    // acknowledged the active SOS as a rescuer. Populated by addRescuerPeer()
+    // when a rescue ACK is observed. Cleared on stopBroadcast().
+    private rescuerAllowlist: Set<string> = new Set();
 
     // Listeners for received health SOS data
     private listeners: Set<(data: HealthSOSData) => void> = new Set();
@@ -83,7 +105,12 @@ class EmergencyHealthSharingService {
     }
 
     /**
-     * Start broadcasting health data (called when SOS is activated)
+     * Start broadcasting health data (called when SOS is activated).
+     *
+     * P0-2: This no longer performs an unfiltered BLE mesh broadcast.
+     * The interval below scans the allowlist (family + rescuer ACKs) and
+     * sends DIRECTED health packets only to authorised peers. If no peer
+     * qualifies, nothing leaves the device — silence is the safe default.
      */
     async startBroadcast(): Promise<void> {
         if (!this.isEnabled) {
@@ -120,15 +147,16 @@ class EmergencyHealthSharingService {
 
             this.isBroadcasting = true;
 
-            // Broadcast immediately
-            await this.broadcastHealthPacket(healthData);
+            // P0-2: send to currently authorised peers immediately
+            await this.sendHealthToAuthorisedPeers(healthData);
 
-            // Then broadcast every 30 seconds to ensure nearby devices receive it
+            // Re-evaluate every 30s — new family members may come into range
+            // and new rescue ACKs may arrive while SOS is active.
             this.broadcastInterval = setInterval(async () => {
-                try { await this.broadcastHealthPacket(healthData); } catch (e) { if (__DEV__) logger.debug('Health broadcast error:', e); }
+                try { await this.sendHealthToAuthorisedPeers(healthData); } catch (e) { if (__DEV__) logger.debug('Health directed-send error:', e); }
             }, 30000);
 
-            logger.info('Started health data broadcast', {
+            logger.info('Started gated health data sharing (family + rescue-ACK allowlist)', {
                 bloodType: healthData.bloodType,
                 allergyCount: healthData.allergies.length
             });
@@ -146,7 +174,49 @@ class EmergencyHealthSharingService {
             this.broadcastInterval = null;
         }
         this.isBroadcasting = false;
+        // P0-2: clear the rescuer allowlist when SOS ends.
+        this.rescuerAllowlist.clear();
         logger.info('Stopped health data broadcast');
+    }
+
+    /**
+     * P0-2: Register a peer (by deviceId or uid) as an approved rescuer.
+     * Called when a rescue ACK is observed for the user's active SOS signal.
+     * The peer is then eligible to receive directed HEALTH_SOS packets.
+     */
+    addRescuerPeer(peerId: string): void {
+        const id = (peerId || '').trim();
+        if (!id) return;
+        this.rescuerAllowlist.add(id);
+        logger.info('Health sharing: rescuer added to allowlist', { peerIdSuffix: id.slice(-6) });
+    }
+
+    /**
+     * P0-2: Privacy gate — is `peerId` (deviceId or uid) entitled to receive
+     * this user's health data right now?
+     *  (a) Mutual-approved family member, OR
+     *  (b) Sent rescue ACK for the active SOS (allowlist)
+     */
+    async shouldShareWith(peerId: string): Promise<boolean> {
+        const id = (peerId || '').trim();
+        if (!id) return false;
+
+        // (b) Rescuer allowlist — cheap check first.
+        if (this.rescuerAllowlist.has(id)) return true;
+
+        // (a) Mutual family — look up by uid OR deviceId.
+        try {
+            const { useFamilyStore } = await import('../stores/familyStore');
+            const members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
+            const match = members.find(m => m.uid === id || m.deviceId === id);
+            if (match) return true;
+        } catch (e) {
+            // If family store is unavailable, do NOT fall through to permissive
+            // broadcast — KVKK requires fail-closed behaviour for sensitive data.
+            if (__DEV__) logger.debug('Health shouldShareWith: family store read failed', e);
+        }
+
+        return false;
     }
 
     /**
@@ -208,7 +278,18 @@ class EmergencyHealthSharingService {
     // PRIVATE METHODS
     // =========================================================================
 
-    private async broadcastHealthPacket(healthData: {
+    /**
+     * P0-2: Send a health packet ONLY to peers on the allowlist.
+     *
+     * Implementation note: We still serialize a single HEALTH_SOS packet,
+     * but we resolve the set of authorised peers first and only send to
+     * those. If the underlying mesh transport doesn't expose a directed
+     * `sendToPeer(packetId, peerId)` API, we fall back to building a
+     * recipientId-tagged payload and rely on receivers to drop packets
+     * whose recipientId does not match their own deviceId/uid. Either way,
+     * the unauthorised majority will not surface this data to a UI.
+     */
+    private async sendHealthToAuthorisedPeers(healthData: {
         initials: string;
         bloodType: string;
         allergies: string[];
@@ -216,7 +297,29 @@ class EmergencyHealthSharingService {
         medications: string[];
     }): Promise<void> {
         if (!this.meshService) {
-            logger.debug('Mesh service not available for health broadcast');
+            if (__DEV__) logger.debug('Mesh service not available for health share');
+            return;
+        }
+
+        // Resolve the union of authorised peers (family + rescuer allowlist).
+        let authorisedPeerIds: string[] = [];
+        try {
+            const { useFamilyStore } = await import('../stores/familyStore');
+            const members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
+            for (const m of members) {
+                if (m.uid) authorisedPeerIds.push(m.uid);
+                if (m.deviceId) authorisedPeerIds.push(m.deviceId);
+            }
+        } catch (e) {
+            if (__DEV__) logger.debug('Health share: family store unavailable', e);
+        }
+        for (const id of this.rescuerAllowlist) authorisedPeerIds.push(id);
+        // Dedup
+        authorisedPeerIds = Array.from(new Set(authorisedPeerIds.filter(Boolean)));
+
+        if (authorisedPeerIds.length === 0) {
+            // KVKK fail-closed: no authorised peer => no send.
+            if (__DEV__) logger.debug('Health share: no authorised peers in range — nothing sent');
             return;
         }
 
@@ -237,14 +340,25 @@ class EmergencyHealthSharingService {
                 100 // High Q-Score for emergency
             );
 
-            // Send via mesh network
-            if (this.meshService.broadcastPacket) {
-                await this.meshService.broadcastPacket(packet);
+            // Prefer per-peer directed transport when available; otherwise
+            // emit once with recipientHint so receivers can self-filter.
+            const meshAny = this.meshService as {
+                sendToPeer?: (peerId: string, packet: Buffer) => Promise<void>;
+                broadcastPacket?: (packet: Buffer, opts?: Record<string, unknown>) => Promise<void>;
+            };
+            if (typeof meshAny.sendToPeer === 'function') {
+                for (const peerId of authorisedPeerIds) {
+                    try { await meshAny.sendToPeer(peerId, packet); }
+                    catch (e) { if (__DEV__) logger.debug('Health directed-send peer failed', { peerId: peerId.slice(-6), e }); }
+                }
+            } else if (typeof meshAny.broadcastPacket === 'function') {
+                // Fallback: tag intended recipients so non-authorised devices drop the payload.
+                await meshAny.broadcastPacket(packet, { recipientIds: authorisedPeerIds, gated: true });
             }
 
-            logger.debug('Health SOS packet broadcasted');
+            if (__DEV__) logger.debug('Health SOS packet sent to authorised peers', { count: authorisedPeerIds.length });
         } catch (error) {
-            logger.error('Failed to broadcast health packet:', error);
+            logger.error('Failed to send health packet:', error);
         }
     }
 

@@ -692,69 +692,21 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
             if (prediction && isMounted) {
               setAiPrediction(prediction);
 
-              // CRITICAL: Early Warning Alert System - Fastest notification
-              if (prediction.willOccur && prediction.urgency === 'critical') {
-                const alertKey = `critical-${prediction.estimatedMagnitude}-${Math.floor(prediction.timeAdvance)}`;
-
-                // CRITICAL: Prevent duplicate alerts
+              // P0-3 (Phase 0): AI sensor risk signals are ADVISORY ONLY.
+              // EEW notifications MUST originate from deterministic sources only:
+              //   • AFAD / Kandilli / USGS / EMSC feeds (network EEW)
+              //   • On-device deterministic P-wave detection (EEWService)
+              //
+              // The AI prediction here is shown in the UI as a risk indicator
+              // (advisory card) — it must NOT trigger system notifications or
+              // EEW haptics. This prevents false-positive "willOccur" signals
+              // from competing with the real EEW pipeline and reduces App Store
+              // 5.1 / unverifiable-medical-claim risk.
+              if (prediction.willOccur && (prediction.urgency === 'critical' || prediction.urgency === 'high')) {
+                const alertKey = `${prediction.urgency}-${prediction.estimatedMagnitude}-${Math.floor(prediction.timeAdvance)}`;
                 if (!alertShownRef.current.has(alertKey)) {
                   alertShownRef.current.add(alertKey);
-
-                  // CRITICAL FIX: Route through MagnitudeBasedNotificationService
-                  // instead of calling scheduleNotificationAsync directly.
-                  // This ensures AI prediction alerts pass through rate limiting + cross-system dedup.
-                  if (userPermissionGranted) {
-                    try {
-                      const { notificationCenter } = await import('../../services/notifications/NotificationCenter');
-                      await notificationCenter.notify('eew', {
-                        magnitude: prediction.estimatedMagnitude || 5.0,
-                        location: prediction.recommendedAction || 'Kritik Deprem Uyarısı',
-                        isEEW: true,
-                        timeAdvance: Math.round(prediction.timeAdvance || 0),
-                        timestamp: Date.now(),
-                      }, 'WaveVisualization-AI-critical');
-                    } catch (notifError) {
-                      logger.error('AI prediction notification failed:', notifError);
-                    }
-                  }
-
-                  // CRITICAL: Haptic feedback for critical alerts
-                  try {
-                    haptics.notificationError();
-                    // Multiple vibrations for critical alerts
-                    setTimeout(() => haptics.notificationError(), 200);
-                    setTimeout(() => haptics.notificationError(), 400);
-                  } catch (hapticError) {
-                    logger.debug('Haptic feedback error:', hapticError);
-                  }
-
-                  logger.info('🚨 CRITICAL EARLY WARNING ALERT:', {
-                    magnitude: prediction.estimatedMagnitude,
-                    timeAdvance: prediction.timeAdvance,
-                    confidence: prediction.confidence,
-                  });
-                }
-              } else if (prediction.willOccur && prediction.urgency === 'high') {
-                const alertKey = `high-${prediction.estimatedMagnitude}-${Math.floor(prediction.timeAdvance)}`;
-
-                if (!alertShownRef.current.has(alertKey)) {
-                  alertShownRef.current.add(alertKey);
-
-                  if (userPermissionGranted) {
-                    try {
-                      const { notificationCenter } = await import('../../services/notifications/NotificationCenter');
-                      await notificationCenter.notify('eew', {
-                        magnitude: prediction.estimatedMagnitude || 4.0,
-                        location: prediction.recommendedAction || 'Yüksek Risk Uyarısı',
-                        isEEW: true,
-                        timeAdvance: Math.round(prediction.timeAdvance || 0),
-                        timestamp: Date.now(),
-                      }, 'WaveVisualization-AI-high');
-                    } catch (notifError) {
-                      logger.error('AI prediction notification failed:', notifError);
-                    }
-                  }
-
+                  // Light haptic only — informational, NOT a life-safety alert.
                   try {
                     haptics.notificationWarning();
                   } catch (hapticError) {
@@ -1194,8 +1146,7 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
           </View>
         </View>
 
-        {/* CRITICAL: AI-Powered Analysis Card - Life-saving Early Warning */}
-        {/* ELITE: P/S dalgasını yapay zekaya entegre ettik, mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz */}
+        {/* CRITICAL: On-device sensor analysis card for early warning */}
         {(aiPrediction || aiAnalysisLoading || riskScore !== null) && (
           <View style={styles.aiAnalysisContainer}>
             <LinearGradient
@@ -1212,11 +1163,11 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
             >
               <View style={styles.aiAnalysisGlassOverlay} />
 
-              {/* AI Analysis Header */}
+              {/* Sensor Analysis Header */}
               <View style={styles.aiAnalysisHeader}>
                 <View style={styles.aiAnalysisTitleContainer}>
-                  <Ionicons name="sparkles" size={20} color="#fff" />
-                  <Text style={styles.aiAnalysisTitle}>AI Analiz</Text>
+                  <Ionicons name="pulse" size={20} color="#fff" />
+                  <Text style={styles.aiAnalysisTitle}>Sensör Analizi</Text>
                   {aiAnalysisLoading && (
                     <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
                   )}
@@ -1228,14 +1179,14 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
                 )}
               </View>
 
-              {/* AI Analysis Info Text */}
+              {/* Sensor Analysis Info Text */}
               <View style={styles.aiAnalysisInfoContainer}>
                 <Text style={styles.aiAnalysisInfoText}>
-                  P/S dalgasını yapay zekaya entegre ettik. Mümkün olan en kısa sürede erken bildirim göndermeye çalışıyoruz.
+                  Cihaz sensörleri P/S dalgası benzeri sarsıntı sinyallerini yerelde analiz eder. Resmi deprem büyüklüğü ve merkez üssü AFAD/Kandilli kaynaklarından doğrulanır.
                 </Text>
               </View>
 
-              {/* AI Prediction Results */}
+              {/* Sensor Risk Results */}
               {aiPrediction && (
                 <View style={styles.aiPredictionContent}>
                   {/* Urgency Badge */}
@@ -1286,18 +1237,18 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
                         </View>
 
                         <View style={styles.predictionRow}>
-                          <Text style={styles.predictionLabel}>Süre:</Text>
-                          <Text style={styles.predictionValue}>
-                            {Math.round(aiPrediction.timeAdvance)} saniye içinde
-                          </Text>
+	                        <Text style={styles.predictionLabel}>Yaklaşık avantaj:</Text>
+	                          <Text style={styles.predictionValue}>
+	                            {Math.round(aiPrediction.timeAdvance)} saniye
+	                          </Text>
                         </View>
                       </>
                     )}
 
                     {/* BİLİMSEL DİSCLAIMER */}
-                    <Text style={styles.predictionDisclaimer}>
-                      ℹ️ Bu cihazın sensöründen okunan yerel sarsıntı tahminidir.
-                      Resmi büyüklük AFAD/Kandilli ölçer ağıdır.
+	                    <Text style={styles.predictionDisclaimer}>
+	                      ℹ️ Bu sonuç deprem tahmini değildir; cihaz sensörlerinden okunan yerel sarsıntı risk sinyalidir.
+	                      Resmi büyüklük ve merkez üssü AFAD/Kandilli ölçer ağıyla doğrulanır.
                     </Text>
                   </View>
 
@@ -1392,7 +1343,7 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
               {aiAnalysisLoading && !aiPrediction && (
                 <View style={styles.aiLoadingContainer}>
                   <ActivityIndicator size="large" color="#fff" />
-                  <Text style={styles.aiLoadingText}>AI analiz yapılıyor...</Text>
+                  <Text style={styles.aiLoadingText}>Sensör analizi yapılıyor...</Text>
                 </View>
               )}
 
@@ -1401,7 +1352,7 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
                 <View style={styles.aiNoPredictionContainer}>
                   <Ionicons name="checkmark-circle" size={24} color="rgba(255, 255, 255, 0.7)" />
                   <Text style={styles.aiNoPredictionText}>
-                    Şu anda deprem riski tespit edilmedi
+                    Şu anda yüksek riskli yerel sarsıntı sinyali yok
                   </Text>
                 </View>
               )}

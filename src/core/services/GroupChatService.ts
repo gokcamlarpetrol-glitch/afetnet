@@ -1035,6 +1035,65 @@ class GroupChatService {
     async loadMessages(groupId: string, limit: number = 50): Promise<GroupMessage[]> {
         return loadGroupMessages(groupId, limit);
     }
+
+    /**
+     * P0-12: Accept a message that arrived over BLE mesh and route it into the
+     * group's local store. Called from MeshMessageBridge when the mesh layer
+     * detects either a `to: 'group:<id>'` route or a `groupId` field in the
+     * payload JSON.
+     *
+     * We deliberately don't try to re-broadcast over the cloud here — Firestore
+     * already fan-outs group messages via its own subscription. If the same
+     * message later arrives via cloud, MeshStore dedup (by id) prevents a
+     * duplicate render.
+     */
+    async ingestMeshMessage(groupId: string, mesh: MeshMessage): Promise<void> {
+        if (!groupId || !mesh) return;
+
+        // Parse the payload if it's a GroupChat JSON envelope.
+        let parsed: Partial<GroupMessage> | null = null;
+        try {
+            if (typeof mesh.content === 'string' && mesh.content.startsWith('{')) {
+                const obj = JSON.parse(mesh.content) as Record<string, unknown>;
+                parsed = {
+                    id: (typeof obj.messageId === 'string' && obj.messageId) || mesh.id,
+                    from: typeof obj.from === 'string' ? obj.from : mesh.senderId,
+                    fromName: typeof obj.senderName === 'string' ? obj.senderName : mesh.senderName,
+                    type: (obj.type as GroupMessage['type']) || 'CHAT',
+                    content: typeof obj.content === 'string' ? obj.content : '',
+                    timestamp: typeof obj.timestamp === 'number' ? obj.timestamp : mesh.timestamp,
+                    mediaType: typeof obj.mediaType === 'string' ? (obj.mediaType as GroupMessage['mediaType']) : undefined,
+                    mediaUrl: typeof obj.mediaUrl === 'string' ? obj.mediaUrl : undefined,
+                    mediaDuration: typeof obj.mediaDuration === 'number' ? obj.mediaDuration : undefined,
+                    mediaThumbnail: typeof obj.mediaThumbnail === 'string' ? obj.mediaThumbnail : undefined,
+                    location: (typeof obj.location === 'object' && obj.location !== null) ? obj.location as GroupMessage['location'] : undefined,
+                    replyTo: typeof obj.replyTo === 'string' ? obj.replyTo : undefined,
+                    replyPreview: typeof obj.replyPreview === 'string' ? obj.replyPreview : undefined,
+                };
+            }
+        } catch {
+            // Not a JSON envelope — fall back to raw mesh text.
+        }
+
+        const groupMessage: GroupMessage = {
+            id: parsed?.id ?? mesh.id,
+            from: parsed?.from ?? mesh.senderId,
+            fromName: parsed?.fromName ?? mesh.senderName,
+            type: parsed?.type ?? 'CHAT',
+            content: parsed?.content ?? mesh.content,
+            timestamp: parsed?.timestamp ?? mesh.timestamp,
+            ...(parsed?.mediaType ? { mediaType: parsed.mediaType } : {}),
+            ...(parsed?.mediaUrl ? { mediaUrl: parsed.mediaUrl } : {}),
+            ...(typeof parsed?.mediaDuration === 'number' ? { mediaDuration: parsed.mediaDuration } : {}),
+            ...(parsed?.mediaThumbnail ? { mediaThumbnail: parsed.mediaThumbnail } : {}),
+            ...(parsed?.location ? { location: parsed.location } : {}),
+            ...(parsed?.replyTo ? { replyTo: parsed.replyTo } : {}),
+            ...(parsed?.replyPreview ? { replyPreview: parsed.replyPreview } : {}),
+        } as GroupMessage;
+
+        // Mirror into MeshStore so the unified renderer picks it up.
+        this.syncMessagesToMeshStore(groupId, [groupMessage]);
+    }
 }
 
 // Singleton

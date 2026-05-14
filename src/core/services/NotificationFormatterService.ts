@@ -15,6 +15,8 @@ export interface FormattedNotification {
   data: any;
 }
 
+const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
+
 class NotificationFormatterService {
   private truncate(text: string, maxLength: number): string {
     if (!text || text.length <= maxLength) {
@@ -39,7 +41,7 @@ class NotificationFormatterService {
         title: `🚨 DEPREM UYARISI (${magnitude.toFixed(1)})`,
         body: `Sarsıntı Bekleniyor! ${location} (~${Math.max(0, Math.round(timeAdvance || 0))}sn)`,
         priority: 'critical',
-        sound: 'siren.wav',
+        sound: EMERGENCY_NOTIFICATION_SOUND,
         vibrationPattern: [0, 500, 200, 500, 200, 500],
         ttsText: `Dikkat! Deprem uyarısı. ${location} bölgesinde ${magnitude.toFixed(1)} büyüklüğünde deprem bekleniyor. Güvenli yere geçin.`,
         categoryId: 'earthquake', // ELITE: Interactive actions
@@ -64,7 +66,7 @@ class NotificationFormatterService {
       title: `🆘 ACİL DURUM: ${from}`,
       body: message || 'Acil yardım çağrısı alındı. Konumu görmek için dokunun.',
       priority: 'critical',
-      sound: 'siren.wav',
+      sound: EMERGENCY_NOTIFICATION_SOUND,
       vibrationPattern: [0, 1000, 500, 1000],
       ttsText: `Acil durum çağrısı! ${from} yardım istiyor.`,
       categoryId: 'sos', // ELITE: Interactive actions
@@ -104,6 +106,7 @@ class NotificationFormatterService {
     source: string,
     imageUrl?: string,
     showPreview: boolean = true,
+    metadata: { url?: string; articleId?: string; publishedAt?: number } = {},
   ): FormattedNotification {
     const safeTitle = this.truncate(title, 90);
     const safeSummary = showPreview
@@ -115,7 +118,16 @@ class NotificationFormatterService {
       body: safeSummary,
       priority: 'normal',
       categoryId: 'news', // ELITE: Interactive actions
-      data: { type: 'news', source, imageUrl },
+      data: {
+        type: 'news',
+        title,
+        summary,
+        source,
+        imageUrl,
+        url: metadata.url,
+        articleId: metadata.articleId,
+        publishedAt: metadata.publishedAt || Date.now(),
+      },
     };
 
     // ELITE: Add rich media attachment if available

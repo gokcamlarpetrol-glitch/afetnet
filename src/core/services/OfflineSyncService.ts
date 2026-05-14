@@ -24,7 +24,7 @@ const MAX_SYNC_QUEUE_SIZE = 500;
 
 export interface SyncItem {
   id: string;
-  type: 'message' | 'location' | 'status' | 'sos' | 'save' | 'update' | 'delete' | 'batch';
+  type: 'message' | 'location' | 'status' | 'sos' | 'save' | 'update' | 'delete' | 'contact_request' | 'batch';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any;
   timestamp: number;
@@ -259,6 +259,20 @@ class OfflineSyncService {
         const ok = await firebaseDataService.deleteFamilyMember(uid, memberId);
         if (!ok) {
           throw new Error('Family delete sync returned false');
+        }
+        break;
+      }
+      case 'contact_request': {
+        const { contactRequestService } = await import('./ContactRequestService');
+        const toUserId = typeof item.data?.toUserId === 'string' ? item.data.toUserId : '';
+        const toQrId = typeof item.data?.toQrId === 'string' ? item.data.toQrId : toUserId;
+        const message = typeof item.data?.message === 'string' ? item.data.message : undefined;
+        if (!toUserId || uid === 'unknown') {
+          throw new Error('Invalid contact request payload for family sync');
+        }
+        const ok = await contactRequestService.sendContactRequest(toUserId, toQrId, message);
+        if (!ok) {
+          throw new Error('Contact request sync returned false');
         }
         break;
       }

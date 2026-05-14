@@ -29,6 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
     unknown: '#64748b',
 };
 const isGeneratedLocalFamilyId = (value: string): boolean => value.startsWith('family-');
+const TELEMETRY_STALE_MS = 2 * 60 * 60 * 1000;
 
 interface FamilyMapViewProps {
     members: FamilyMember[];
@@ -160,6 +161,12 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     const hasRecentSignal = !!normalizedLastSeen && (Date.now() - normalizedLastSeen) < 10 * 60 * 1000;
                     const isLastKnownLocation = resolvedLocation.source === 'lastKnown';
                     const isOnline = !isLastKnownLocation && (member.isOnline === true || hasRecentSignal);
+                    const normalizedBatteryTs = normalizeTimestampMs(
+                        member.batteryUpdatedAt ?? member.location?.timestamp ?? member.lastKnownLocation?.timestamp,
+                    );
+                    const batteryLevel = member.batteryLevel;
+                    const isBatteryStale = !!normalizedBatteryTs && Date.now() - normalizedBatteryTs > TELEMETRY_STALE_MS;
+                    const showBattery = batteryLevel !== undefined && batteryLevel > 0 && !isBatteryStale;
 
                     return (
                         <React.Fragment key={member.uid}>
@@ -215,22 +222,22 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                                     </View>
 
                                     {/* Battery badge */}
-                                    {member.batteryLevel !== undefined && member.batteryLevel > 0 && (
+                                    {showBattery && (
                                         <View
                                             style={[
                                                 styles.batteryBadge,
                                                 {
                                                     backgroundColor:
-                                                        member.batteryLevel < 20
+                                                        batteryLevel < 20
                                                             ? '#ef4444'
-                                                            : member.batteryLevel < 50
+                                                            : batteryLevel < 50
                                                                 ? '#f59e0b'
                                                                 : '#22c55e',
                                                 },
                                             ]}
                                         >
                                             <Text style={styles.batteryText}>
-                                                {member.batteryLevel}%
+                                                {batteryLevel}%
                                             </Text>
                                         </View>
                                     )}
@@ -313,30 +320,44 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     )}
 
                     {/* Battery */}
-                    {selectedMember.batteryLevel !== undefined && (
-                        <View style={styles.detailRow}>
-                            <Ionicons
-                                name={
-                                    selectedMember.batteryLevel < 20
-                                        ? 'battery-dead'
-                                        : selectedMember.batteryLevel < 50
-                                            ? 'battery-half'
-                                            : 'battery-full'
-                                }
-                                size={16}
-                                color={
-                                    selectedMember.batteryLevel < 20
-                                        ? '#ef4444'
-                                        : selectedMember.batteryLevel < 50
-                                            ? '#f59e0b'
-                                            : '#22c55e'
-                                }
-                            />
-                            <Text style={styles.detailRowText}>
-                                Pil: %{selectedMember.batteryLevel}
-                            </Text>
-                        </View>
-                    )}
+                    {selectedMember.batteryLevel !== undefined && (() => {
+                        const batteryLevel = selectedMember.batteryLevel;
+                        if (batteryLevel === undefined) return null;
+                        const normalizedBatteryTs = normalizeTimestampMs(
+                            selectedMember.batteryUpdatedAt
+                            ?? selectedMember.location?.timestamp
+                            ?? selectedMember.lastKnownLocation?.timestamp,
+                        );
+                        const isBatteryStale = !!normalizedBatteryTs && Date.now() - normalizedBatteryTs > TELEMETRY_STALE_MS;
+                        return (
+                            <View style={styles.detailRow}>
+                                <Ionicons
+                                    name={
+                                        isBatteryStale
+                                            ? 'battery-dead'
+                                            : batteryLevel < 20
+                                                ? 'battery-dead'
+                                                : batteryLevel < 50
+                                                    ? 'battery-half'
+                                                    : 'battery-full'
+                                    }
+                                    size={16}
+                                    color={
+                                        isBatteryStale
+                                            ? '#94a3b8'
+                                            : batteryLevel < 20
+                                                ? '#ef4444'
+                                                : batteryLevel < 50
+                                                    ? '#f59e0b'
+                                                    : '#22c55e'
+                                    }
+                                />
+                                <Text style={styles.detailRowText}>
+                                    {isBatteryStale ? `Pil: eski veri (%${batteryLevel})` : `Pil: %${batteryLevel}`}
+                                </Text>
+                            </View>
+                        );
+                    })()}
 
                     {/* Check-in button */}
                     <Pressable

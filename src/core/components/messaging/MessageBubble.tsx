@@ -112,11 +112,15 @@ export const MessageBubble = React.memo(({ message, isMe, showTail, replyToConte
   // Sanitize content for display
   const displayContent = sanitizeForDisplay(message.content);
 
+  // P0-11: Distinct icons for 'pending' (no network) vs 'sending' (in flight).
+  // Before, both rendered as the same hourglass — users couldn't tell whether
+  // their message was actually leaving the device or just sitting in a queue.
   const getStatusIcon = () => {
     switch (message.status) {
-      case 'sending':
       case 'pending':
-        return 'time-outline';
+        return 'cloud-offline-outline'; // queued waiting for connectivity
+      case 'sending':
+        return 'time-outline';          // actively transmitting
       case 'sent':
         return 'checkmark';
       case 'delivered':
@@ -133,7 +137,22 @@ export const MessageBubble = React.memo(({ message, isMe, showTail, replyToConte
   const getStatusColor = () => {
     if (message.status === 'failed') return '#ef4444';
     if (message.status === 'read') return '#53bdeb'; // WhatsApp blue for read ticks
+    if (message.status === 'pending') return '#94a3b8'; // P0-11: dimmer to signal "not active yet"
     return '#64748b';
+  };
+
+  // P0-11: Localized Turkish label for accessibility — screen readers should
+  // hear "Bekliyor" vs "Gönderiliyor" vs "Gönderildi" instead of just a tick.
+  const getStatusAccessibilityLabel = () => {
+    switch (message.status) {
+      case 'pending':   return 'Bekliyor';
+      case 'sending':   return 'Gönderiliyor';
+      case 'sent':      return 'Gönderildi';
+      case 'delivered': return 'İletildi';
+      case 'read':      return 'Okundu';
+      case 'failed':    return 'Gönderilemedi';
+      default:          return '';
+    }
   };
 
   // ELITE: Render media content based on message type
@@ -302,6 +321,7 @@ export const MessageBubble = React.memo(({ message, isMe, showTail, replyToConte
                 name={getStatusIcon()}
                 size={12}
                 color={getStatusColor()}
+                accessibilityLabel={getStatusAccessibilityLabel()}
               />
             )}
           </View>

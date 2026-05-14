@@ -30,8 +30,23 @@ const TIMEOUT_MS = 10000;
 // With only 2 retries (5.5s total), messages get stuck "pending" forever.
 // 5 retries with 1-15s backoff = ~45s total coverage.
 const RETRY_CONFIG = { maxRetries: 5, baseDelayMs: 1000, maxDelayMs: 15000 };
+const MAX_MESSAGE_PREVIEW_LENGTH = 100;
 
 // ─── HELPERS ──────────────────────────────────────
+
+function toMessagePreview(message: Pick<MessageData, 'content' | 'type' | 'mediaType'>): string {
+  const content = typeof message.content === 'string' ? message.content.trim() : '';
+  if (content) return content.substring(0, MAX_MESSAGE_PREVIEW_LENGTH);
+
+  const mediaType = message.mediaType || message.type;
+  if (mediaType === 'image') return 'Fotoğraf';
+  if (mediaType === 'voice') return 'Sesli mesaj';
+  if (mediaType === 'video') return 'Video';
+  if (mediaType === 'location') return 'Konum paylaşıldı';
+  if (message.type === 'sos' || message.type === 'emergency') return 'Acil durum mesajı';
+
+  return 'Mesaj';
+}
 
 function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -345,7 +360,7 @@ export async function saveMessage(
     try {
       const convRef = doc(db, 'conversations', conversationId);
       await setDoc(convRef, {
-        lastMessage: message.content.substring(0, 100),
+        lastMessage: toMessagePreview(message),
         lastMessageSenderName: message.senderName || '',
         lastMessageAt: message.timestamp,
         updatedAt: Date.now(),
@@ -374,7 +389,7 @@ export async function saveMessage(
       const threadRef = doc(db, 'user_inbox', uid, 'threads', conversationId);
       const inboxData = {
         conversationId,
-        lastMessagePreview: message.content.substring(0, 100),
+        lastMessagePreview: toMessagePreview(message),
         lastMessageSenderName: message.senderName || '',
         lastMessageAt: message.timestamp,
       };

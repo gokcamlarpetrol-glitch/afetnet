@@ -18,7 +18,6 @@
  */
 
 import { createLogger } from '../utils/logger';
-import { openAIService } from '../ai/services/OpenAIService';
 import { ensembleDetectionService, EnsembleResult } from './EnsembleDetectionService';
 import { SensorReading } from './EnsembleDetectionService';
 
@@ -67,15 +66,10 @@ class AIEarthquakePredictionService {
 
     try {
       await ensembleDetectionService.initialize();
-      try {
-        await openAIService.initialize();
-      } catch (openAIError) {
-        logger.warn('OpenAI init failed for AIEarthquakePredictionService, continuing with ensemble-only mode', openAIError);
-      }
       this.isInitialized = true;
 
       if (__DEV__) {
-        logger.info('AIEarthquakePredictionService initialized - Real-time AI prediction active');
+        logger.info('EarthquakeRiskAnalysisService initialized - on-device sensor analysis active');
       }
     } catch (error) {
       logger.error('Failed to initialize AIEarthquakePredictionService:', error);
@@ -117,17 +111,9 @@ class AIEarthquakePredictionService {
       // Step 4: Seismic activity trend
       const activityFactor = this.analyzeSeismicActivityTrend(recentEarthquakes);
 
-      // Step 5: AI-powered prediction (if OpenAI configured)
-      let aiPrediction: { probability: number; timeAdvance: number } | undefined;
-      if (openAIService.isConfigured() && sensorReadings.length >= 100) {
-        aiPrediction = await this.generateAIPrediction(
-          ensembleResult,
-          historicalFactor,
-          precursorFactor,
-          activityFactor,
-          location,
-        );
-      }
+      // Step 5: Remote AI deliberately disabled for life-safety + cost control.
+      // The final alert decision must come from deterministic on-device signal analysis,
+      // not from an LLM.
 
       // Step 6: Combine all factors
       const factors = {
@@ -170,12 +156,12 @@ class AIEarthquakePredictionService {
       }
 
       if (__DEV__ && willOccur) {
-        logger.info(`🔮 AI PREDICTION: ${probability.toFixed(2)}% probability, ${timeAdvance}s advance, ${ensembleResult.estimatedMagnitude.toFixed(1)} magnitude`);
+        logger.info(`Sensor risk signal: ${probability.toFixed(2)} probability, ${timeAdvance}s estimated advantage, ${ensembleResult.estimatedMagnitude.toFixed(1)} local intensity`);
       }
 
       return result;
     } catch (error) {
-      logger.error('AI prediction error:', error);
+      logger.error('Sensor risk analysis error:', error);
       return null;
     }
   }
@@ -293,66 +279,6 @@ class AIEarthquakePredictionService {
   }
 
   /**
-   * Generate AI-powered prediction using OpenAI
-   */
-  private async generateAIPrediction(
-    ensembleResult: EnsembleResult,
-    historicalFactor: number,
-    precursorFactor: number,
-    activityFactor: number,
-    location?: { latitude: number; longitude: number },
-  ): Promise<{ probability: number; timeAdvance: number } | undefined> {
-    try {
-      const prompt = `Deprem tahmini analizi yap:
-
-Ensemble Detection Sonuçları:
-- Güven: ${ensembleResult.confidence}%
-- Büyüklük: ${ensembleResult.estimatedMagnitude}
-- Zaman Avantajı: ${ensembleResult.timeAdvance} saniye
-- Algılama Yöntemleri: ${ensembleResult.detectionMethods.join(', ')}
-
-Faktörler:
-- Tarihsel Desen: ${(historicalFactor * 100).toFixed(0)}%
-- Öncü Sinyaller: ${(precursorFactor * 100).toFixed(0)}%
-- Sismik Aktivite: ${(activityFactor * 100).toFixed(0)}%
-
-Konum: ${location ? `${location.latitude}, ${location.longitude}` : 'Bilinmiyor'}
-
-JSON formatında döndür:
-{
-  "probability": 0.0-1.0,
-  "timeAdvance": saniye,
-  "reasoning": "Kısa açıklama"
-}
-
-Sadece JSON döndür, başka metin ekleme.`;
-
-      const systemPrompt = `Sen bir deprem tahmin uzmanısın. Verilen verileri analiz edip deprem olasılığını hesaplıyorsun. Sadece JSON formatında yanıt ver.`;
-
-      // ELITE: Cost optimization - reduced maxTokens for small JSON response
-      const aiResponse = await openAIService.generateText(prompt, {
-        systemPrompt,
-        maxTokens: 150, // Optimized: Reduced from 200 to save ~$0.00003 per call (small JSON response)
-        temperature: 0.3, // Low temperature for consistent results
-        serviceName: 'AIEarthquakePredictionService', // ELITE: For cost tracking
-      });
-
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          probability: Math.max(0, Math.min(1, parsed.probability || 0.5)),
-          timeAdvance: Math.max(5, Math.min(30, parsed.timeAdvance || 10)),
-        };
-      }
-    } catch (error) {
-      logger.error('AI prediction generation error:', error);
-    }
-
-    return undefined;
-  }
-
-  /**
    * Calculate final probability from all factors
    */
   private calculateProbability(
@@ -426,13 +352,13 @@ Sadece JSON döndür, başka metin ekleme.`;
     timeAdvance: number,
   ): string {
     if (urgency === 'critical') {
-      return `🚨 KRİTİK! ${magnitude.toFixed(1)} büyüklüğünde deprem ${Math.round(timeAdvance)} saniye içinde olabilir! HEMEN güvenli yere geçin!`;
+      return `🚨 KRİTİK SENSÖR UYARISI! ${magnitude.toFixed(1)} tahmini sarsıntı sinyali algılandı. Yaklaşık ${Math.round(timeAdvance)} saniyelik avantaj olabilir. HEMEN güvenli pozisyona geçin!`;
     }
     if (urgency === 'high') {
-      return `⚠️ YÜKSEK RİSK! ${magnitude.toFixed(1)} büyüklüğünde deprem ${Math.round(timeAdvance)} saniye içinde olabilir. Güvenli yere geçin!`;
+      return `⚠️ YÜKSEK SENSÖR RİSKİ! ${magnitude.toFixed(1)} tahmini sarsıntı sinyali algılandı. Yaklaşık ${Math.round(timeAdvance)} saniyelik avantaj olabilir. Güvenli pozisyona geçin!`;
     }
     if (urgency === 'medium') {
-      return `⚠️ ORTA RİSK! Deprem olasılığı yüksek. ${Math.round(timeAdvance)} saniye içinde olabilir. Hazırlıklı olun.`;
+      return `⚠️ ORTA SENSÖR RİSKİ! Cihaz sarsıntı sinyali algılıyor. Hazırlıklı olun ve resmi uyarıları takip edin.`;
     }
     return `ℹ️ Düşük risk seviyesi. Dikkatli olun.`;
   }

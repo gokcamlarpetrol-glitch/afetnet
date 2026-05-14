@@ -72,8 +72,12 @@ async function applyRuntimeSettings(): Promise<void> {
   } catch { /* non-critical */ }
 
   try {
-    const { voiceCommandService } = await import('./services/VoiceCommandService');
-    if (s.voiceCommandEnabled) {
+    // P0-5: VoiceCommandService is feature-flagged off (real recognition not
+    // implemented, only TTS). All entry points already no-op when
+    // VOICE_COMMAND_ENABLED === false. We still call stopListening() defensively
+    // in case a previous build left the service active on this device.
+    const { voiceCommandService, VOICE_COMMAND_ENABLED } = await import('./services/VoiceCommandService');
+    if (VOICE_COMMAND_ENABLED && s.voiceCommandEnabled) {
       await voiceCommandService.initialize();
       await voiceCommandService.startListening();
     } else {
@@ -710,8 +714,20 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       logger.info('✅ Background tasks');
     } catch (e: unknown) { logger.error('Background tasks:', e); }
 
-    if (isAuthed) {
-      syncService?.forceSync?.().catch((e: unknown) => logger.debug('Sync skipped:', e));
+    // P0-11: OfflineSyncService must be initialize()'d BEFORE the first
+    // forceSync. Without this, the service was never started — the NetInfo
+    // listener was never wired up, the queue was never loaded from MMKV,
+    // and messages quietly piled up offline with no chance of being synced
+    // even after connectivity returned. This is the root cause of "mesaj
+    // sent yalan hissi" — the queue existed in memory but no one ever drained it.
+    if (isAuthed && syncService?.initialize) {
+      try {
+        await syncService.initialize();
+        logger.info('✅ OfflineSyncService initialized');
+      } catch (e) {
+        logger.error('OfflineSyncService init failed:', e);
+      }
+      syncService.forceSync?.().catch((e: unknown) => logger.debug('Sync skipped:', e));
     }
 
     offlineMapService?.initialize?.().catch((e: unknown) => logger.debug('Offline map:', e));
@@ -1171,6 +1187,12 @@ export async function shutdownApp() {
     unifiedSOSController.destroy();
   } catch (e) { logger.error('UnifiedSOSController destroy failed:', e); }
 
+  // Cleanup SOSChannelRouter (NetInfo listeners, channel retry timer, outbox state)
+  try {
+    const { sosChannelRouter } = await import('./services/sos/SOSChannelRouter');
+    sosChannelRouter.destroy();
+  } catch (e) { logger.error('SOSChannelRouter destroy failed:', e); }
+
   // HATA 2 FIX: Reset SOS store on logout — clears signalHistory + incomingSOSAlerts.
   // Without this, User B sees User A's SOS history on first login (cross-user data leak).
   try {
@@ -1409,6 +1431,12 @@ export async function shutdownApp() {
     const { notificationCenter } = await import('./services/notifications/NotificationCenter');
     notificationCenter.destroy();
   } catch { /* already stopped */ }
+
+  // Clear notification dedup state to prevent cross-user leakage on account switch
+  try {
+    const { clearNotificationDedup } = await import('./services/NotificationService');
+    clearNotificationDedup();
+  } catch { /* best-effort */ }
 
   // Cleanup GlobalErrorHandler (restore original console.error)
   try {

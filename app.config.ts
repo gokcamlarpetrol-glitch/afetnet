@@ -122,7 +122,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     "expo-secure-store",
     "expo-location",
-    "expo-notifications",
+    [
+      "expo-notifications",
+      {
+        defaultChannel: "default",
+        sounds: [
+          "./assets/emergency-alert.wav",
+          "./assets/sounds/whistle.wav",
+        ],
+      },
+    ],
     "expo-web-browser",
     "expo-asset",
     [
@@ -167,7 +176,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
-    buildNumber: "3",
+    buildNumber: "4",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     // APPLE REJECTION FIX: requireFullScreen must be true because the app:
@@ -235,7 +244,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: "com.gokhancamci.afetnetapp",
-    versionCode: 33,
+    versionCode: 34,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png",

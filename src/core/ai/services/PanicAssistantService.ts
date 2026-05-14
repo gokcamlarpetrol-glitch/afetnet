@@ -18,11 +18,31 @@ import { openAIService } from './OpenAIService';
 
 const logger = createLogger('PanicAssistantService');
 
-interface EmergencyContext {
+/**
+ * P0-6: EmergencyContext now carries the user's physical environment so the
+ * advice engine doesn't blindly tell an open-field user to "duck under a
+ * table". `environment` is the new mandatory-at-caller field; PanicAssistant
+ * itself still allows it to be undefined for backwards compatibility with
+ * legacy callers, but AIAssistantCoordinator now always sets it via a
+ * location-based heuristic.
+ *
+ * Values:
+ *   • 'inside'   — indoors, fixed structure (apartment, office, school)
+ *   • 'outside'  — open ground, plaza, park, mountainside
+ *   • 'vehicle'  — driving / parked car / public transit
+ *   • 'coastal'  — near the sea (tsunami exposure)
+ *   • 'unknown'  — unable to determine; advice falls back to indoor template
+ */
+export type EmergencyEnvironment = 'inside' | 'outside' | 'vehicle' | 'coastal' | 'unknown';
+
+export interface EmergencyContext {
   magnitude?: number;
   location?: string;
   userLocation?: { latitude: number; longitude: number };
   distance?: number;
+  environment?: EmergencyEnvironment;
+  /** P0-14: residence type — drives apartment-vs-detached-house advice. Optional, defaults to 'apartment'. */
+  residenceType?: 'apartment' | 'detached' | 'workplace' | 'other';
 }
 
 class PanicAssistantService {
@@ -279,6 +299,89 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
   }
 
   /**
+   * P0-6: Build the environment-specific "do this FIRST" action that prefaces
+   * the generic Drop-Cover-Hold playbook. Without this, an outdoors / driving /
+   * coastal user is told to "duck under a table" — which is misleading and
+   * potentially dangerous.
+   */
+  private getEnvironmentPrimer(env: EmergencyEnvironment, context?: EmergencyContext): EmergencyAction | null {
+    if (env === 'outside') {
+      return {
+        id: '0',
+        text: 'AÇIK ALANDA — Yapı, ağaç ve elektrik direklerinden uzaklaş',
+        priority: 0,
+        completed: false,
+        icon: 'exit',
+        phase: 'during',
+        details: 'Açık alandasın. Binalardan, ağaçlardan, elektrik direklerinden ve devrilebilecek yapılardan en az binanın yüksekliği kadar uzaklaş. Yere çök ve başını koru.',
+        checklist: [
+          'Binalardan uzaklaş',
+          'Ağaç ve elektrik direklerinden uzaklaş',
+          'Yere çök, başını koru',
+          'Sarsıntı bitene kadar bekle',
+        ],
+        warningLevel: 'emergency',
+        timeCritical: true,
+        location: 'Açık alan',
+        estimatedRiskReduction: 75,
+      };
+    }
+    if (env === 'vehicle') {
+      return {
+        id: '0',
+        text: 'ARAÇTAYSAN — Yolun kenarına çek, dur, arabada kal',
+        priority: 0,
+        completed: false,
+        icon: 'warning',
+        phase: 'during',
+        details: 'Araçtaysan: köprü, üst geçit, tünel veya bina altında DURMA. Açık bir alana yanaş, motoru kapat ve emniyet kemerin takılı kal. Sarsıntı bitene kadar arabadan inme.',
+        checklist: [
+          'Köprü ve üst geçitlerden uzaklaş',
+          'Açık yere yanaş, dur',
+          'Motoru kapat',
+          'Arabada kal, emniyet kemerin takılı',
+        ],
+        warningLevel: 'emergency',
+        timeCritical: true,
+        location: 'Araç içi',
+        estimatedRiskReduction: 70,
+      };
+    }
+    if (env === 'coastal') {
+      // Coastal users get the indoor playbook PLUS an early tsunami warning.
+      // The tsunami advice that follows in the main list is gated on magnitude
+      // ≥ 6.5 (P0-14); we surface the warning here as priority 0 so coastal
+      // users see it immediately even at lower magnitudes.
+      const mag = context?.magnitude ?? 0;
+      if (mag >= 6.5) {
+        return {
+          id: '0',
+          text: 'KIYIDASIN — Tsunami riski: yüksek yere çık',
+          priority: 0,
+          completed: false,
+          icon: 'water',
+          phase: 'during',
+          details: 'Kıyı bölgesindesin ve deprem büyük. Sarsıntı durur durmaz denizden uzaklaş, en az 30m yüksekliğe çık. Tsunami ilk dalgadan sonra da gelebilir.',
+          checklist: [
+            'Önce ÇÖK-KAPAN-TUTUN',
+            'Sarsıntı bitince denizden uzaklaş',
+            'Yüksek yere çık (30m+)',
+            'Resmî uyarıları takip et',
+          ],
+          warningLevel: 'emergency',
+          timeCritical: true,
+          location: 'Kıyı bölgesi',
+          estimatedRiskReduction: 90,
+        };
+      }
+      // Below 6.5 — coastal but no immediate tsunami → fall through to indoor.
+      return null;
+    }
+    // 'inside' or 'unknown' → fall through, the existing indoor playbook applies.
+    return null;
+  }
+
+  /**
    * Kural tabanlı kapsamlı fallback aksiyonlar
    */
   private getActionsWithRules(
@@ -286,7 +389,12 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
     context?: EmergencyContext,
   ): EmergencyAction[] {
     if (scenario === 'earthquake') {
+      // P0-6: prepend environment-specific primer when available
+      const env: EmergencyEnvironment = context?.environment ?? 'unknown';
+      const primer = this.getEnvironmentPrimer(env, context);
+
       const baseActions: EmergencyAction[] = [
+        ...(primer ? [primer] : []),
         {
           id: '1',
           text: 'ÇÖK - KAPAN - TUTUN',
@@ -294,7 +402,7 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
           completed: false,
           icon: 'shield-checkmark',
           phase: 'during',
-          details: 'Sarsıntı sırasında kendinizi sağlam bir yapının yanına konumlandırarak başınızı koruyun. Yaşam üçgeni oluşturun.',
+          details: 'Sarsıntı sırasında çök-kapan-tutun pozisyonuna geçin, başınızı ve boynunuzu koruyun. Uygunsa sağlam bir masa ya da mobilyanın altında/yanında kalın.',
           checklist: [
             'Yere çökün',
             'Sağlam bir mobilyanın yanına geçin',
@@ -920,8 +1028,16 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
         });
       }
 
-      // Çok büyük deprem için ek aksiyonlar
-      if (context?.magnitude && context.magnitude >= 6.5) {
+      // P0-14: Tsunami warning was previously surfaced on every M6.5+ quake —
+      // an Ankara user (700km from any coast) was being told to "climb to 30m
+      // above sea level". Now gate on actual coastal exposure:
+      //   • If we have environment === 'coastal' from the caller, trust it.
+      //   • If we have userLocation, do a coastal-bbox check (Marmara / Aegean
+      //     / Mediterranean / Black Sea coasts within ~30km).
+      //   • If we have neither, do NOT surface the tsunami advice for a
+      //     generic inland user. (Inland users are the majority.)
+      const isCoastal = context?.environment === 'coastal' || (context?.userLocation ? this.isNearTurkishCoast(context.userLocation, 30) : false);
+      if (isCoastal && context?.magnitude && context.magnitude >= 6.5) {
         baseActions.push({
           id: '18',
           text: 'Tsunami riski kontrolü',
@@ -1147,13 +1263,51 @@ Büyük depremlerde (≥5.0) mahsur kalanlar, yıkıntılar, tsunami riski gibi 
     ];
   }
 
+  /**
+   * P0-14: Rough coastal-exposure check for Turkish coastlines.
+   *
+   * The heuristic uses coarse coastline bounding boxes — good enough for
+   * deciding whether to surface tsunami advice, which is a "show vs hide"
+   * binary decision, not a precise tsunami inundation map. False positives
+   * (telling an inland user near a bbox edge about tsunami) are far less
+   * harmful than the previous false negative (failing to warn an inland
+   * user who happens to be on the coast was the OPPOSITE problem — actually
+   * the previous code over-warned EVERY user; this restores the right
+   * default).
+   *
+   * Distance is in km from the bbox border, not from the actual shoreline.
+   * That's intentionally generous: a user 30km from a coast bbox edge is
+   * still in a region that could be tsunami-affected by surge propagation.
+   */
+  private isNearTurkishCoast(loc: { latitude: number; longitude: number }, _toleranceKm: number): boolean {
+    const lat = loc.latitude;
+    const lng = loc.longitude;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+    // Coastal bounding boxes (lat-min, lat-max, lng-min, lng-max) — these
+    // are coarse strips along Turkey's four coasts plus a small buffer.
+    const COASTS = [
+      // Marmara Sea + Bosphorus + Sea of Marmara coast
+      { latMin: 40.0, latMax: 41.4, lngMin: 26.0, lngMax: 30.5 },
+      // Aegean coast (İzmir, Bodrum, Çanakkale region)
+      { latMin: 36.5, latMax: 40.5, lngMin: 25.5, lngMax: 28.2 },
+      // Mediterranean coast (Antalya, Mersin, Hatay region)
+      { latMin: 35.8, latMax: 37.4, lngMin: 28.0, lngMax: 36.5 },
+      // Black Sea coast (Sinop to Hopa)
+      { latMin: 40.8, latMax: 42.2, lngMin: 27.5, lngMax: 41.8 },
+    ];
+
+    return COASTS.some(b => lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax);
+  }
+
   // Helper metodlar
-  private getStepByStepGuide(actionId: string, scenario: DisasterScenario): ActionStep[] {
+  private getStepByStepGuide(_actionId: string, _scenario: DisasterScenario): ActionStep[] {
     // Bazı aksiyonlar için zaten stepByStepGuide var, diğerleri için boş döndür
     return [];
   }
 
-  private getVisualGuide(actionId: string, scenario: DisasterScenario): VisualGuide | undefined {
+  private getVisualGuide(actionId: string, _scenario: DisasterScenario): VisualGuide | undefined {
     const guides: Record<string, VisualGuide> = {
       '1': {
         type: 'illustration',

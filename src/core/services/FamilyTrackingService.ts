@@ -487,6 +487,8 @@ class FamilyTrackingService {
         location.latitude,
         location.longitude,
         'remote',
+        newTimestamp,
+        typeof batteryLevel === 'number' ? { batteryLevel } : undefined,
       ).catch((error) => {
         logger.warn('Failed to sync member location to FamilyStore', error);
       });

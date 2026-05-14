@@ -6,10 +6,30 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { eliteStorage, DirectStorage, waitForStorageReady } from '../utils/storage';
+import {
+  CRITICAL_EEW_NOTIFICATION_MIN_MAGNITUDE,
+  GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE,
+  migrateEarthquakeNotificationDefault,
+} from '../config/earthquakeDefaults';
 
 const SETTINGS_STORE_KEY = 'afetnet-settings';
 const LEGACY_EULA_ACCEPTED_KEY = 'AFETNET_EULA_ACCEPTED';
 const AUTH_CACHE_KEY = 'afetnet_auth_cached';
+const QUIET_HOUR_TIME_REGEX = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+
+export const isValidQuietHourTime = (value: unknown): value is string =>
+  typeof value === 'string' && QUIET_HOUR_TIME_REGEX.test(value);
+
+const sanitizePersistedSettings = (settings: Partial<SettingsState>): Partial<SettingsState> => {
+  const sanitized = { ...settings };
+  if (sanitized.quietHoursStart !== undefined && !isValidQuietHourTime(sanitized.quietHoursStart)) {
+    delete sanitized.quietHoursStart;
+  }
+  if (sanitized.quietHoursEnd !== undefined && !isValidQuietHourTime(sanitized.quietHoursEnd)) {
+    delete sanitized.quietHoursEnd;
+  }
+  return sanitized;
+};
 
 const getPersistedEulaAccepted = (): boolean | null => {
   try {
@@ -108,11 +128,13 @@ interface SettingsState {
 
   // ELITE: Comprehensive Earthquake Settings
   // Notification Thresholds
-  minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 4.0)
+  minMagnitudeForNotification: number; // Minimum magnitude to receive notifications (default: 5.0)
+  earthquakeNotificationDefaultMigratedToM5: boolean; // One-time migration from legacy 4.0 default
   maxDistanceForNotification: number; // Maximum distance in km (0 = unlimited, default: 0)
 
   // Critical Earthquake Settings
-  criticalMagnitudeThreshold: number; // Magnitude threshold for critical alerts (default: 6.0)
+  criticalMagnitudeThreshold: number; // Magnitude threshold for critical alerts (default: 5.5)
+  criticalMagnitudeDefaultMigratedToM55: boolean; // One-time migration from legacy 6.0 default
   criticalDistanceThreshold: number; // Distance threshold for critical alerts (default: 100km)
 
   // Early Warning Settings
@@ -173,6 +195,7 @@ interface SettingsState {
   // ELITE: Compliance
   eulaAccepted: boolean;
   aiDataSharingConsented: boolean; // Apple 5.1.2(i): explicit consent before sharing data with OpenAI
+  sosAmbientAudioEnabled: boolean; // Explicit opt-in before SOS ambient audio recording/upload
   blockedUsers: string[]; // List of blocked user IDs
 }
 
@@ -245,6 +268,7 @@ interface SettingsActions {
   // ELITE: Compliance
   setEulaAccepted: (accepted: boolean) => void;
   setAiDataSharingConsented: (consented: boolean) => void;
+  setSosAmbientAudioEnabled: (enabled: boolean) => void;
   blockUser: (userId: string) => void;
   unblockUser: (userId: string) => void;
   isUserBlocked: (userId: string) => boolean;
@@ -279,10 +303,13 @@ const defaultSettings: SettingsState = {
   verboseLoggingEnabled: false,
 
   // ELITE: Comprehensive Earthquake Settings Defaults
-  // CRITICAL: Default notification threshold is 4.0 M (user requirement)
-  minMagnitudeForNotification: 4.0,
+  // CRITICAL: General earthquake notification default is M5.0+.
+  // Lower magnitudes still appear in "Son Depremler"; users can manually lower this.
+  minMagnitudeForNotification: GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE,
+  earthquakeNotificationDefaultMigratedToM5: true,
   maxDistanceForNotification: 0, // 0 = unlimited
-  criticalMagnitudeThreshold: 6.0,
+  criticalMagnitudeThreshold: CRITICAL_EEW_NOTIFICATION_MIN_MAGNITUDE,
+  criticalMagnitudeDefaultMigratedToM55: true,
   criticalDistanceThreshold: 100,
   eewMinMagnitude: 3.5,
   eewWarningTime: 10,
@@ -322,6 +349,7 @@ const defaultSettings: SettingsState = {
   // ELITE: Compliance — use synchronous MMKV read to prevent EULA flash on app resume
   eulaAccepted: getInitialEulaAccepted(),
   aiDataSharingConsented: false,
+  sosAmbientAudioEnabled: false,
   blockedUsers: [],
 };
 
@@ -356,7 +384,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setVerboseLogging: (enabled) => set({ verboseLoggingEnabled: enabled }),
 
       // ELITE: Comprehensive Earthquake Settings Actions
-      setMinMagnitudeForNotification: (magnitude) => set({ minMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)) }),
+      setMinMagnitudeForNotification: (magnitude) => set({
+        minMagnitudeForNotification: Math.max(0, Math.min(10, magnitude)),
+        earthquakeNotificationDefaultMigratedToM5: true,
+      }),
       setMaxDistanceForNotification: (distance) => set({ maxDistanceForNotification: Math.max(0, distance) }),
       setCriticalMagnitudeThreshold: (magnitude) => set({ criticalMagnitudeThreshold: Math.max(0, Math.min(10, magnitude)) }),
       setCriticalDistanceThreshold: (distance) => set({ criticalDistanceThreshold: Math.max(0, distance) }),
@@ -386,8 +417,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       setNotificationSoundRepeat: (repeat) => set({ notificationSoundRepeat: Math.max(1, Math.min(10, repeat)) }),
       setNotificationMode: (mode) => set({ notificationMode: mode }),
       setQuietHoursEnabled: (enabled) => set({ quietHoursEnabled: enabled }),
-      setQuietHoursStart: (time) => set({ quietHoursStart: time }),
-      setQuietHoursEnd: (time) => set({ quietHoursEnd: time }),
+      setQuietHoursStart: (time) => set((state) => (
+        isValidQuietHourTime(time) ? { quietHoursStart: time } : { quietHoursStart: state.quietHoursStart }
+      )),
+      setQuietHoursEnd: (time) => set((state) => (
+        isValidQuietHourTime(time) ? { quietHoursEnd: time } : { quietHoursEnd: state.quietHoursEnd }
+      )),
       setQuietHoursCriticalOnly: (enabled) => set({ quietHoursCriticalOnly: enabled }),
       setMagnitudeBasedSound: (enabled) => set({ magnitudeBasedSound: enabled }),
       setMagnitudeBasedVibration: (enabled) => set({ magnitudeBasedVibration: enabled }),
@@ -401,6 +436,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set({ eulaAccepted: accepted });
       },
       setAiDataSharingConsented: (consented) => set({ aiDataSharingConsented: consented }),
+      setSosAmbientAudioEnabled: (enabled) => set({ sosAmbientAudioEnabled: enabled }),
 
       blockUser: (userId) => set((state) => ({
         blockedUsers: state.blockedUsers.includes(userId) ? state.blockedUsers : [...state.blockedUsers, userId],
@@ -413,13 +449,20 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       resetToDefaults: () => {
         const eulaAccepted = get().eulaAccepted || getInitialEulaAccepted();
         const aiDataSharingConsented = get().aiDataSharingConsented;
+        const sosAmbientAudioEnabled = get().sosAmbientAudioEnabled;
         persistLegacyEulaAccepted(eulaAccepted);
-        set({ ...defaultSettings, eulaAccepted, aiDataSharingConsented });
+        set({ ...defaultSettings, eulaAccepted, aiDataSharingConsented, sosAmbientAudioEnabled });
       },
     }),
     {
       name: SETTINGS_STORE_KEY,
       storage: createJSONStorage(() => eliteStorage),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...sanitizePersistedSettings(
+          migrateEarthquakeNotificationDefault((persistedState ?? {}) as Partial<SettingsState>),
+        ),
+      }),
       // Preserve synchronously-read eulaAccepted value after async hydration.
       // Without this, Zustand persist can overwrite the sync value with stale data.
       onRehydrateStorage: () => (state, error) => {

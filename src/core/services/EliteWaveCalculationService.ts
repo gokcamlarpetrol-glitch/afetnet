@@ -54,8 +54,18 @@ export interface EliteWaveCalculationResult {
   sWaveArrivalTime: number; // seconds
   
   // Warning time
-  warningTime: number; // seconds (S-wave arrival - P-wave arrival)
+  warningTime: number; // seconds (S-wave arrival - P-wave arrival, THEORETICAL — NOT what user should see)
   warningTimeUncertainty: number; // seconds (±uncertainty)
+
+  // ELITE F2: Real-world warning time accounting for detection latency.
+  // AFAD/Kandilli typically detect ~25s after origin. By the time mobile receives this,
+  // most of the theoretical (P→S) window is already gone. These fields are what the UI
+  // must show — not `warningTime`. See EEWService.ts notifyCallbacks.
+  effectiveWarningTime: number; // seconds remaining until S-wave (max(0, sArrival - elapsed))
+  timeUntilSWave: number; // alias of effectiveWarningTime for clarity
+  elapsedSinceOrigin: number; // seconds since earthquake origin time (origin → now)
+  pWaveAlreadyArrived: boolean; // true if elapsed > pWaveArrival (P-wave passed user)
+  sWaveAlreadyArrived: boolean; // true if elapsed > sWaveArrival (shaking already started)
   
   // Intensity estimates
   estimatedIntensity: number; // Modified Mercalli Intensity (MMI) scale
@@ -853,6 +863,25 @@ class EliteWaveCalculationService {
       const sWaveArrivalTimeMin = Math.max(0, sWaveArrivalTime - arrivalTimeUncertainty);
       const sWaveArrivalTimeMax = sWaveArrivalTime + arrivalTimeUncertainty;
 
+      // ELITE F2: Calculate effective warning time accounting for detection latency.
+      // The theoretical warningTime (sArrival - pArrival) assumes user is alerted at origin.
+      // In reality, AFAD/Kandilli detect ~25s after origin and CF runs ~15s polling.
+      // Origin time validation: if originTime is missing/in-future, treat elapsed as 0
+      // (defensive — assume best-case so we don't suppress alerts on clock skew).
+      const nowMs = Date.now();
+      const rawElapsed = (nowMs - earthquake.originTime) / 1000;
+      const elapsedSinceOrigin = Number.isFinite(rawElapsed) && rawElapsed >= 0 && rawElapsed < 3600
+        ? rawElapsed
+        : 0;
+      const timeUntilSWave = Math.max(0, sWaveArrivalTime - elapsedSinceOrigin);
+      const timeUntilPWave = Math.max(0, pWaveArrivalTime - elapsedSinceOrigin);
+      // Effective warning = (remaining S-wave time) - (remaining P-wave time).
+      // If P-wave already arrived (timeUntilPWave === 0), effective = timeUntilSWave.
+      // If S-wave already arrived (timeUntilSWave === 0), effective = 0 (shaking now).
+      const effectiveWarningTime = Math.max(0, timeUntilSWave - timeUntilPWave);
+      const pWaveAlreadyArrived = elapsedSinceOrigin >= pWaveArrivalTime;
+      const sWaveAlreadyArrived = elapsedSinceOrigin >= sWaveArrivalTime;
+
       const result: EliteWaveCalculationResult = {
         epicentralDistance: Math.round(epicentralDistance * 10) / 10,
         hypocentralDistance: Math.round(hypocentralDistance * 10) / 10,
@@ -862,6 +891,11 @@ class EliteWaveCalculationService {
         sWaveArrivalTime: Math.round(sWaveArrivalTime * 10) / 10,
         warningTime: Math.round(warningTime * 10) / 10,
         warningTimeUncertainty: Math.round(arrivalTimeUncertainty * 10) / 10,
+        effectiveWarningTime: Math.round(effectiveWarningTime * 10) / 10,
+        timeUntilSWave: Math.round(timeUntilSWave * 10) / 10,
+        elapsedSinceOrigin: Math.round(elapsedSinceOrigin * 10) / 10,
+        pWaveAlreadyArrived,
+        sWaveAlreadyArrived,
         estimatedIntensity: Math.round(mmiResult.mmi * 10) / 10,
         intensityUncertainty: Math.round(mmiResult.uncertainty * 10) / 10,
         estimatedPGA: Math.round(pgaResult.pga * 1000) / 1000,

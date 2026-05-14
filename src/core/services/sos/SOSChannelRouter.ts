@@ -12,11 +12,42 @@
 
 import { createLogger } from '../../utils/logger';
 import { SOSSignal, ChannelStatus, useSOSStore } from './SOSStateManager';
-import NetInfo from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState, NetInfoSubscription } from '@react-native-community/netinfo';
 import * as Battery from 'expo-battery';
 import { isApprovedFamilyMember } from '../../utils/familyApproval';
+import { DirectStorage } from '../../utils/storage';
 
 const logger = createLogger('SOSChannelRouter');
+
+type SOSBroadcastChannel = 'mesh' | 'firebase' | 'backend' | 'push' | 'family' | 'nearbyUsers';
+type CloudRetryChannel = Extract<SOSBroadcastChannel, 'firebase' | 'backend' | 'family' | 'nearbyUsers'>;
+type SOSCloudOutboxItem = {
+    signal: SOSSignal;
+    pendingChannels: CloudRetryChannel[];
+    createdAt: number;
+    lastAttemptAt: number;
+    retryCount: number;
+};
+
+const SOS_CLOUD_OUTBOX_KEY = '@afetnet:sos_cloud_outbox:v1';
+const SOS_CLOUD_OUTBOX_TTL_MS = 30 * 60 * 1000;
+const SOS_CLOUD_OUTBOX_MAX_ITEMS = 10;
+
+// P0-1: Separate outbox for SOS cancellations. We don't need to re-broadcast
+// a cancelled signal — we only need to flip `status` on existing Firestore
+// docs (sos_broadcasts/{id}, sos_signals/{id}, sos_alerts/{member}/items/{id},
+// devices/{member}/sos_alerts/{id}) once connectivity returns. Stored
+// per-uid so a logout doesn't replay another user's cancellations.
+const SOS_CANCEL_OUTBOX_KEY_PREFIX = '@afetnet:sos_cancel_outbox';
+const SOS_CANCEL_OUTBOX_TTL_MS = 24 * 60 * 60 * 1000; // 24h — cancel can wait
+const SOS_CANCEL_OUTBOX_MAX_ITEMS = 25;
+
+type SOSCancelOutboxItem = {
+    signalId: string;
+    queuedAt: number;
+    lastAttemptAt: number;
+    retryCount: number;
+};
 
 type MeshDependencies = {
     meshNetworkService: {
@@ -45,9 +76,9 @@ async function waitForAuthUid(label: string): Promise<string | null> {
     let uid = getFirebaseAuth()?.currentUser?.uid ?? null;
     if (uid) return uid;
 
-    // CRITICAL FIX: Increased from 2s to 5s. Auth restoration on cold start can take
-    // up to 8s (INITIAL_RESTORE_GRACE_MS). 2s was insufficient — family/nearby SOS
-    // channels silently failed because senderUid was null (Firestore rules reject).
+    // CRITICAL FIX: Wait up to 8s for auth restoration. Cold-start auth restoration
+    // can take up to INITIAL_RESTORE_GRACE_MS (8s). Shorter waits caused family/nearby
+    // SOS channels to silently fail because senderUid was null (Firestore rules reject).
     logger.warn(`⏳ ${label}: No auth yet — waiting up to 8s for auth restoration...`);
     const start = Date.now();
     while (!uid && Date.now() - start < 8000) {
@@ -66,6 +97,11 @@ async function waitForAuthUid(label: string): Promise<string | null> {
 
 class SOSChannelRouter {
     private isInitialized = false;
+    private connectivityRetryUnsubscribe: NetInfoSubscription | null = null;
+    private outboxNetInfoUnsubscribe: NetInfoSubscription | null = null;
+    private connectivityRetryInFlight = false;
+    private cloudOutboxInFlight = false;
+    private pendingConnectivitySignalId: string | null = null;
 
     // ============================================================================
     // INITIALIZATION
@@ -74,7 +110,43 @@ class SOSChannelRouter {
     async initialize(): Promise<void> {
         if (this.isInitialized) return;
         this.isInitialized = true;
+        this.ensureCloudOutboxNetInfoListener();
+        this.processCloudOutbox('initialize').catch(err => {
+            logger.warn('SOS cloud outbox initial sync failed:', err);
+        });
+        // P0-1: Drain queued cancellations on app start in case the user
+        // cancelled SOS while offline and then killed the app.
+        this.processCancelOutbox('initialize').catch(err => {
+            logger.warn('SOS cancel outbox initial sync failed:', err);
+        });
         logger.info('SOS Channel Router initialized');
+    }
+
+    /**
+     * Tear down all subscriptions and timers. Called from shutdownApp to allow
+     * a clean re-initialize() on next launch / account switch without leaking
+     * NetInfo listeners or retry timers across sessions.
+     */
+    destroy(): void {
+        if (!this.isInitialized) return;
+        if (this.outboxNetInfoUnsubscribe) {
+            try { this.outboxNetInfoUnsubscribe(); } catch { /* best-effort */ }
+            this.outboxNetInfoUnsubscribe = null;
+        }
+        if (this.connectivityRetryUnsubscribe) {
+            try { this.connectivityRetryUnsubscribe(); } catch { /* best-effort */ }
+            this.connectivityRetryUnsubscribe = null;
+        }
+        if (this.channelRetryTimer) {
+            clearTimeout(this.channelRetryTimer);
+            this.channelRetryTimer = null;
+        }
+        this.channelRetryRound = 0;
+        this.connectivityRetryInFlight = false;
+        this.cloudOutboxInFlight = false;
+        this.pendingConnectivitySignalId = null;
+        this.isInitialized = false;
+        logger.info('SOS Channel Router destroyed');
     }
 
     // ============================================================================
@@ -108,7 +180,7 @@ class SOSChannelRouter {
 
         const store = useSOSStore.getState();
 
-        const channelNames = ['mesh', 'firebase', 'backend', 'push', 'family', 'nearbyUsers'];
+        const channelNames: SOSBroadcastChannel[] = ['mesh', 'firebase', 'backend', 'push', 'family', 'nearbyUsers'];
 
         // Parallel broadcast through all channels
         const results = await Promise.allSettled([
@@ -135,6 +207,7 @@ class SOSChannelRouter {
 
         if (failedChannels.length === channelNames.length) {
             logger.error(`🆘 SOS broadcast FAILED on ALL channels: ${failedChannels.join(', ')}`);
+            this.enqueueCloudOutbox(signal, failedChannels);
             // LIFE-SAFETY: Notify user that SOS was not delivered — they must take manual action
             try {
                 const { notificationCenter } = await import('../notifications/NotificationCenter');
@@ -154,14 +227,21 @@ class SOSChannelRouter {
                     timestamp: Date.now(),
                 });
             } catch { /* best-effort */ }
+
+            this.scheduleChannelRetry(signal, failedChannels);
+            this.armConnectivityRetry(signal, failedChannels);
         } else if (failedChannels.length > 0) {
             logger.warn(`⚠️ SOS broadcast partial: ✅ ${succeededChannels.join(', ')} | ❌ ${failedChannels.join(', ')}`);
+            this.enqueueCloudOutbox(signal, failedChannels);
 
             // Sprint Audit FIX A7: Auto-retry transient channel failures after 30s.
             // SOS is life-safety; brief network blips should not leave channels permanently 'failed'.
             // Only retry if SOS is STILL active when the timeout fires (user did not cancel).
             this.scheduleChannelRetry(signal, failedChannels);
+            this.armConnectivityRetry(signal, failedChannels);
         } else {
+            this.removeCloudOutbox(signal.id);
+            this.clearConnectivityRetryIfResolved(signal.id);
             logger.info('✅ SOS broadcast completed on all channels');
         }
     }
@@ -177,16 +257,27 @@ class SOSChannelRouter {
     private channelRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
     private scheduleChannelRetry(signal: SOSSignal, failedChannels: string[]): void {
+        const retryableChannels = failedChannels.filter((ch): ch is SOSBroadcastChannel =>
+            ch === 'mesh' || ch === 'firebase' || ch === 'backend' || ch === 'family' || ch === 'nearbyUsers'
+        );
+        if (retryableChannels.length === 0) return;
+
         if (this.channelRetryRound >= SOSChannelRouter.MAX_CHANNEL_RETRY_ROUNDS) {
             logger.warn('SOS channel retry: max rounds reached');
             this.channelRetryRound = 0;
             return;
         }
-        if (this.channelRetryTimer) clearTimeout(this.channelRetryTimer);
+        if (this.channelRetryTimer) {
+            clearTimeout(this.channelRetryTimer);
+            this.channelRetryTimer = null;
+        }
         this.channelRetryRound++;
         const round = this.channelRetryRound;
-        logger.info(`SOS channel retry scheduled (round ${round}/${SOSChannelRouter.MAX_CHANNEL_RETRY_ROUNDS}): ${failedChannels.join(', ')}`);
+        logger.info(`SOS channel retry scheduled (round ${round}/${SOSChannelRouter.MAX_CHANNEL_RETRY_ROUNDS}): ${retryableChannels.join(', ')}`);
         this.channelRetryTimer = setTimeout(async () => {
+            // Timer has fired — clear handle so cancelChannelRetry() / scheduleChannelRetry()
+            // see a consistent state (no dangling reference to a non-pending timer).
+            this.channelRetryTimer = null;
             // Verify SOS is still active before retrying
             const store = useSOSStore.getState();
             if (!store.isActive || !store.currentSignal) {
@@ -194,37 +285,48 @@ class SOSChannelRouter {
                 this.channelRetryRound = 0;
                 return;
             }
-            logger.warn(`🔄 SOS channel retry round ${round}: ${failedChannels.join(', ')}`);
-            const retryPromises: Promise<unknown>[] = [];
-            for (const ch of failedChannels) {
+            logger.warn(`🔄 SOS channel retry round ${round}: ${retryableChannels.join(', ')}`);
+            const retryTasks: Array<{ channel: SOSBroadcastChannel; promise: Promise<unknown> }> = [];
+            for (const ch of retryableChannels) {
                 switch (ch) {
+                    case 'mesh':
+                        retryTasks.push({ channel: ch, promise: this.broadcastViaMesh(signal, store.updateChannelStatus) });
+                        break;
                     case 'firebase':
-                        retryPromises.push(this.broadcastViaFirebase(signal, store.updateChannelStatus));
+                        retryTasks.push({ channel: ch, promise: this.broadcastViaFirebase(signal, store.updateChannelStatus) });
                         break;
                     case 'backend':
-                        retryPromises.push(this.broadcastViaBackend(signal, store.updateChannelStatus));
-                        break;
-                    case 'push':
-                        retryPromises.push(this.broadcastViaPush(signal, store.updateChannelStatus));
+                        retryTasks.push({ channel: ch, promise: this.broadcastViaBackend(signal, store.updateChannelStatus) });
                         break;
                     case 'family':
-                        retryPromises.push(this.broadcastToFamily(signal));
+                        retryTasks.push({ channel: ch, promise: this.broadcastToFamily(signal) });
                         break;
                     case 'nearbyUsers':
-                        retryPromises.push(this.broadcastToNearbyUsers(signal));
+                        retryTasks.push({ channel: ch, promise: this.broadcastToNearbyUsers(signal) });
                         break;
-                    // 'mesh' is fire-and-forget — no retry needed
+                    case 'push':
+                        break;
                 }
             }
-            await Promise.allSettled(retryPromises);
+            const retryResults = await Promise.allSettled(retryTasks.map(task => task.promise));
             // Check if still failures and schedule next round
             const updatedSignal = useSOSStore.getState().currentSignal;
             if (updatedSignal) {
-                const stillFailed = Object.entries(updatedSignal.channels)
+                const rejectedChannels = retryResults
+                    .map((result, index) => ({ result, channel: retryTasks[index]?.channel }))
+                    .filter((entry): entry is { result: PromiseRejectedResult; channel: SOSBroadcastChannel } =>
+                        entry.result.status === 'rejected' && !!entry.channel
+                    )
+                    .map(entry => entry.channel);
+                const failedStateChannels = Object.entries(updatedSignal.channels)
                     .filter(([, status]) => status === 'failed')
                     .map(([ch]) => ch);
+                const stillFailed = Array.from(new Set([...rejectedChannels, ...failedStateChannels]));
                 if (stillFailed.length > 0) {
                     this.scheduleChannelRetry(updatedSignal, stillFailed);
+                } else {
+                    this.channelRetryRound = 0;
+                    this.clearConnectivityRetryIfResolved(updatedSignal.id);
                 }
             }
         }, SOSChannelRouter.CHANNEL_RETRY_DELAY_MS);
@@ -237,6 +339,458 @@ class SOSChannelRouter {
             this.channelRetryTimer = null;
         }
         this.channelRetryRound = 0;
+        const signalId = useSOSStore.getState().currentSignal?.id;
+        this.removeCloudOutbox(signalId);
+        this.clearConnectivityRetryIfResolved();
+    }
+
+    private isCloudRetryChannel(channel: string): channel is CloudRetryChannel {
+        return channel === 'firebase' || channel === 'backend' || channel === 'family' || channel === 'nearbyUsers';
+    }
+
+    private isOnlineNetState(state: Pick<NetInfoState, 'isConnected' | 'isInternetReachable'>): boolean {
+        return !!state.isConnected && state.isInternetReachable !== false;
+    }
+
+    private readCloudOutbox(): SOSCloudOutboxItem[] {
+        try {
+            const raw = DirectStorage.getString(SOS_CLOUD_OUTBOX_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            const now = Date.now();
+            return parsed
+                .filter((item): item is SOSCloudOutboxItem => {
+                    if (!item || typeof item !== 'object') return false;
+                    if (!item.signal || typeof item.signal.id !== 'string') return false;
+                    if (!Array.isArray(item.pendingChannels) || item.pendingChannels.length === 0) return false;
+                    if (typeof item.createdAt !== 'number') return false;
+                    return now - item.createdAt <= SOS_CLOUD_OUTBOX_TTL_MS;
+                })
+                .slice(0, SOS_CLOUD_OUTBOX_MAX_ITEMS);
+        } catch (error) {
+            logger.warn('SOS cloud outbox unreadable, clearing corrupted payload:', error);
+            try { DirectStorage.delete(SOS_CLOUD_OUTBOX_KEY); } catch { /* best-effort */ }
+            return [];
+        }
+    }
+
+    private writeCloudOutbox(items: SOSCloudOutboxItem[]): void {
+        const now = Date.now();
+        const validItems = items
+            .filter(item => now - item.createdAt <= SOS_CLOUD_OUTBOX_TTL_MS)
+            .slice(-SOS_CLOUD_OUTBOX_MAX_ITEMS);
+
+        try {
+            if (validItems.length === 0) {
+                DirectStorage.delete(SOS_CLOUD_OUTBOX_KEY);
+            } else {
+                DirectStorage.setString(SOS_CLOUD_OUTBOX_KEY, JSON.stringify(validItems));
+            }
+        } catch (error) {
+            logger.warn('SOS cloud outbox write failed:', error);
+        }
+    }
+
+    private enqueueCloudOutbox(signal: SOSSignal, failedChannels: string[]): void {
+        const pendingChannels = failedChannels.filter((ch): ch is CloudRetryChannel => this.isCloudRetryChannel(ch));
+        if (pendingChannels.length === 0) return;
+
+        const existing = this.readCloudOutbox();
+        const existingIndex = existing.findIndex(item => item.signal.id === signal.id);
+        const now = Date.now();
+        const nextItem: SOSCloudOutboxItem = existingIndex >= 0
+            ? {
+                ...existing[existingIndex],
+                signal,
+                pendingChannels: Array.from(new Set([...existing[existingIndex].pendingChannels, ...pendingChannels])),
+            }
+            : {
+                signal,
+                pendingChannels: Array.from(new Set(pendingChannels)),
+                createdAt: now,
+                lastAttemptAt: 0,
+                retryCount: 0,
+            };
+
+        if (existingIndex >= 0) {
+            existing[existingIndex] = nextItem;
+        } else {
+            existing.push(nextItem);
+        }
+
+        this.writeCloudOutbox(existing);
+        logger.warn(`SOS cloud outbox persisted for ${signal.id}: ${nextItem.pendingChannels.join(', ')}`);
+    }
+
+    private removeCloudOutbox(signalId?: string): void {
+        if (!signalId) return;
+        const remaining = this.readCloudOutbox().filter(item => item.signal.id !== signalId);
+        this.writeCloudOutbox(remaining);
+    }
+
+    private ensureCloudOutboxNetInfoListener(): void {
+        if (this.outboxNetInfoUnsubscribe) return;
+
+        const addEventListener = (NetInfo as unknown as {
+            addEventListener?: (listener: (state: NetInfoState) => void) => NetInfoSubscription;
+        }).addEventListener;
+        if (typeof addEventListener !== 'function') return;
+
+        this.outboxNetInfoUnsubscribe = addEventListener((state: NetInfoState) => {
+            if (this.isOnlineNetState(state)) {
+                this.processCloudOutbox('connectivity-restored').catch(err => {
+                    logger.warn('SOS cloud outbox connectivity sync failed:', err);
+                });
+                // P0-1: Drain queued cancellations alongside the signal outbox.
+                this.processCancelOutbox('connectivity-restored').catch(err => {
+                    logger.warn('SOS cancel outbox connectivity sync failed:', err);
+                });
+            }
+        });
+    }
+
+    // ============================================================================
+    // P0-1: SOS CANCEL OUTBOX (offline persist for cancellations)
+    // ============================================================================
+
+    private async getCancelOutboxKey(): Promise<string> {
+        // Scope per-user so a logout/account-switch never replays the wrong
+        // user's cancellations. Falls back to a global key for offline-only
+        // users (no auth) — still keeps cancellations on the same device.
+        try {
+            const { getFirebaseAuth } = await import('../../../lib/firebase');
+            const uid = getFirebaseAuth()?.currentUser?.uid;
+            if (uid) return `${SOS_CANCEL_OUTBOX_KEY_PREFIX}:${uid}`;
+        } catch { /* fall through to global */ }
+        return SOS_CANCEL_OUTBOX_KEY_PREFIX;
+    }
+
+    private async readCancelOutbox(): Promise<SOSCancelOutboxItem[]> {
+        try {
+            const key = await this.getCancelOutboxKey();
+            const raw = DirectStorage.getString(key);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            const now = Date.now();
+            return parsed
+                .filter((item): item is SOSCancelOutboxItem => {
+                    if (!item || typeof item !== 'object') return false;
+                    if (typeof item.signalId !== 'string' || item.signalId.length === 0) return false;
+                    if (typeof item.queuedAt !== 'number') return false;
+                    return now - item.queuedAt <= SOS_CANCEL_OUTBOX_TTL_MS;
+                })
+                .slice(0, SOS_CANCEL_OUTBOX_MAX_ITEMS);
+        } catch (error) {
+            logger.warn('SOS cancel outbox unreadable, clearing:', error);
+            try {
+                const key = await this.getCancelOutboxKey();
+                DirectStorage.delete(key);
+            } catch { /* best-effort */ }
+            return [];
+        }
+    }
+
+    private async writeCancelOutbox(items: SOSCancelOutboxItem[]): Promise<void> {
+        try {
+            const key = await this.getCancelOutboxKey();
+            const now = Date.now();
+            const valid = items
+                .filter(i => now - i.queuedAt <= SOS_CANCEL_OUTBOX_TTL_MS)
+                .slice(-SOS_CANCEL_OUTBOX_MAX_ITEMS);
+            if (valid.length === 0) {
+                DirectStorage.delete(key);
+            } else {
+                DirectStorage.setString(key, JSON.stringify(valid));
+            }
+        } catch (error) {
+            logger.warn('SOS cancel outbox write failed:', error);
+        }
+    }
+
+    /**
+     * P0-1: Public API. Enqueue an SOS cancellation for later cloud sync.
+     * Safe to call from anywhere — duplicates by signalId are merged.
+     */
+    async queueCancelToOutbox(signalId: string): Promise<void> {
+        const id = (signalId || '').trim();
+        if (!id) return;
+        const existing = await this.readCancelOutbox();
+        if (existing.some(it => it.signalId === id)) {
+            // Already queued — refresh queuedAt so TTL doesn't expire mid-retry.
+            const refreshed = existing.map(it => it.signalId === id ? { ...it, queuedAt: Date.now() } : it);
+            await this.writeCancelOutbox(refreshed);
+            return;
+        }
+        existing.push({ signalId: id, queuedAt: Date.now(), lastAttemptAt: 0, retryCount: 0 });
+        await this.writeCancelOutbox(existing);
+        logger.warn(`SOS cancel queued to outbox: ${id}`);
+
+        // Best-effort: if we happen to be online right now, drain immediately.
+        try {
+            const state = await NetInfo.fetch();
+            if (this.isOnlineNetState(state)) {
+                void this.processCancelOutbox('queued-while-online');
+            }
+        } catch { /* non-critical */ }
+    }
+
+    /**
+     * P0-1: Drain queued cancellations to Firestore. Idempotent: applying
+     * `status: 'cancelled'` to an already-cancelled doc is a harmless no-op.
+     */
+    private async processCancelOutbox(reason: string): Promise<void> {
+        if (!this.isInitialized) return;
+        const items = await this.readCancelOutbox();
+        if (items.length === 0) return;
+
+        let db: Awaited<ReturnType<typeof import('../firebase/FirebaseInstanceManager').getFirestoreInstanceAsync>> | null = null;
+        try {
+            const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+            db = await getFirestoreInstanceAsync();
+        } catch (e) {
+            logger.warn(`SOS cancel outbox (${reason}): firestore unavailable, will retry later`, e);
+            return;
+        }
+        if (!db) return;
+
+        const { doc, updateDoc } = await import('firebase/firestore');
+        const remaining: SOSCancelOutboxItem[] = [];
+
+        // Pre-fetch family member ids once per drain pass.
+        let memberIds: string[] = [];
+        try {
+            const { useFamilyStore } = await import('../../stores/familyStore');
+            memberIds = useFamilyStore.getState().members
+                .filter(isApprovedFamilyMember)
+                .flatMap(m => [m.uid, m.deviceId])
+                .filter((v): v is string => !!v && v.length > 0);
+        } catch { /* best-effort */ }
+
+        for (const item of items) {
+            const cancelData = { status: 'cancelled', cancelledAt: Date.now() };
+            try {
+                await Promise.allSettled([
+                    updateDoc(doc(db, 'sos_broadcasts', item.signalId), cancelData),
+                    updateDoc(doc(db, 'sos_signals', item.signalId), cancelData),
+                    ...memberIds.flatMap(id => [
+                        updateDoc(doc(db, 'sos_alerts', id, 'items', item.signalId), cancelData),
+                        updateDoc(doc(db, 'devices', id, 'sos_alerts', item.signalId), cancelData),
+                    ]),
+                ]);
+                logger.info(`✅ SOS cancel outbox: drained ${item.signalId}`);
+                // Success: do NOT re-enqueue.
+            } catch (e) {
+                const next: SOSCancelOutboxItem = {
+                    ...item,
+                    lastAttemptAt: Date.now(),
+                    retryCount: item.retryCount + 1,
+                };
+                // Cap retries — at some point the doc just doesn't exist.
+                if (next.retryCount <= 8) {
+                    remaining.push(next);
+                } else {
+                    logger.warn(`SOS cancel outbox: giving up on ${item.signalId} after ${next.retryCount} retries`);
+                }
+                if (__DEV__) logger.debug('SOS cancel drain attempt failed', e);
+            }
+        }
+
+        await this.writeCancelOutbox(remaining);
+    }
+
+    private async retryCloudChannelsForSignal(
+        signal: SOSSignal,
+        channels: CloudRetryChannel[],
+        reason: string,
+    ): Promise<CloudRetryChannel[]> {
+        const updateIfCurrent = (channel: 'firebase' | 'backend', status: ChannelStatus) => {
+            const latest = useSOSStore.getState();
+            if (latest.currentSignal?.id === signal.id) {
+                latest.updateChannelStatus(channel, status);
+            }
+        };
+
+        const tasks: Array<{ channel: CloudRetryChannel; promise: Promise<unknown> }> = [];
+        for (const channel of channels) {
+            switch (channel) {
+                case 'firebase':
+                    tasks.push({ channel, promise: this.broadcastViaFirebase(signal, updateIfCurrent) });
+                    break;
+                case 'backend':
+                    tasks.push({ channel, promise: this.broadcastViaBackend(signal, updateIfCurrent) });
+                    break;
+                case 'family':
+                    tasks.push({ channel, promise: this.broadcastToFamily(signal) });
+                    break;
+                case 'nearbyUsers':
+                    tasks.push({ channel, promise: this.broadcastToNearbyUsers(signal) });
+                    break;
+            }
+        }
+
+        if (tasks.length === 0) return [];
+
+        logger.warn(`SOS cloud retry (${reason}) started for ${signal.id}: ${tasks.map(t => t.channel).join(', ')}`);
+        const results = await Promise.allSettled(tasks.map(task => task.promise));
+        const rejected = results
+            .map((result, index) => ({ result, channel: tasks[index]?.channel }))
+            .filter((entry): entry is { result: PromiseRejectedResult; channel: CloudRetryChannel } =>
+                entry.result.status === 'rejected' && !!entry.channel
+            )
+            .map(entry => entry.channel);
+
+        const latestStore = useSOSStore.getState();
+        const latest = latestStore.currentSignal?.id === signal.id ? latestStore.currentSignal : null;
+        const failedStateChannels = latest
+            ? Object.entries(latest.channels)
+                .filter(([channel, status]) =>
+                    (channel === 'firebase' || channel === 'backend') && status === 'failed'
+                )
+                .map(([channel]) => channel as CloudRetryChannel)
+            : [];
+
+        return Array.from(new Set([...rejected, ...failedStateChannels]));
+    }
+
+    private async processCloudOutbox(reason: string): Promise<void> {
+        if (this.cloudOutboxInFlight) return;
+
+        const netState = await NetInfo.fetch();
+        if (!this.isOnlineNetState(netState)) return;
+
+        const items = this.readCloudOutbox();
+        if (items.length === 0) return;
+
+        this.cloudOutboxInFlight = true;
+        const remaining: SOSCloudOutboxItem[] = [];
+        try {
+            for (const item of items) {
+                const ageMs = Date.now() - item.createdAt;
+                if (ageMs > SOS_CLOUD_OUTBOX_TTL_MS || item.signal.status === 'cancelled') {
+                    logger.warn(`Dropping stale/cancelled SOS cloud outbox item: ${item.signal.id}`);
+                    continue;
+                }
+
+                const stillFailed = await this.retryCloudChannelsForSignal(item.signal, item.pendingChannels, reason);
+                if (stillFailed.length > 0) {
+                    remaining.push({
+                        ...item,
+                        pendingChannels: stillFailed,
+                        lastAttemptAt: Date.now(),
+                        retryCount: item.retryCount + 1,
+                    });
+                } else {
+                    logger.info(`✅ SOS cloud outbox delivered for ${item.signal.id}`);
+                }
+            }
+        } finally {
+            this.cloudOutboxInFlight = false;
+            this.writeCloudOutbox(remaining);
+        }
+    }
+
+    private armConnectivityRetry(signal: SOSSignal, failedChannels: string[]): void {
+        const cloudFailures = failedChannels.filter((ch): ch is CloudRetryChannel => this.isCloudRetryChannel(ch));
+        if (cloudFailures.length === 0) return;
+
+        this.enqueueCloudOutbox(signal, cloudFailures);
+        this.pendingConnectivitySignalId = signal.id;
+        if (this.connectivityRetryUnsubscribe) {
+            logger.debug(`SOS cloud retry already armed for ${this.pendingConnectivitySignalId}`);
+            return;
+        }
+
+        const addEventListener = (NetInfo as unknown as {
+            addEventListener?: (listener: (state: NetInfoState) => void) => NetInfoSubscription;
+        }).addEventListener;
+        if (typeof addEventListener !== 'function') {
+            logger.warn('SOS cloud retry could not subscribe to NetInfo; timed retries remain active');
+            return;
+        }
+
+        logger.warn(`SOS cloud retry armed until connectivity returns: ${cloudFailures.join(', ')}`);
+        this.connectivityRetryUnsubscribe = addEventListener((state: NetInfoState) => {
+            if (this.isOnlineNetState(state)) {
+                this.retryPendingCloudChannels('connectivity-restored').catch(err => {
+                    logger.warn('SOS cloud retry on connectivity restore failed:', err);
+                });
+            }
+        });
+
+        NetInfo.fetch()
+            .then(state => {
+                if (this.isOnlineNetState(state)) {
+                    this.retryPendingCloudChannels('connectivity-currently-online').catch(err => {
+                        logger.warn('SOS immediate cloud retry failed:', err);
+                    });
+                }
+            })
+            .catch(() => { /* best-effort */ });
+    }
+
+    private async retryPendingCloudChannels(reason: string): Promise<void> {
+        if (this.connectivityRetryInFlight) return;
+
+        const store = useSOSStore.getState();
+        const signal = store.currentSignal;
+        if (!store.isActive || !signal || (this.pendingConnectivitySignalId && signal.id !== this.pendingConnectivitySignalId)) {
+            this.clearConnectivityRetryIfResolved();
+            return;
+        }
+
+        const netState = await NetInfo.fetch();
+        if (!this.isOnlineNetState(netState)) return;
+
+        this.connectivityRetryInFlight = true;
+        try {
+            logger.warn(`🔄 SOS cloud retry started (${reason}) for ${signal.id}`);
+            const tasks: Array<{ channel: CloudRetryChannel; promise: Promise<unknown> }> = [
+                { channel: 'firebase', promise: this.broadcastViaFirebase(signal, store.updateChannelStatus) },
+                { channel: 'backend', promise: this.broadcastViaBackend(signal, store.updateChannelStatus) },
+                { channel: 'family', promise: this.broadcastToFamily(signal) },
+                { channel: 'nearbyUsers', promise: this.broadcastToNearbyUsers(signal) },
+            ];
+            const results = await Promise.allSettled(tasks.map(task => task.promise));
+            const rejectedChannels = results
+                .map((result, index) => ({ result, channel: tasks[index]?.channel }))
+                .filter((entry): entry is { result: PromiseRejectedResult; channel: CloudRetryChannel } =>
+                    entry.result.status === 'rejected' && !!entry.channel
+                )
+                .map(entry => entry.channel);
+            const latest = useSOSStore.getState().currentSignal;
+            const failedStateChannels = latest
+                ? Object.entries(latest.channels)
+                    .filter(([channel, status]) =>
+                        (channel === 'firebase' || channel === 'backend') && status === 'failed'
+                    )
+                    .map(([channel]) => channel)
+                : [];
+            const stillFailed = Array.from(new Set([...rejectedChannels, ...failedStateChannels]));
+            if (stillFailed.length === 0) {
+                logger.info(`✅ SOS cloud retry resolved for ${signal.id}`);
+                this.removeCloudOutbox(signal.id);
+                this.channelRetryRound = 0;
+                this.clearConnectivityRetryIfResolved(signal.id);
+            } else {
+                this.enqueueCloudOutbox(signal, stillFailed);
+                logger.warn(`SOS cloud retry still failing: ${stillFailed.join(', ')}`);
+            }
+        } finally {
+            this.connectivityRetryInFlight = false;
+        }
+    }
+
+    private clearConnectivityRetryIfResolved(signalId?: string): void {
+        if (signalId && this.pendingConnectivitySignalId && this.pendingConnectivitySignalId !== signalId) return;
+        if (this.connectivityRetryUnsubscribe) {
+            try {
+                this.connectivityRetryUnsubscribe();
+            } catch { /* no-op */ }
+            this.connectivityRetryUnsubscribe = null;
+        }
+        this.pendingConnectivitySignalId = null;
     }
 
     // ============================================================================
@@ -262,6 +816,16 @@ class SOSChannelRouter {
             getInstallationId,
             getDisplayName,
         };
+    }
+
+    private async getVisibleMeshPeerCount(): Promise<number | null> {
+        try {
+            const { useMeshStore } = await import('../mesh/MeshStore');
+            const peers = useMeshStore.getState().peers;
+            return Array.isArray(peers) ? peers.length : null;
+        } catch {
+            return null;
+        }
     }
 
     private async broadcastViaMesh(
@@ -320,11 +884,10 @@ class SOSChannelRouter {
                 if (!bleReady) {
                     logger.error('🚨 SOS mesh broadcast: Bluetooth is OFF — mesh packets will be deferred until Bluetooth is enabled');
                 }
-                const { useMeshStore: getMeshStore } = await import('../mesh/MeshStore');
-                const peerCount = getMeshStore.getState().peers.length;
+                const peerCount = await this.getVisibleMeshPeerCount();
                 if (peerCount === 0) {
                     logger.warn('⚠️ SOS mesh broadcast: 0 peers discovered — signal queued, will auto-send when peers appear (BLE scan active)');
-                } else {
+                } else if (peerCount !== null) {
                     logger.info(`✅ SOS mesh broadcast: ${peerCount} peer(s) visible — signal will be delivered`);
                 }
             } catch { /* best-effort status check */ }
@@ -342,27 +905,30 @@ class SOSChannelRouter {
             // broadcastMessage() queues the packet and returns success even with 0 peers.
             // If 0 peers → message sits in queue and may NEVER be delivered.
             // User should NOT see "SOS sent via mesh" when nobody can receive it.
-            try {
-                const { useMeshStore: getMeshStorePost } = await import('../mesh/MeshStore');
-                const postPeerCount = getMeshStorePost.getState().peers.length;
-                if (postPeerCount === 0) {
-                    updateStatus('mesh', 'failed');
-                    logger.warn('⚠️ Mesh SOS queued but 0 peers — marked as failed (will auto-send when peers appear)');
-                } else {
-                    // FIX 11: Status is 'sent' because peers were visible, but this means
-                    // "queued to peers" — NOT confirmed delivery. BLE broadcast is fire-and-forget;
-                    // actual receipt depends on peers' BLE scan being active.
-                    updateStatus('mesh', 'sent');
-                    logger.info(`✅ SOS queued to ${postPeerCount} visible mesh peer(s) — delivery not confirmed (BLE fire-and-forget)`);
-                }
-            } catch {
-                // Fallback: mark as sent if we can't check peer count
+            let postPeerCount: number | null = null;
+            postPeerCount = await this.getVisibleMeshPeerCount();
+            if (postPeerCount === null) {
+                // Fallback: mark as sent if we cannot inspect peer count.
                 updateStatus('mesh', 'sent');
                 logger.info('✅ SOS sent via Mesh');
+                return;
             }
+
+            if (postPeerCount === 0) {
+                updateStatus('mesh', 'failed');
+                logger.warn('⚠️ Mesh SOS queued but 0 peers — not marked sent until a peer is visible');
+                throw new Error('Mesh SOS queued but no visible peers');
+            }
+
+            // FIX 11: Status is 'sent' because peers were visible, but this means
+            // "queued to peers" — NOT confirmed delivery. BLE broadcast is fire-and-forget;
+            // actual receipt depends on peers' BLE scan being active.
+            updateStatus('mesh', 'sent');
+            logger.info(`✅ SOS queued to ${postPeerCount} visible mesh peer(s) — delivery not confirmed (BLE fire-and-forget)`);
         } catch (error) {
             logger.error('❌ Mesh broadcast failed:', error);
             updateStatus('mesh', 'failed');
+            throw error;
         }
     }
 
@@ -377,11 +943,17 @@ class SOSChannelRouter {
         updateStatus('firebase', 'pending');
 
         try {
-            // IMPORTANT: Always attempt Firestore write even when offline.
-            // Firestore on RN has memory-only cache (NO persistent offline queue).
-            // The write is attempted optimistically; online status is verified AFTER
-            // to determine reported status (sent vs pending). See lines 352-362.
+            // Firestore on React Native has memory-only cache in this setup, not a
+            // reliable disk-backed emergency outbox. Do not claim "sent" while offline;
+            // mark failed and let the SOS cloud retry listener send it when internet returns.
             updateStatus('firebase', 'sending');
+
+            const netInfoPre = await NetInfo.fetch();
+            if (!this.isOnlineNetState(netInfoPre)) {
+                updateStatus('firebase', 'failed');
+                logger.warn('⚠️ Firebase SOS deferred — offline (mesh remains active, cloud retry armed)');
+                throw new Error('Firebase SOS deferred while offline');
+            }
 
             // CRITICAL FIX: Write SOS to a GLOBAL sos_signals collection,
             // NOT to the sender's own message inbox.
@@ -396,26 +968,14 @@ class SOSChannelRouter {
             if (!currentUid) {
                 logger.error('❌ Firebase SOS broadcast FAILED: No authenticated user after 8s wait — Firestore rules will reject. Mesh channel is the fallback.');
                 updateStatus('firebase', 'failed');
-                return;
+                throw new Error('Firebase SOS failed: no authenticated user');
             }
 
             const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
             const db = await getFirestoreInstanceAsync();
             if (!db) {
                 updateStatus('firebase', 'failed');
-                return;
-            }
-
-            // CRITICAL FIX (SOS-C3): NetInfo check BEFORE setDoc to avoid memory-cache evaporation.
-            // Firestore RN SDK has NO persistent cache; offline setDoc() resolves from memory cache,
-            // but if app is killed before reconnect, data is LOST. Pre-check prevents misleading
-            // 'sent' status when delivery is actually impossible. Mesh channel is still attempted.
-            const netInfoPre = await NetInfo.fetch();
-            const isOnline = !!netInfoPre.isConnected && netInfoPre.isInternetReachable !== false;
-            if (!isOnline) {
-                updateStatus('firebase', 'failed');
-                logger.warn('⚠️ Firebase SOS skipped — offline (mesh + push fallback active)');
-                return;
+                throw new Error('Firebase SOS failed: Firestore unavailable');
             }
 
             const { doc, setDoc } = await import('firebase/firestore');
@@ -445,6 +1005,7 @@ class SOSChannelRouter {
         } catch (error) {
             logger.error('❌ Firebase broadcast failed:', error);
             updateStatus('firebase', 'failed');
+            throw error;
         }
     }
 
@@ -460,10 +1021,10 @@ class SOSChannelRouter {
 
         try {
             const netInfo = await NetInfo.fetch();
-            if (!netInfo.isConnected) {
-                logger.debug('Backend skipped: offline');
-                updateStatus('backend', 'idle');
-                return;
+            if (!this.isOnlineNetState(netInfo)) {
+                logger.debug('Backend deferred: offline');
+                updateStatus('backend', 'failed');
+                throw new Error('Backend SOS deferred while offline');
             }
 
             const { backendEmergencyService } = await import('../BackendEmergencyService');
@@ -498,6 +1059,7 @@ class SOSChannelRouter {
         } catch (error) {
             logger.error('❌ Backend broadcast failed:', error);
             updateStatus('backend', 'failed');
+            throw error;
         }
     }
 
@@ -558,6 +1120,7 @@ class SOSChannelRouter {
 
             // ELITE: Load health profile for life-saving info
             const healthInfo = await this.loadHealthProfile();
+            let familyCloudError: Error | null = null;
 
             // CRITICAL FIX: Use the ACTUAL Firebase Auth UID for senderUid, not signal.userId.
             // signal.userId may have fallen back to a device ID (AFN-XXXX) during cold start.
@@ -568,7 +1131,8 @@ class SOSChannelRouter {
             try {
                 const authUid = await waitForAuthUid('Family SOS');
                 if (!authUid) {
-                    logger.error('❌ Family SOS: Auth still unavailable after 2s — Firestore writes will likely be rejected');
+                    familyCloudError = new Error('Family SOS failed: no authenticated user');
+                    logger.error('❌ Family SOS: Auth still unavailable after 8s — Firestore writes will be rejected');
                 }
                 if (authUid) resolvedSenderUid = authUid;
             } catch (e) { logger.error('SOS auth UID resolution failed:', e); }
@@ -592,93 +1156,98 @@ class SOSChannelRouter {
                 healthInfo,
             };
 
-            // CRITICAL FIX: Always attempt Firestore writes — Firestore offline persistence
-            // queues them locally and syncs when connectivity returns.
-            {
-                logger.info(`📨 Broadcasting SOS to ${members.length} family members via Firestore...`);
+            if (!familyCloudError) {
+                try {
+                    logger.info(`📨 Broadcasting SOS to ${members.length} family members via Firestore...`);
 
-                const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
-                let db = await getFirestoreInstanceAsync();
-                if (!db) {
-                    // RETRY: Firestore may be initializing during cold start — wait 2s and retry once
-                    logger.warn('Family Firestore broadcast: Firestore unavailable, retrying in 2s...');
-                    await new Promise(r => setTimeout(r, 2000));
-                    db = await getFirestoreInstanceAsync();
-                }
-                if (!db) {
-                    logger.error('❌ Family Firestore broadcast FAILED: Firestore unavailable after retry');
-                } else {
-                    const { doc, setDoc } = await import('firebase/firestore');
+                    const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+                    let db = await getFirestoreInstanceAsync();
+                    if (!db) {
+                        // RETRY: Firestore may be initializing during cold start — wait 2s and retry once
+                        logger.warn('Family Firestore broadcast: Firestore unavailable, retrying in 2s...');
+                        await new Promise(r => setTimeout(r, 2000));
+                        db = await getFirestoreInstanceAsync();
+                    }
+                    if (!db) {
+                        familyCloudError = new Error('Family SOS failed: Firestore unavailable');
+                        logger.error('❌ Family Firestore broadcast FAILED: Firestore unavailable after retry');
+                    } else {
+                        const { doc, setDoc } = await import('firebase/firestore');
 
-                    // Resolve ALL sender identity forms for robust self-exclusion
-                    const senderSelfIds = new Set<string>();
-                    try {
-                        // CRITICAL FIX: Use getFirebaseAuth() singleton instead of raw getAuth()
-                        // Raw getAuth() creates new instance without MMKV persistence → null currentUser
-                        const { getFirebaseAuth } = await import('../../../lib/firebase');
-                        const authUid = getFirebaseAuth()?.currentUser?.uid;
-                        if (authUid) senderSelfIds.add(authUid);
-                    } catch (e) { logger.error('SOS family self-ID auth check failed:', e); }
-                    if (signal.userId) senderSelfIds.add(signal.userId);
-                    if (senderDeviceId) senderSelfIds.add(senderDeviceId);
-                    try {
-                        const { identityService: idSvc } = await import('../IdentityService');
-                        const publicCode = idSvc.getPublicUserCode?.();
-                        if (publicCode) senderSelfIds.add(publicCode);
-                    } catch (e) { logger.error('SOS family publicCode resolution failed:', e); }
+                        // Resolve ALL sender identity forms for robust self-exclusion
+                        const senderSelfIds = new Set<string>();
+                        try {
+                            // CRITICAL FIX: Use getFirebaseAuth() singleton instead of raw getAuth()
+                            // Raw getAuth() creates new instance without MMKV persistence → null currentUser
+                            const { getFirebaseAuth } = await import('../../../lib/firebase');
+                            const authUid = getFirebaseAuth()?.currentUser?.uid;
+                            if (authUid) senderSelfIds.add(authUid);
+                        } catch (e) { logger.error('SOS family self-ID auth check failed:', e); }
+                        if (signal.userId) senderSelfIds.add(signal.userId);
+                        if (senderDeviceId) senderSelfIds.add(senderDeviceId);
+                        try {
+                            const { identityService: idSvc } = await import('../IdentityService');
+                            const publicCode = idSvc.getPublicUserCode?.();
+                            if (publicCode) senderSelfIds.add(publicCode);
+                        } catch (e) { logger.error('SOS family publicCode resolution failed:', e); }
 
-                    const writePromises = members.flatMap((member) => {
-                        // Skip self — check all known IDs for the sender
-                        if ((member.uid && senderSelfIds.has(member.uid)) ||
-                            (member.deviceId && senderSelfIds.has(member.deviceId))) {
-                            return [];
-                        }
-                        // Write to ALL known IDs for this member
-                        // SOSAlertListener may listen on physical deviceId, QR id, OR UID
-                        const targetIds = new Set<string>();
-                        if (member.deviceId) targetIds.add(member.deviceId);
-                        if (member.uid) targetIds.add(member.uid);
+                        const writePromises = members.flatMap((member) => {
+                            // Skip self — check all known IDs for the sender
+                            if ((member.uid && senderSelfIds.has(member.uid)) ||
+                                (member.deviceId && senderSelfIds.has(member.deviceId))) {
+                                return [];
+                            }
+                            // Write to ALL known IDs for this member
+                            // SOSAlertListener may listen on physical deviceId, QR id, OR UID
+                            const targetIds = new Set<string>();
+                            if (member.deviceId) targetIds.add(member.deviceId);
+                            if (member.uid) targetIds.add(member.uid);
 
-                        return Array.from(targetIds).map(async (targetId) => {
-                            try {
-                                const legacyRef = doc(db, 'devices', targetId, 'sos_alerts', signal.id);
-                                const v3Ref = doc(db, 'sos_alerts', targetId, 'items', signal.id);
+                            return Array.from(targetIds).map(async (targetId) => {
+                                try {
+                                    const legacyRef = doc(db, 'devices', targetId, 'sos_alerts', signal.id);
+                                    const v3Ref = doc(db, 'sos_alerts', targetId, 'items', signal.id);
 
-                                const writes = await Promise.allSettled([
-                                    setDoc(legacyRef, sosAlert),
-                                    setDoc(v3Ref, sosAlert),
-                                ]);
-
-                                const hasSuccess = writes.some((result) => result.status === 'fulfilled');
-                                if (!hasSuccess) {
-                                    // RETRY: Single retry with 1s delay for transient Firestore errors
-                                    logger.warn(`⚠️ SOS family write failed for ${member.name} (${targetId}), retrying in 1s...`);
-                                    await new Promise(r => setTimeout(r, 1000));
-                                    const retryWrites = await Promise.allSettled([
+                                    const writes = await Promise.allSettled([
                                         setDoc(legacyRef, sosAlert),
                                         setDoc(v3Ref, sosAlert),
                                     ]);
-                                    const retrySuccess = retryWrites.some((r) => r.status === 'fulfilled');
-                                    if (!retrySuccess) {
-                                        throw new Error('No SOS family write path succeeded after retry');
+
+                                    const hasSuccess = writes.some((result) => result.status === 'fulfilled');
+                                    if (!hasSuccess) {
+                                        // RETRY: Single retry with 1s delay for transient Firestore errors
+                                        logger.warn(`⚠️ SOS family write failed for ${member.name} (${targetId}), retrying in 1s...`);
+                                        await new Promise(r => setTimeout(r, 1000));
+                                        const retryWrites = await Promise.allSettled([
+                                            setDoc(legacyRef, sosAlert),
+                                            setDoc(v3Ref, sosAlert),
+                                        ]);
+                                        const retrySuccess = retryWrites.some((r) => r.status === 'fulfilled');
+                                        if (!retrySuccess) {
+                                            throw new Error('No SOS family write path succeeded after retry');
+                                        }
                                     }
+
+                                    logger.info(`✅ SOS alert sent to family member: ${member.name} (${targetId})`);
+                                } catch (err) {
+                                    logger.error(`❌ Failed to send SOS to family member ${member.name} (${targetId}):`, err);
+                                    throw err; // Re-throw so Promise.allSettled counts it as rejected
                                 }
-
-                                logger.info(`✅ SOS alert sent to family member: ${member.name} (${targetId})`);
-                            } catch (err) {
-                                logger.error(`❌ Failed to send SOS to family member ${member.name} (${targetId}):`, err);
-                                throw err; // Re-throw so Promise.allSettled counts it as rejected
-                            }
+                            });
                         });
-                    });
 
-                    const familyResults = await Promise.allSettled(writePromises);
-                    const familySuccessCount = familyResults.filter(r => r.status === 'fulfilled').length;
-                    logger.info(`✅ Family SOS Firestore broadcast: ${familySuccessCount}/${members.length} members`);
-                    if (familySuccessCount === 0 && members.length > 0) {
-                        throw new Error(`All ${members.length} family SOS writes failed`);
+                        const familyResults = await Promise.allSettled(writePromises);
+                        const familySuccessCount = familyResults.filter(r => r.status === 'fulfilled').length;
+                        logger.info(`✅ Family SOS Firestore broadcast: ${familySuccessCount}/${members.length} members`);
+                        if (familySuccessCount === 0 && writePromises.length > 0) {
+                            familyCloudError = new Error(`All ${members.length} family SOS writes failed`);
+                        }
                     }
+                } catch (cloudErr) {
+                    familyCloudError = cloudErr instanceof Error ? cloudErr : new Error(String(cloudErr));
                 }
+            } else {
+                logger.warn('Family Firestore broadcast deferred; mesh backup will still be attempted');
             }
 
             // OFFLINE: Also broadcast via BLE Mesh with family tag (mesh always runs)
@@ -705,8 +1274,13 @@ class SOSChannelRouter {
             } catch (meshErr) {
                 logger.warn('Mesh family SOS broadcast failed:', meshErr);
             }
+
+            if (familyCloudError) {
+                throw familyCloudError;
+            }
         } catch (error) {
             logger.error('❌ Family broadcast failed:', error);
+            throw error;
         }
     }
 
@@ -721,7 +1295,8 @@ class SOSChannelRouter {
      */
     private async broadcastToNearbyUsers(signal: SOSSignal): Promise<void> {
         try {
-            // CRITICAL FIX: Always attempt Firestore write — offline persistence queues it.
+            // Firestore write is attempted only when internet is reachable; otherwise
+            // SOS cloud retry sends this when connectivity returns.
             // STEP 1: Firestore instance
             const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
             let db = await getFirestoreInstanceAsync();
@@ -735,7 +1310,7 @@ class SOSChannelRouter {
             }
             if (!db) {
                 logger.error('❌ Nearby SOS broadcast FAILED: Firestore unavailable after retry');
-                return;
+                throw new Error('Nearby SOS failed: Firestore unavailable');
             }
 
             // STEP 3: Check auth state — resolve auth UID for Firestore rules compliance
@@ -807,6 +1382,12 @@ class SOSChannelRouter {
                 typeOfLatitude: typeof broadcastData.latitude,
             }));
 
+            const netState = await NetInfo.fetch();
+            if (!this.isOnlineNetState(netState)) {
+                logger.warn('⚠️ Nearby SOS deferred — offline (cloud retry will write sos_broadcasts when internet returns)');
+                throw new Error('Nearby SOS deferred while offline');
+            }
+
             // STEP 6: Write to Firestore
             const broadcastRef = doc(db, 'sos_broadcasts', signal.id);
             logger.debug(`[SOS] Step 6 - Writing to: sos_broadcasts/${signal.id}`);
@@ -819,6 +1400,7 @@ class SOSChannelRouter {
             const errMsg = error instanceof Error ? error.message : String(error);
             logger.debug(`[SOS] ❌ WRITE FAILED: ${errMsg}`);
             logger.error('❌ Global SOS broadcast failed:', error);
+            throw error;
         }
     }
 
@@ -848,7 +1430,7 @@ class SOSChannelRouter {
             const db = await getFirestoreInstanceAsync();
             if (!db) {
                 logger.warn('Cannot send ACK: Firestore unavailable');
-                return;
+                throw new Error('Kurtarma mesajı gönderilemedi: Firestore bağlantısı hazır değil.');
             }
 
             const { doc, setDoc } = await import('firebase/firestore');
@@ -1085,7 +1667,7 @@ class SOSChannelRouter {
     async getNetworkStatus(): Promise<'online' | 'mesh' | 'offline'> {
         try {
             const netInfo = await NetInfo.fetch();
-            if (netInfo.isConnected) {
+            if (this.isOnlineNetState(netInfo)) {
                 return 'online';
             }
 

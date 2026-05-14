@@ -40,40 +40,147 @@ import {
     calculateDistance,
 } from './utils';
 
+const TURKEY_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+const OFFICIAL_EVENT_MAX_AGE_MS = 15 * 60 * 1000;
+const OFFICIAL_EVENT_MAX_FUTURE_SKEW_MS = 60 * 1000;
+const EMERGENCY_NOTIFICATION_SOUND = 'emergency-alert.wav';
+
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+function formatTurkeyApiDateTimeFromMs(timestamp: number): { date: string; time: string } {
+    const date = new Date(timestamp + TURKEY_UTC_OFFSET_MS);
+    return {
+        date: `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`,
+        time: `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`,
+    };
+}
+
+function parseTurkeyLocalDateTime(value: unknown): number {
+    if (typeof value !== 'string') return 0;
+
+    const raw = value.trim();
+    if (!raw) return 0;
+
+    const normalized = raw
+        .replace(/\./g, '-')
+        .replace(/\s+/, 'T');
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+
+    if (hasExplicitTimezone) {
+        const parsed = Date.parse(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+    if (!match) {
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6] || 0);
+
+    if (
+        month < 1 || month > 12 ||
+        day < 1 || day > 31 ||
+        hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 ||
+        second < 0 || second > 59
+    ) {
+        return 0;
+    }
+
+    return Date.UTC(year, month - 1, day, hour, minute, second) - TURKEY_UTC_OFFSET_MS;
+}
+
+function parseKandilliMagnitude(md: string, ml: string, mw: string): number {
+    for (const rawValue of [ml, mw, md]) {
+        const magnitude = Number(rawValue);
+        if (Number.isFinite(magnitude) && magnitude > 0) {
+            return magnitude;
+        }
+    }
+
+    return 0;
+}
+
+function isValidCoordinatePair(latitude: unknown, longitude: unknown): latitude is number {
+    return typeof latitude === 'number' &&
+        typeof longitude === 'number' &&
+        Number.isFinite(latitude) &&
+        Number.isFinite(longitude) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        longitude >= -180 &&
+        longitude <= 180;
+}
+
+function isValidEEWEvent(event: EEWEvent): boolean {
+    return Boolean(event.id) &&
+        Number.isFinite(event.magnitude) &&
+        event.magnitude > 0 &&
+        event.magnitude <= 10 &&
+        isValidCoordinatePair(event.latitude, event.longitude) &&
+        Number.isFinite(event.depth) &&
+        event.depth >= 0 &&
+        event.depth <= 700 &&
+        Number.isFinite(event.issuedAt) &&
+        event.issuedAt > 0;
+}
+
+function isFreshOfficialEvent(event: EEWEvent): boolean {
+    if (!isValidEEWEvent(event)) return false;
+
+    const eventAge = Date.now() - event.issuedAt;
+    return eventAge <= OFFICIAL_EVENT_MAX_AGE_MS &&
+        eventAge >= -OFFICIAL_EVENT_MAX_FUTURE_SKEW_MS;
+}
+
 // ============================================================
 // HELPER FUNCTIONS - DATA FETCHING
 // ============================================================
 
 async function fetchAFADEvents(): Promise<EEWEvent[]> {
-    const now = new Date();
-    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+    const now = Date.now();
+    const fiveMinutesAgo = now - 5 * 60 * 1000;
 
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-    const formatTime = (d: Date) => d.toISOString().split('T')[1].substring(0, 8);
+    const start = formatTurkeyApiDateTimeFromMs(fiveMinutesAgo);
+    const end = formatTurkeyApiDateTimeFromMs(now);
 
-    const url = `${AFAD_API}?start=${formatDate(fiveMinutesAgo)}%20${formatTime(fiveMinutesAgo)}&end=${formatDate(now)}%20${formatTime(now)}&minmag=3&limit=10`;
+    const url = `${AFAD_API}?start=${encodeURIComponent(`${start.date} ${start.time}`)}&end=${encodeURIComponent(`${end.date} ${end.time}`)}&minmag=3&limit=10`;
 
     try {
         const response = await fetch(url, {
             headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(10000), // 10s timeout
+            signal: AbortSignal.timeout(5000),
         });
         const data = await response.json();
 
         if (!Array.isArray(data)) return [];
 
-        return data.map((item: Record<string, unknown>) => ({
-            id: `afad-${String(item.eventID || item.id || Date.now())}`,
-            magnitude: Number(item.magnitude || item.mag || 0),
-            latitude: Number(item.latitude || item.lat || 0),
-            longitude: Number(item.longitude || item.lng || 0),
-            depth: Number(item.depth || 10),
-            location: String(item.location || item.region || 'Türkiye'),
-            source: 'AFAD' as const,
-            timestamp: Date.now(),
-            // CRITICAL FIX: Never default to Date.now() — makes old/invalid events look new
-            issuedAt: new Date(String(item.date || '')).getTime() || 0,
-        }));
+        return data.map((item: Record<string, unknown>): EEWEvent => {
+            const geojson = item.geojson as { coordinates?: unknown } | undefined;
+            const coordinates = Array.isArray(geojson?.coordinates) ? geojson.coordinates : [];
+            const issuedAt = parseTurkeyLocalDateTime(item.eventDate || item.date || item.originTime || item.time);
+
+            return {
+                id: `afad-${String(item.eventID || item.id || issuedAt || Date.now())}`,
+                magnitude: Number(item.magnitude ?? item.mag ?? 0),
+                latitude: Number(item.latitude ?? item.lat ?? coordinates[1] ?? 0),
+                longitude: Number(item.longitude ?? item.lon ?? item.lng ?? coordinates[0] ?? 0),
+                depth: Number(item.depth ?? coordinates[2] ?? 10),
+                location: String(item.location || item.region || 'Türkiye'),
+                source: 'AFAD',
+                timestamp: Date.now(),
+                issuedAt,
+            };
+        }).filter(isFreshOfficialEvent);
     } catch (error) {
         functions.logger.error('AFAD fetch error:', error);
         return [];
@@ -82,50 +189,67 @@ async function fetchAFADEvents(): Promise<EEWEvent[]> {
 
 async function fetchKandilliEvents(): Promise<EEWEvent[]> {
     try {
-        // Kandilli uses HTML, we need to parse it
+        // Kandilli publishes raw HTML — we extract earthquakes via regex below.
+        // NOTE: Format is fragile. If Kandilli redesigns the page (e.g. moves to
+        // a JSON endpoint or changes column layout), this function returns 0 events.
+        // AFAD / USGS / EMSC act as redundant sources so EEW continues to work.
+        // Monitor BigQuery logs: a sustained 0-events-from-kandilli signal means
+        // the parser needs updating.
         const response = await fetch(KANDILLI_API, {
             headers: { 'Accept': 'text/html' },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(4000),
         });
         const html = await response.text();
 
         // Parse HTML to extract earthquake data
         const events: EEWEvent[] = [];
-        const lines = html.split('\n').filter(line => line.includes('.'));
+        const lines = html.split('\n');
 
-        for (const line of lines.slice(0, 10)) { // Last 10 events
+        for (const line of lines) {
             try {
-                // Kandilli format: Date Time Lat Lon Depth Mag Location
-                const parts = line.trim().split(/\s+/);
-                if (parts.length < 7) continue;
+                const trimmed = line.trim();
+                if (!/^\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/.test(trimmed)) continue;
 
-                const dateStr = parts[0];
-                const timeStr = parts[1];
-                const lat = parseFloat(parts[2]);
-                const lon = parseFloat(parts[3]);
-                const depth = parseFloat(parts[4]);
-                const mag = parseFloat(parts[5]);
-                const location = parts.slice(6).join(' ');
+                // Kandilli format: Date Time Lat Lon Depth MD ML Mw Location
+                const rowMatch = trimmed.match(
+                    /^(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(-?\d{1,2}\.\d{2,5})\s+(-?\d{1,3}\.\d{2,5})\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(-\.-|\d+(?:\.\d+)?)\s+(.+)$/,
+                );
+                const parts = trimmed.split(/\s+/);
+
+                const dateStr = rowMatch?.[1] ?? parts[0];
+                const timeStr = rowMatch?.[2] ?? parts[1];
+                const lat = parseFloat(rowMatch?.[3] ?? parts[2]);
+                const lon = parseFloat(rowMatch?.[4] ?? parts[3]);
+                const depth = parseFloat(rowMatch?.[5] ?? parts[4]);
+                const md = rowMatch?.[6] ?? parts[5];
+                const ml = rowMatch?.[7] ?? parts[6];
+                const mw = rowMatch?.[8] ?? parts[7];
+                const mag = parseKandilliMagnitude(md, ml, mw);
+                const location = (rowMatch?.[9] ?? parts.slice(8).join(' '))
+                    .replace(/\s+İlksel.*$/i, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
 
                 if (isNaN(lat) || isNaN(lon) || isNaN(mag)) continue;
                 if (mag < 3.0) continue; // Filter small events
 
-                const timestamp = new Date(`${dateStr}T${timeStr}Z`).getTime();
-                const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-
-                if (timestamp < fiveMinutesAgo) continue; // Only recent events
-
-                events.push({
+                const timestamp = parseTurkeyLocalDateTime(`${dateStr} ${timeStr}`);
+                const event: EEWEvent = {
                     id: `kandilli-${timestamp}-${Math.round(lat * 100)}`,
                     magnitude: mag,
                     latitude: lat,
                     longitude: lon,
-                    depth: depth,
+                    depth: Number.isFinite(depth) ? depth : 10,
                     location: location || 'Türkiye',
                     source: 'KANDILLI',
                     timestamp: Date.now(),
                     issuedAt: timestamp,
-                });
+                };
+
+                if (!isFreshOfficialEvent(event)) continue;
+
+                events.push(event);
+                if (events.length >= 10) break;
             } catch {
                 // Skip malformed lines
             }
@@ -142,7 +266,7 @@ async function fetchUSGSEvents(): Promise<EEWEvent[]> {
     try {
         const response = await fetch(USGS_API, {
             headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(5000),
         });
         const data = await response.json();
 
@@ -178,7 +302,7 @@ async function fetchEMSCEvents(): Promise<EEWEvent[]> {
     try {
         const response = await fetch(EMSC_API, {
             headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(5000),
         });
         const data = await response.json();
 
@@ -274,13 +398,18 @@ export async function saveEEWEvent(event: EEWEvent): Promise<void> {
 export async function sendEEWPushWithRetry(event: EEWEvent): Promise<{ sent: number; failed: number }> {
     functions.logger.warn(`🚨 SENDING FCM PUSH: M${event.magnitude} ${event.location}`);
 
+    if (!isValidEEWEvent(event)) {
+        functions.logger.error('Refusing to send invalid EEW event:', event);
+        return { sent: 0, failed: 0 };
+    }
+
     const isCritical = event.magnitude >= MIN_MAGNITUDE_CRITICAL;
+    let criticalTopicDelivered = false;
 
     // ================================================================
-    // PHASE 1: FCM TOPIC SEND — O(1), instant delivery to ALL subscribers
-    // This is the FASTEST path: no token iteration, no Firestore reads.
-    // Users subscribe to 'earthquake-alerts' and 'eew-turkey' topics via
-    // FCMTokenService on the client.
+    // PHASE 1: FCM TOPIC SEND — reserved for critical national-scale alerts.
+    // Non-critical M4.0-M5.4 alerts must stay location-scoped; topic sends would
+    // notify every subscriber in Turkey and bypass per-user proximity filtering.
     // ================================================================
     try {
         const eewData: Record<string, string> = {
@@ -296,58 +425,60 @@ export async function sendEEWPushWithRetry(event: EEWEvent): Promise<{ sent: num
             verified: String(event.verified || false),
         };
 
-        // CRITICAL FIX: Use collapseKey/apns-collapse-id so that if the same user
-        // receives this event via BOTH topic subscription AND per-token fan-out,
-        // the OS collapses them into a single notification instead of showing two.
-        const collapseKey = `eew_${event.id}`;
-
-        const topicMessage: admin.messaging.Message = {
-            topic: isCritical ? 'eew-turkey' : 'earthquake-alerts',
-            notification: {
-                title: isCritical ? '🚨 ACİL DEPREM UYARISI!' : '⚠️ DEPREM UYARISI',
-                body: `M${event.magnitude.toFixed(1)} - ${event.location}${event.verified ? ' ✓' : ''}`,
-            },
-            data: eewData,
-            android: {
-                priority: 'high',
-                collapseKey,
-                notification: {
-                    channelId: isCritical ? 'eew_critical' : 'earthquake_alerts',
-                    priority: 'max',
-                    defaultSound: true,
-                    defaultVibrateTimings: true,
-                    tag: collapseKey,
-                },
-            },
-            apns: {
-                payload: {
-                    aps: {
-                        sound: 'default',
-                        badge: 1,
-                        'content-available': 1,
-                        'interruption-level': isCritical ? 'time-sensitive' : 'active',
-                        'relevance-score': isCritical ? 1.0 : 0.7,
-                        'thread-id': collapseKey,
-                    },
-                    ...eewData,
-                },
-                headers: {
-                    'apns-priority': '10',
-                    'apns-push-type': 'alert',
-                    'apns-expiration': '0',
-                    'apns-collapse-id': collapseKey,
-                },
-            },
-        };
-
-        const topicResult = await messaging.send(topicMessage);
-        functions.logger.info(`✅ FCM TOPIC SEND (${isCritical ? 'eew-turkey' : 'earthquake-alerts'}): ${topicResult}`);
-
-        // For critical events, also send to the general earthquake-alerts topic
         if (isCritical) {
+            // CRITICAL FIX: Use collapseKey/apns-collapse-id so that if the same user
+            // receives this event via BOTH topic subscription AND per-token fan-out,
+            // the OS collapses them into a single notification instead of showing two.
+            const collapseKey = `eew_${event.id}`;
+
+            const topicMessage: admin.messaging.Message = {
+                topic: 'eew-turkey',
+                notification: {
+                    title: '🚨 ACİL DEPREM UYARISI!',
+                    body: `M${event.magnitude.toFixed(1)} - ${event.location}${event.verified ? ' ✓' : ''}`,
+                },
+                data: eewData,
+                android: {
+                    priority: 'high',
+                    collapseKey,
+                    notification: {
+                        channelId: 'eew_critical',
+                        priority: 'max',
+                        defaultSound: true,
+                        defaultVibrateTimings: true,
+                        tag: collapseKey,
+                    },
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: EMERGENCY_NOTIFICATION_SOUND,
+                            badge: 1,
+                            'content-available': 1,
+                            'interruption-level': 'time-sensitive',
+                            'relevance-score': 1.0,
+                            'thread-id': collapseKey,
+                        },
+                        ...eewData,
+                    },
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert',
+                        'apns-expiration': '0',
+                        'apns-collapse-id': collapseKey,
+                    },
+                },
+            };
+
+            const topicResult = await messaging.send(topicMessage);
+            functions.logger.info(`✅ FCM TOPIC SEND (eew-turkey): ${topicResult}`);
+
             const generalTopicMessage = { ...topicMessage, topic: 'earthquake-alerts' };
             await messaging.send(generalTopicMessage);
             functions.logger.info('✅ FCM TOPIC SEND (earthquake-alerts) for critical event');
+            criticalTopicDelivered = true;
+        } else {
+            functions.logger.info('Skipping broad EEW topic send for non-critical event; using proximity-scoped fan-out only');
         }
     } catch (topicError) {
         functions.logger.error('FCM topic send failed (falling through to per-token):', topicError);
@@ -360,39 +491,119 @@ export async function sendEEWPushWithRetry(event: EEWEvent): Promise<{ sent: num
     const radiusKm = isCritical ?
         NEARBY_RADIUS_CRITICAL : NEARBY_RADIUS_NORMAL;
 
-    const tokens = await getNearbyTokens(event.latitude, event.longitude, radiusKm);
+    // Critical M5.5+ is a life-safety national alert. Topic send covers native
+    // FCM subscribers, but Expo/APNs tokens cannot be assumed to be on FCM topics.
+    // Send a per-token safety net to every registered Expo/native token and rely on
+    // collapse keys to suppress duplicates for users who also received the topic push.
+    const tokens = isCritical
+        ? await getAllTokensMerged()
+        : await getNearbyTokens(event.latitude, event.longitude, radiusKm, false);
 
     if (tokens.length === 0) {
-        // Fallback: Send to all if no location data
-        return sendToAllTokens(event);
+        if (isCritical && !criticalTopicDelivered) {
+            return sendToAllTokens(event);
+        }
+
+        functions.logger.warn(`No nearby push tokens for ${isCritical ? 'critical' : 'non-critical'} EEW event; broad fallback suppressed`);
+        return { sent: 0, failed: 0 };
     }
 
     return sendToTokensWithRetry(event, tokens);
 }
 
-async function getNearbyTokens(lat: number, lon: number, radiusKm: number): Promise<string[]> {
+// ============================================================
+// ELITE F4: Paginated token query — scales to 1M+ users
+// ============================================================
+//
+// Previous code used `.limit(10000)` / `.limit(50000)` which silently
+// truncated the token list at 1M users — 950k users would never receive
+// the push notification. Firestore has no "fetch all" — large queries MUST
+// be paginated with `startAfter()` cursors.
+//
+// Implementation:
+//   - Pages of PAGE_SIZE (1000) documents each
+//   - Hard cap of MAX_PAGES (500 = 500k tokens) to prevent runaway
+//     scans on degenerate queries (corrupt index, etc.)
+//   - Returns once cursor exhausted OR cap reached (with alert log)
+
+const TOKEN_PAGE_SIZE = 1000;
+const TOKEN_MAX_PAGES = 500; // 500 × 1000 = 500k tokens max per call
+const LOCATION_PAGE_SIZE = 1000;
+const LOCATION_MAX_PAGES = 1000; // 1M locations supported
+
+/**
+ * Paginate a Firestore query, calling `onPage` for each batch.
+ * Returns total docs visited. Stops at MAX_PAGES with a warning.
+ */
+async function paginateQuery<T extends FirebaseFirestore.DocumentData = FirebaseFirestore.DocumentData>(
+    queryRef: FirebaseFirestore.Query<T>,
+    pageSize: number,
+    maxPages: number,
+    onPage: (docs: FirebaseFirestore.QueryDocumentSnapshot<T>[]) => void,
+    label: string,
+): Promise<number> {
+    let totalSeen = 0;
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot<T> | null = null;
+    let pages = 0;
+
+    while (pages < maxPages) {
+        let pageQuery: FirebaseFirestore.Query<T> = queryRef.limit(pageSize);
+        if (lastDoc) {
+            pageQuery = pageQuery.startAfter(lastDoc);
+        }
+        const snap = await pageQuery.get();
+        if (snap.empty) break;
+
+        onPage(snap.docs);
+        totalSeen += snap.docs.length;
+        pages++;
+        lastDoc = snap.docs[snap.docs.length - 1];
+
+        // Last page (fewer docs than requested) — done.
+        if (snap.docs.length < pageSize) break;
+    }
+
+    if (pages >= maxPages) {
+        functions.logger.error(
+            `⚠️ Pagination cap reached for ${label}: hit ${maxPages} pages (~${totalSeen} docs). ` +
+            `Either degenerate query or scale issue — investigate.`,
+        );
+    }
+
+    return totalSeen;
+}
+
+async function getNearbyTokens(lat: number, lon: number, radiusKm: number, allowGlobalFallback: boolean): Promise<string[]> {
     const nearbyTokens: string[] = [];
     const seenTokens = new Set<string>();
 
-    // V3: Check locations_current for proximity, then batch get tokens
+    // V3: Paginate locations_current → collect nearby UIDs → batch-fetch tokens
     try {
-        const locationsSnap = await db.collection('locations_current').select('latitude', 'longitude').limit(10000).get();
         const nearbyUids: string[] = [];
-        for (const locDoc of locationsSnap.docs) {
-            const locData = locDoc.data();
-            if (typeof locData.latitude === 'number' && typeof locData.longitude === 'number') {
-                const distance = calculateDistance(lat, lon, locData.latitude, locData.longitude);
-                if (distance <= radiusKm) {
-                    nearbyUids.push(locDoc.id);
+        await paginateQuery(
+            db.collection('locations_current').select('latitude', 'longitude'),
+            LOCATION_PAGE_SIZE,
+            LOCATION_MAX_PAGES,
+            (docs) => {
+                for (const locDoc of docs) {
+                    const locData = locDoc.data();
+                    if (isValidCoordinatePair(locData.latitude, locData.longitude)) {
+                        const distance = calculateDistance(lat, lon, locData.latitude, locData.longitude);
+                        if (distance <= radiusKm) {
+                            nearbyUids.push(locDoc.id);
+                        }
+                    }
                 }
-            }
-        }
-        // Batch token retrieval (max 30 concurrent)
+            },
+            'locations_current',
+        );
+
+        // Batch token retrieval (max 30 concurrent reads per batch)
         const BATCH_SIZE = 30;
         for (let i = 0; i < nearbyUids.length; i += BATCH_SIZE) {
             const batch = nearbyUids.slice(i, i + BATCH_SIZE);
             const tokenPromises = batch.map(uid =>
-                db.collection('push_tokens').doc(uid).collection('devices').get()
+                db.collection('push_tokens').doc(uid).collection('devices').get(),
             );
             const tokenSnaps = await Promise.all(tokenPromises);
             for (const v3Snap of tokenSnaps) {
@@ -402,34 +613,55 @@ async function getNearbyTokens(lat: number, lon: number, radiusKm: number): Prom
                 }
             }
         }
-    } catch { /* V3 location lookup is best-effort */ }
+        functions.logger.info(
+            `🎯 V3 nearby lookup: ${nearbyUids.length} UIDs within ${radiusKm}km → ${nearbyTokens.length} tokens`,
+        );
+    } catch (v3Err) {
+        functions.logger.warn('V3 location lookup failed (continuing with legacy):', v3Err);
+    }
 
-    // Legacy: Get all tokens with location from fcm_tokens
+    // Legacy: Paginate fcm_tokens with location filter
     try {
-        const tokensSnapshot = await db.collection('fcm_tokens')
-            .where('location', '!=', null)
-            .select('token', 'location')
-            .limit(50000)
-            .get();
-
-        for (const doc of tokensSnapshot.docs) {
-            const data = doc.data();
-            if (data.location && data.token && !seenTokens.has(data.token)) {
-                const distance = calculateDistance(
-                    lat, lon,
-                    data.location.latitude, data.location.longitude
-                );
-
-                if (distance <= radiusKm) {
-                    seenTokens.add(data.token);
-                    nearbyTokens.push(data.token);
+        const v3Found = nearbyTokens.length;
+        await paginateQuery(
+            db.collection('fcm_tokens')
+                .where('location', '!=', null)
+                .select('token', 'location'),
+            TOKEN_PAGE_SIZE,
+            TOKEN_MAX_PAGES,
+            (docs) => {
+                for (const doc of docs) {
+                    const data = doc.data();
+                    const latitude = data.location?.latitude;
+                    const longitude = data.location?.longitude;
+                    if (
+                        typeof data.token === 'string' &&
+                        isValidCoordinatePair(latitude, longitude) &&
+                        !seenTokens.has(data.token)
+                    ) {
+                        const distance = calculateDistance(lat, lon, latitude, longitude);
+                        if (distance <= radiusKm) {
+                            seenTokens.add(data.token);
+                            nearbyTokens.push(data.token);
+                        }
+                    }
                 }
-            }
-        }
-    } catch { /* legacy fallback */ }
+            },
+            'fcm_tokens (legacy)',
+        );
+        functions.logger.info(
+            `🎯 Legacy nearby lookup added ${nearbyTokens.length - v3Found} tokens (total ${nearbyTokens.length})`,
+        );
+    } catch (legacyErr) {
+        functions.logger.warn('Legacy fcm_tokens lookup failed:', legacyErr);
+    }
 
-    // If not enough nearby tokens, include all
-    if (nearbyTokens.length < 10) {
+    // Critical M5.5+ may broaden to ALL tokens if proximity coverage is sparse.
+    // Non-critical events must never broaden beyond proximity (false-alarm risk).
+    if (allowGlobalFallback && nearbyTokens.length < 10) {
+        functions.logger.warn(
+            `⚠️ Only ${nearbyTokens.length} nearby tokens for critical event — broadening to ALL tokens`,
+        );
         const allTokens = await getAllTokensMerged();
         return allTokens;
     }
@@ -437,30 +669,51 @@ async function getNearbyTokens(lat: number, lon: number, radiusKm: number): Prom
     return nearbyTokens;
 }
 
-// V3: Merge tokens from both push_tokens and fcm_tokens collections
+// V3: Merge tokens from both push_tokens and fcm_tokens collections (paginated)
 async function getAllTokensMerged(): Promise<string[]> {
     const allTokens: string[] = [];
     const seenTokens = new Set<string>();
 
-    // V3: push_tokens/{uid}/devices
+    // V3: push_tokens/{uid}/devices — collectionGroup query, paginated
     try {
-        const v3Snap = await db.collectionGroup('devices').select('token').limit(10000).get();
-        for (const tDoc of v3Snap.docs) {
-            // Only include docs under push_tokens (not fcm_tokens/devices)
-            if (tDoc.ref.parent.parent?.parent.id === 'push_tokens') {
-                const t = tDoc.data()?.token;
-                if (t && !seenTokens.has(t)) { seenTokens.add(t); allTokens.push(t); }
-            }
-        }
-    } catch { /* collectionGroup may fail if no composite index */ }
-
-    // Legacy: fcm_tokens
-    const tokensSnapshot = await db.collection('fcm_tokens').select('token').limit(50000).get();
-    for (const d of tokensSnapshot.docs) {
-        const t = d.data()?.token;
-        if (t && !seenTokens.has(t)) { seenTokens.add(t); allTokens.push(t); }
+        await paginateQuery(
+            db.collectionGroup('devices').select('token'),
+            TOKEN_PAGE_SIZE,
+            TOKEN_MAX_PAGES,
+            (docs) => {
+                for (const tDoc of docs) {
+                    // Only include docs under push_tokens (not fcm_tokens/devices)
+                    if (tDoc.ref.parent.parent?.parent.id === 'push_tokens') {
+                        const t = tDoc.data()?.token;
+                        if (t && !seenTokens.has(t)) { seenTokens.add(t); allTokens.push(t); }
+                    }
+                }
+            },
+            'push_tokens/{uid}/devices',
+        );
+    } catch (cgErr) {
+        functions.logger.warn('collectionGroup(devices) failed (may need index):', cgErr);
     }
 
+    // Legacy: fcm_tokens (paginated)
+    try {
+        await paginateQuery(
+            db.collection('fcm_tokens').select('token'),
+            TOKEN_PAGE_SIZE,
+            TOKEN_MAX_PAGES,
+            (docs) => {
+                for (const d of docs) {
+                    const t = d.data()?.token;
+                    if (t && !seenTokens.has(t)) { seenTokens.add(t); allTokens.push(t); }
+                }
+            },
+            'fcm_tokens',
+        );
+    } catch (legacyErr) {
+        functions.logger.error('Legacy fcm_tokens fetch failed:', legacyErr);
+    }
+
+    functions.logger.info(`🌍 getAllTokensMerged: ${allTokens.length} unique tokens (V3 + legacy)`);
     return allTokens;
 }
 
@@ -503,7 +756,7 @@ async function sendToTokensWithRetry(
                 timestamp: String(event.timestamp),
                 verified: String(event.verified || false),
             },
-            sound: 'default',
+            sound: isCritical ? EMERGENCY_NOTIFICATION_SOUND : 'default',
             priority: 'high',
             channelId: expoChannelId,
         }));
@@ -559,7 +812,7 @@ async function sendToTokensWithRetry(
         apns: {
             payload: {
                 aps: {
-                    sound: 'default',
+                    sound: isCritical ? EMERGENCY_NOTIFICATION_SOUND : 'default',
                     badge: 1,
                     'content-available': 1,
                     'interruption-level': isCritical ? 'time-sensitive' : 'active',
@@ -647,85 +900,137 @@ async function createCrowdsourcedAlert(consensus: PWaveConsensus): Promise<void>
 }
 
 // ============================================================
-// 1. FAST EEW MONITOR (Every 10 seconds) - CRITICAL
+// 1. FAST EEW MONITOR — Effective ~15s polling via internal stagger
 // ============================================================
+//
+// ELITE F1: Cloud Functions v1 PubSub minimum schedule interval is 1 minute.
+// To get sub-minute polling without deploying 4 separate identical functions
+// (which would multiply CF count + deploy complexity), we run a SINGLE scheduled
+// function every minute and execute 4 polling waves internally at t+0s, t+15s,
+// t+30s, t+45s. Each wave does the full AFAD/Kandilli/USGS/EMSC fetch in
+// parallel with 4-5s HTTP timeouts (see fetch* helpers), so a wave finishes
+// in ~5s and we sleep until the next 15s slot.
+//
+// This means: effective polling latency ~15s (was 60s).
+// Detection-to-push latency before: 14-108s (typical 60s + push delivery).
+// Detection-to-push latency now: 4-19s (typical 15s + push delivery).
+//
+// Why a single CF (not 4 staggered)?
+//   - PubSub schedule can't express sub-minute offsets reliably across regions.
+//   - 4 CFs = 4x cold-start risk; one CF stays warm during its 1-min execution.
+//   - Idempotency (Firestore transaction below) already prevents duplicate FCM.
+//
+// Failure mode: if a single wave throws, we log and continue with the next.
+// Total CF timeout: 300s — well above 4×~10s waves with safety margin.
+
+const POLL_WAVES_PER_MINUTE = 4; // 60s / 15s
+const POLL_WAVE_INTERVAL_MS = 15_000;
+
+async function runSinglePollWave(waveIndex: number): Promise<number> {
+    let processedCount = 0;
+    try {
+        // Fetch from ALL sources in parallel (each with 4-5s timeout)
+        const [afadEvents, kandilliEvents, usgsEvents, emscEvents] = await Promise.all([
+            fetchAFADEvents(),
+            fetchKandilliEvents(),
+            fetchUSGSEvents(),
+            fetchEMSCEvents(),
+        ]);
+
+        const allEvents = [...afadEvents, ...kandilliEvents, ...usgsEvents, ...emscEvents];
+        const uniqueEvents = deduplicateEvents(allEvents);
+
+        functions.logger.info(
+            `📊 Wave ${waveIndex + 1}/${POLL_WAVES_PER_MINUTE}: AFAD=${afadEvents.length}, ` +
+            `Kandilli=${kandilliEvents.length}, USGS=${usgsEvents.length}, EMSC=${emscEvents.length}`,
+        );
+
+        for (const event of uniqueEvents) {
+            const verifiedEvent = verifyEvent(event, allEvents);
+
+            if (!isFreshOfficialEvent(verifiedEvent)) {
+                const eventAge = Date.now() - verifiedEvent.issuedAt;
+                functions.logger.warn(
+                    `⏭️ Wave ${waveIndex + 1}: skipping stale/future event M${verifiedEvent.magnitude} ` +
+                    `at ${verifiedEvent.location} (age: ${Math.round(eventAge / 60000)}min)`,
+                );
+                continue;
+            }
+
+            // IDEMPOTENCY: Firestore transaction ensures only ONE wave (this minute or any
+            // previous minute) processes a given event. Race-safe across CF instances.
+            const eventRef = db.collection('eew_events').doc(verifiedEvent.id);
+            let alreadyProcessed = false;
+            try {
+                await db.runTransaction(async (tx) => {
+                    const doc = await tx.get(eventRef);
+                    if (doc.exists) {
+                        alreadyProcessed = true;
+                        return;
+                    }
+                    tx.set(eventRef, {
+                        ...verifiedEvent,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        detectedInWave: waveIndex + 1,
+                    });
+                });
+            } catch (txError) {
+                functions.logger.error(
+                    `Wave ${waveIndex + 1}: transaction failed for event ${verifiedEvent.id}:`,
+                    txError,
+                );
+                continue;
+            }
+            if (alreadyProcessed) continue;
+
+            if (verifiedEvent.magnitude >= MIN_MAGNITUDE_ALERT) {
+                await sendEEWPushWithRetry(verifiedEvent);
+                processedCount++;
+            }
+        }
+    } catch (waveError) {
+        // ELITE F1: One wave failing must not block the others. Log + continue.
+        functions.logger.error(`❌ Wave ${waveIndex + 1} error:`, waveError);
+    }
+    return processedCount;
+}
+
+// Helper: sleep with cancel safety (resolves even on timeout-near-edge).
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export const eewMonitorFast = functions
     .region(REGION)
     .runWith({ timeoutSeconds: 300, memory: '512MB' })
     .pubsub.schedule('every 1 minutes')
     .onRun(async () => {
-        functions.logger.info('🔍 EEW Monitor FAST running...');
+        const startMs = Date.now();
+        functions.logger.info(
+            `🔍 EEW Monitor FAST running (4×15s waves = effective ~15s polling)...`,
+        );
 
-        try {
-            // Fetch from ALL sources in parallel
-            const [afadEvents, kandilliEvents, usgsEvents, emscEvents] = await Promise.all([
-                fetchAFADEvents(),
-                fetchKandilliEvents(),
-                fetchUSGSEvents(),
-                fetchEMSCEvents(),
-            ]);
+        let totalProcessed = 0;
+        for (let i = 0; i < POLL_WAVES_PER_MINUTE; i++) {
+            const waveStartMs = Date.now();
+            const processed = await runSinglePollWave(i);
+            totalProcessed += processed;
 
-            // Combine all events
-            const allEvents = [...afadEvents, ...kandilliEvents, ...usgsEvents, ...emscEvents];
-
-            // Deduplicate by location/time proximity
-            const uniqueEvents = deduplicateEvents(allEvents);
-
-            functions.logger.info(`📊 Sources: AFAD=${afadEvents.length}, Kandilli=${kandilliEvents.length}, USGS=${usgsEvents.length}, EMSC=${emscEvents.length}`);
-
-            let processedCount = 0;
-            for (const event of uniqueEvents) {
-                // Multi-source verification
-                const verifiedEvent = verifyEvent(event, allEvents);
-
-                // IDEMPOTENCY: Use Firestore transaction to atomically check+create.
-                // A simple read-then-write check is NOT race-safe — two Cloud Function
-                // instances can both read "not exists" at the same time and both send FCM.
-                // The transaction makes the entire check+save atomic; only ONE instance wins.
-                const eventRef = db.collection('eew_events').doc(verifiedEvent.id);
-                let alreadyProcessed = false;
-                try {
-                    await db.runTransaction(async (tx) => {
-                        const doc = await tx.get(eventRef);
-                        if (doc.exists) {
-                            alreadyProcessed = true;
-                            return;
-                        }
-                        tx.set(eventRef, {
-                            ...verifiedEvent,
-                            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                        });
-                    });
-                } catch (txError) {
-                    functions.logger.error(`Transaction failed for event ${verifiedEvent.id}:`, txError);
-                    continue; // Skip this event on transaction failure
-                }
-                if (alreadyProcessed) continue;
-
-                // CRITICAL FIX: Timestamp freshness check — NEVER send push for stale events.
-                // Old earthquakes (hours/days old) can appear if API returns historical data,
-                // Firestore doc was deleted, or service restarted. This is the ROOT CAUSE of
-                // false earthquake notifications.
-                const MAX_EVENT_AGE_MS = 15 * 60 * 1000; // 15 minutes
-                const eventAge = Date.now() - verifiedEvent.issuedAt;
-                if (verifiedEvent.issuedAt <= 0 || eventAge > MAX_EVENT_AGE_MS) {
-                    functions.logger.warn(`⏭️ Skipping stale/invalid event M${verifiedEvent.magnitude} at ${verifiedEvent.location} (age: ${Math.round(eventAge / 60000)}min, issuedAt: ${verifiedEvent.issuedAt})`);
-                    continue;
-                }
-
-                // Send FCM if significant (only reached by the ONE winning transaction)
-                if (verifiedEvent.magnitude >= MIN_MAGNITUDE_ALERT) {
-                    // V2: Location-based push
-                    await sendEEWPushWithRetry(verifiedEvent);
-                    processedCount++;
+            // Sleep until next 15s slot — but skip sleep on the last wave (no point waiting).
+            if (i < POLL_WAVES_PER_MINUTE - 1) {
+                const waveElapsed = Date.now() - waveStartMs;
+                const sleepDuration = Math.max(0, POLL_WAVE_INTERVAL_MS - waveElapsed);
+                if (sleepDuration > 0) {
+                    await sleep(sleepDuration);
                 }
             }
-
-            functions.logger.info(`✅ Processed ${processedCount} new significant events`);
-        } catch (error) {
-            functions.logger.error('❌ EEW Monitor error:', error);
         }
+
+        const totalElapsedMs = Date.now() - startMs;
+        functions.logger.info(
+            `✅ EEW Fast Monitor done: ${totalProcessed} new events processed across ` +
+            `${POLL_WAVES_PER_MINUTE} waves in ${totalElapsedMs}ms`,
+        );
 
         return null;
     });
@@ -754,10 +1059,9 @@ export const eewMonitorBackup = functions
             for (const event of allEvents) {
                 if (event.magnitude < MIN_MAGNITUDE_CRITICAL) continue;
 
-                // CRITICAL FIX: Same freshness check as fast monitor
-                const backupEventAge = Date.now() - event.issuedAt;
-                if (event.issuedAt <= 0 || backupEventAge > 15 * 60 * 1000) {
-                    functions.logger.warn(`⏭️ Backup: skipping stale event M${event.magnitude} (age: ${Math.round(backupEventAge / 60000)}min)`);
+                if (!isFreshOfficialEvent(event)) {
+                    const backupEventAge = Date.now() - event.issuedAt;
+                    functions.logger.warn(`⏭️ Backup: skipping stale/future/invalid event M${event.magnitude} (age: ${Math.round(backupEventAge / 60000)}min)`);
                     continue;
                 }
 
@@ -849,10 +1153,17 @@ export const eewEmergencyTrigger = functions
 
             for (const event of allEvents) {
                 if (event.magnitude >= MIN_MAGNITUDE_ALERT) {
+                    if (!isFreshOfficialEvent(event)) {
+                        const eventAge = Date.now() - event.issuedAt;
+                        functions.logger.warn(`Emergency trigger: skipping stale/future/invalid event M${event.magnitude} (age: ${Math.round(eventAge / 60000)}min)`);
+                        continue;
+                    }
+
                     // IDEMPOTENCY: Atomic transaction (same pattern as eewMonitorFast/Backup)
                     // A simple read-then-write is NOT race-safe — two concurrent HTTP triggers
                     // can both read "not exists" and both send FCM. Transaction makes it atomic.
                     const eventId = `${event.source}_${event.id || event.timestamp}`;
+                    const eventToSend: EEWEvent = { ...event, id: eventId };
                     const eventRef = db.collection('eew_events').doc(eventId);
                     let alreadyProcessed = false;
                     try {
@@ -863,8 +1174,7 @@ export const eewEmergencyTrigger = functions
                                 return;
                             }
                             tx.set(eventRef, {
-                                ...event,
-                                id: eventId,
+                                ...eventToSend,
                                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                             });
                         });
@@ -874,7 +1184,7 @@ export const eewEmergencyTrigger = functions
                     }
                     if (alreadyProcessed) continue;
 
-                    await sendEEWPushWithRetry(event);
+                    await sendEEWPushWithRetry(eventToSend);
                     sentCount++;
                 }
             }

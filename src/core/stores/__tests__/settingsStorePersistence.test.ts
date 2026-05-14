@@ -116,6 +116,113 @@ describe('settingsStore EULA persistence hardening', () => {
     expect(useSettingsStore.getState().eulaAccepted).toBe(true);
   });
 
+  it('defaults general earthquake notifications to M5.0 and above', () => {
+    const { directStorage, eliteStorage } = createStorage();
+
+    jest.doMock('../../utils/storage', () => ({
+      DirectStorage: directStorage,
+      eliteStorage,
+      isStorageReady: () => true,
+      waitForStorageReady: () => Promise.resolve(),
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSettingsStore } = require('../settingsStore');
+    expect(useSettingsStore.getState().minMagnitudeForNotification).toBe(5.0);
+  });
+
+  it('migrates the legacy M4.0 notification default to M5.0', () => {
+    const { directStorage, eliteStorage } = createStorage({
+      'afetnet-settings': JSON.stringify({
+        state: {
+          minMagnitudeForNotification: 4.0,
+        },
+        version: 0,
+      }),
+    });
+
+    jest.doMock('../../utils/storage', () => ({
+      DirectStorage: directStorage,
+      eliteStorage,
+      isStorageReady: () => true,
+      waitForStorageReady: () => Promise.resolve(),
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSettingsStore } = require('../settingsStore');
+    expect(useSettingsStore.getState().minMagnitudeForNotification).toBe(5.0);
+    expect(useSettingsStore.getState().earthquakeNotificationDefaultMigratedToM5).toBe(true);
+  });
+
+  it('preserves non-default custom earthquake notification thresholds during migration', () => {
+    const { directStorage, eliteStorage } = createStorage({
+      'afetnet-settings': JSON.stringify({
+        state: {
+          minMagnitudeForNotification: 4.5,
+        },
+        version: 0,
+      }),
+    });
+
+    jest.doMock('../../utils/storage', () => ({
+      DirectStorage: directStorage,
+      eliteStorage,
+      isStorageReady: () => true,
+      waitForStorageReady: () => Promise.resolve(),
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSettingsStore } = require('../settingsStore');
+    expect(useSettingsStore.getState().minMagnitudeForNotification).toBe(4.5);
+    expect(useSettingsStore.getState().earthquakeNotificationDefaultMigratedToM5).toBe(true);
+  });
+
+  it('rejects invalid quiet-hour time updates', () => {
+    const { directStorage, eliteStorage } = createStorage();
+
+    jest.doMock('../../utils/storage', () => ({
+      DirectStorage: directStorage,
+      eliteStorage,
+      isStorageReady: () => true,
+      waitForStorageReady: () => Promise.resolve(),
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSettingsStore } = require('../settingsStore');
+
+    useSettingsStore.getState().setQuietHoursStart('21:30');
+    useSettingsStore.getState().setQuietHoursStart('99:99');
+    useSettingsStore.getState().setQuietHoursEnd('06:45');
+    useSettingsStore.getState().setQuietHoursEnd('bad');
+
+    expect(useSettingsStore.getState().quietHoursStart).toBe('21:30');
+    expect(useSettingsStore.getState().quietHoursEnd).toBe('06:45');
+  });
+
+  it('drops invalid persisted quiet-hour values during hydration', () => {
+    const { directStorage, eliteStorage } = createStorage({
+      'afetnet-settings': JSON.stringify({
+        state: {
+          quietHoursStart: '99:99',
+          quietHoursEnd: '06:45',
+        },
+        version: 0,
+      }),
+    });
+
+    jest.doMock('../../utils/storage', () => ({
+      DirectStorage: directStorage,
+      eliteStorage,
+      isStorageReady: () => true,
+      waitForStorageReady: () => Promise.resolve(),
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSettingsStore } = require('../settingsStore');
+    expect(useSettingsStore.getState().quietHoursStart).toBe('22:00');
+    expect(useSettingsStore.getState().quietHoursEnd).toBe('06:45');
+  });
+
   it('reconciles accepted EULA after async storage fallback becomes ready', async () => {
     const seed = new Map<string, string>([
       ['AFETNET_EULA_ACCEPTED', '1'],

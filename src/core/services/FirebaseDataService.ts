@@ -526,7 +526,7 @@ class FirebaseDataService {
   async saveLocationUpdate(uid: string, location: any): Promise<boolean> {
     if (!this._isInitialized) return false;
     try {
-      const targetUid = await this.resolveUidForUserPath(uid, { allowCurrentUserFallback: false });
+      const targetUid = await this.resolveUidForUserPath(uid, { allowCurrentUserFallback: true });
       if (!targetUid) {
         logger.warn(`saveLocationUpdate skipped: unable to resolve UID from "${uid}"`);
         return false;

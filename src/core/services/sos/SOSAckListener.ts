@@ -176,9 +176,9 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
                     const store = useSOSStore.getState();
 
                     if (store.currentSignal) {
-                        const rescuerRef = typeof ackData.rescuerUid === 'string'
-                            ? ackData.rescuerUid
-                            : (typeof ackData.rescuerDeviceId === 'string' ? ackData.rescuerDeviceId : '');
+                        const rescuerUid = typeof ackData.rescuerUid === 'string' ? ackData.rescuerUid : '';
+                        const rescuerDeviceId = typeof ackData.rescuerDeviceId === 'string' ? ackData.rescuerDeviceId : '';
+                        const rescuerRef = rescuerUid || rescuerDeviceId;
                         store.addAck({
                             id: ackId,
                             receiverId: rescuerRef,
@@ -187,6 +187,20 @@ export async function startSOSAckListener(myDeviceId: string): Promise<void> {
                             type: ackData.type === 'on_the_way' ? 'responding' : 'received',
                             distance: undefined,
                         });
+
+                        // P0-2: Rescuer has explicitly ACK'd. Add them to the
+                        // health-sharing allowlist so directed HEALTH_SOS packets
+                        // can reach them. Both uid and deviceId are added because
+                        // BLE peer IDs and Firebase UIDs come from different
+                        // namespaces.
+                        try {
+                            // eslint-disable-next-line @typescript-eslint/no-require-imports
+                            const { emergencyHealthSharingService } = require('../EmergencyHealthSharingService');
+                            if (rescuerUid) emergencyHealthSharingService.addRescuerPeer(rescuerUid);
+                            if (rescuerDeviceId) emergencyHealthSharingService.addRescuerPeer(rescuerDeviceId);
+                        } catch (healthError) {
+                            if (__DEV__) logger.debug('Failed to register rescuer for health allowlist:', healthError);
+                        }
                     }
                 } catch (storeError) {
                     logger.error('Failed to update SOS store with ACK:', storeError);
