@@ -152,12 +152,14 @@ describe('timeUtils', () => {
       expect(result).toBeGreaterThan(0);
     });
 
-    it('should treat date without timezone as Turkey local time', () => {
-      // 22:30:00 Turkey time = 19:30:00 UTC
+    it('should treat AFAD ISO date (no timezone) as UTC — görev #10 regression', () => {
+      // AFAD APIv2 dates have no timezone suffix and ARE UTC (confirmed by
+      // functions/eew.ts:113-117 + live AFAD verification). The old client
+      // code treated AFAD timestamps as Turkey local (+03:00), drifting them
+      // 3h forward and causing the ±5min freshness gate to reject EVERY live
+      // AFAD event — silently killing the client-side AFAD EEW path.
       const result = parseAFADDate('2025-01-15T22:30:00');
-      const date = new Date(result);
-      // Year should be 2025
-      expect(date.getUTCFullYear()).toBe(2025);
+      expect(new Date(result).toISOString()).toBe('2025-01-15T22:30:00.000Z');
     });
   });
 });

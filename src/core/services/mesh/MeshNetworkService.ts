@@ -1686,7 +1686,12 @@ class MeshNetworkService {
     const magic = payload.readUInt8(0);
     if (magic !== BLE_CHUNK_MAGIC) return false;
     const totalChunks = payload.readUInt8(4);
-    return totalChunks > 1 && totalChunks <= 255;
+    // mesh-chunk fix: totalChunks==1 da geçerli. chunkForGATT sınır durumlarda 1
+    // chunk üretebilir (payload.length === chunkDataSize); eskiden bu durumda
+    // false dönüp alıcı ham 0xCE-başlıklı veriyi JSON olarak ayrıştırmaya
+    // çalışıyor ve sessizce düşürüyordu. processIncomingChunk 1-chunk durumunu
+    // zaten doğru ele alıyor (tek parça = tam mesaj, anında reassemble).
+    return totalChunks >= 1 && totalChunks <= 255;
   }
 
   /**
@@ -2960,22 +2965,33 @@ class MeshNetworkService {
 
             // ELITE V4: Direct full-screen alert for offline SOS
             // Direct emit guarantees the alert shows even if expo-notifications isn't initialized.
+            //
+            // KRİTİK (LIFE-SAFETY GAP fix): SOSAlertListener (Firestore yolu) AppState
+            // kontrolü yapıyor; mesh yolu yapmıyordu — emit'ten sonra koşulsuz
+            // `meshSosFullScreenEmitted = true` set edip OS notification fallback'i
+            // hep atlıyordu. Sonuç: backgrounded uygulamada DeviceEventEmitter
+            // dinleyicisi görünür render edemez → SOS BLE üzerinden geldi ama
+            // kullanıcı hiçbir şey görmedi/duymadı. Düzeltme: sadece app
+            // FOREGROUND'daysa emit'i "yeterli" say; aksi halde OS notification
+            // fallback'ine düş (line 2982).
             let meshSosFullScreenEmitted = false;
             try {
-              const { DeviceEventEmitter } = require('react-native');
+              const { AppState, DeviceEventEmitter } = require('react-native');
               const directName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
-              DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
-                signalId: messageId,
-                senderDeviceId: senderId,
-                senderUid: (typeof parsedEnvelope?.senderUid === 'string' && parsedEnvelope.senderUid) || (typeof parsedEnvelope?.userId === 'string' && parsedEnvelope.userId) || senderId,
-                senderName: directName,
-                message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
-                latitude: typeof sosLat === 'number' && isFinite(sosLat) ? sosLat : undefined,
-                longitude: typeof sosLng === 'number' && isFinite(sosLng) ? sosLng : undefined,
-                trapped: isTrapped,
-              });
-              meshSosFullScreenEmitted = true;
-            } catch { /* DeviceEventEmitter is always available in RN */ }
+              if (AppState.currentState === 'active') {
+                DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
+                  signalId: messageId,
+                  senderDeviceId: senderId,
+                  senderUid: (typeof parsedEnvelope?.senderUid === 'string' && parsedEnvelope.senderUid) || (typeof parsedEnvelope?.userId === 'string' && parsedEnvelope.userId) || senderId,
+                  senderName: directName,
+                  message: content || 'Acil yardım gerekiyor! (BLE Mesh)',
+                  latitude: typeof sosLat === 'number' && isFinite(sosLat) ? sosLat : undefined,
+                  longitude: typeof sosLng === 'number' && isFinite(sosLng) ? sosLng : undefined,
+                  trapped: isTrapped,
+                });
+                meshSosFullScreenEmitted = true;
+              }
+            } catch { /* AppState / DeviceEventEmitter always available in RN */ }
 
             // Show local notification ONLY if full-screen alert was NOT shown
             // (prevents double alarm sound from notification + full-screen alert)

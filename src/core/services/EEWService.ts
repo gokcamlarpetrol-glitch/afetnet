@@ -689,7 +689,21 @@ class EEWService {
     try {
       // AFAD API format support
       const eventDate = data.eventDate || data.date || data.originTime || data.time;
-      const eventId = data.eventID || data.eventId || data.id || String(Date.now());
+      // KRİTİK (EEW dedup): Eski fallback `String(Date.now())` her poll'da YENİ id
+      // üretiyordu — aynı fiziksel olay her 5-15sn'lik poll cycle'da farklı id'ye
+      // sahip oluyor, seenEvents.has() hep false dönüyor, AYNI deprem TEKRAR TEKRAR
+      // alarm üretiyordu (kaynak alanlar eksikse veya yeniden adlandırılmışsa).
+      // Çözüm: kaynak yokken kompozit stable id — (lat, lon, mag, time-minute).
+      // Aynı dakikadaki aynı olay aynı id'yi alır → dedup çalışır.
+      const fallbackId = (() => {
+        const lat = Number(data.geojson?.coordinates?.[1] ?? data.latitude ?? data.lat ?? 0);
+        const lon = Number(data.geojson?.coordinates?.[0] ?? data.longitude ?? data.lng ?? 0);
+        const mag = Number(data.mag ?? data.magnitude ?? data.ml ?? 0);
+        const parsedT = eventDate ? Date.parse(String(eventDate)) : NaN;
+        const tMinute = Number.isFinite(parsedT) ? Math.floor(parsedT / 60000) : Math.floor(Date.now() / 60000);
+        return `composite-${lat.toFixed(2)}-${lon.toFixed(2)}-${mag.toFixed(1)}-${tMinute}`;
+      })();
+      const eventId = data.eventID || data.eventId || data.id || fallbackId;
 
       // Location parsing - AFAD uses geojson.coordinates or lat/lng
       const latitude = parseFloat(

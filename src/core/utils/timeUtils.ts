@@ -175,9 +175,18 @@ export function getTimeDifferenceTurkish(timestamp: number): string {
 }
 
 /**
- * Parse AFAD API date string to timestamp
- * AFAD API returns dates in format: "2025-11-10T01:42:12" (Turkey local time, GMT+3)
- * ELITE: Correctly handle Turkey timezone conversion to UTC
+ * görev #10: Resmi deprem feed tarihlerini ms-since-epoch'a ayrıştırır.
+ *
+ * AFAD APIv2 (ISO-T formatı, "2025-11-10T22:27:06") tarihleri **UTC** olarak
+ * yayımlar — saat dilimi eki yoktur. Kandilli (KOERI lst0.asp, noktalı format
+ * "2025.11.10 22:27:06") ise **Türkiye yerel saatini** yayımlar. Sunucu
+ * (functions/eew.ts:113-117) bu ayrımı doğru yapıyor; istemci eskiden ikisini
+ * de Türkiye-yerel sanıp +03:00 ekliyordu → AFAD timestamp'leri 3 saat ileride
+ * çıkıyor, isFreshOfficialEvent (±5dk) TÜM AFAD olaylarını "stale" diye eliyor
+ * ve istemci-taraflı AFAD EEW yolu sessizce ölüyordu.
+ *
+ * Format farkı = kaynak farkı. Noktalı tarih varsa Kandilli (+03:00), ISO-T ise
+ * AFAD (Z). Mevcut isim 'parseAFADDate' geriye dönük uyumluluk için kalıyor.
  */
 export function parseAFADDate(dateString: string): number {
   try {
@@ -188,13 +197,12 @@ export function parseAFADDate(dateString: string): number {
       return Date.now();
     }
 
-    // AFAD API format: "2025-11-10T22:27:06" or "2025-11-10 22:27:06"
-    // Kandilli text format: "2025.11.10 22:27:06"
-    // CRITICAL: AFAD API v2 returns dates WITHOUT timezone info
-    // Based on AFAD web site, dates are displayed in Turkey local time
-    // However, API might return UTC or local time - we need to parse correctly
+    // AFAD APIv2 formatı: "2025-11-10T22:27:06" veya "2025-11-10 22:27:06" — UTC.
+    // Kandilli (KOERI) noktalı formatı: "2025.11.10 22:27:06" — Türkiye yerel saati.
+    // Format kaynağı netleştirir: noktalı varsa Kandilli, ISO-T varsa AFAD.
     let normalizedDate = dateString.trim();
     const dottedDateMatch = /^(\d{4})\.(\d{2})\.(\d{2})(.*)$/.exec(normalizedDate);
+    const isKandilliFormat = dottedDateMatch !== null;
     if (dottedDateMatch) {
       normalizedDate = `${dottedDateMatch[1]}-${dottedDateMatch[2]}-${dottedDateMatch[3]}${dottedDateMatch[4]}`;
     }
@@ -208,26 +216,16 @@ export function parseAFADDate(dateString: string): number {
       // Already has timezone - parse directly
       parsedDate = new Date(normalizedDate);
     } else {
-      // CRITICAL: AFAD API returns dates without timezone info
-      // Based on AFAD web site analysis:
-      // - Web site shows: "2025-11-10 22:27:06" (Turkey local time)
-      // - API returns: "2025-11-10T22:27:06" (same format, no timezone)
-      // - Web site and API dates match EXACTLY, meaning API returns Turkey local time
-      // 
-      // IMPORTANT: When API returns "2025-11-10T22:27:06", it means 22:27:06 in Turkey (UTC+3)
-      // To convert to UTC timestamp correctly:
-      // 1. Parse as Turkey timezone (UTC+3): "2025-11-10T22:27:06+03:00"
-      // 2. JavaScript converts to UTC: 2025-11-10T19:27:06Z (subtracts 3 hours)
-      // 3. When displaying, formatToTurkishTime converts back to Turkey timezone: 22:27:06
-      
-      // CRITICAL: AFAD API returns dates in Turkey local time (UTC+3)
-      // Based on AFAD web site: https://deprem.afad.gov.tr/last-earthquakes.html
-      // Web site shows: "2025-11-10 22:46:14" (Turkey local time)
-      // API returns: "2025-11-10T22:46:14" (same format, Turkey local time)
-      // 
-      // SOLUTION: ALWAYS parse as Turkey timezone (UTC+3)
-      // This ensures dates match exactly with AFAD web site
-      parsedDate = new Date(normalizedDate + '+03:00');
+      // görev #10: Saat dilimi eki yok — kaynak konvansiyonunu uygula.
+      // - Kandilli (noktalı format → isKandilliFormat=true): Türkiye yerel (+03:00).
+      //   Kandilli sayfası ve API'si yerel saat yayımlıyor; +03:00 doğru.
+      // - AFAD APIv2 (ISO-T format → isKandilliFormat=false): UTC ('Z').
+      //   Sunucu (functions/eew.ts:117 parseAfadUtcDateTime) UTC olarak ayrıştırıyor
+      //   ve canlı doğrulama (M5.6 Malatya, 2026-05-21) UTC olduğunu kanıtladı.
+      //   Eski kod ikisine de +03:00 uyguluyordu → AFAD timestamp'leri 3sa ileri
+      //   kayıyor, ±5dk freshness gate'i istemci AFAD yolunu öldürüyordu.
+      const tzSuffix = isKandilliFormat ? '+03:00' : 'Z';
+      parsedDate = new Date(normalizedDate + tzSuffix);
       
       // Validate parse succeeded
       if (isNaN(parsedDate.getTime())) {

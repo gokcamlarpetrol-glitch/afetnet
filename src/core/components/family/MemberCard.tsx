@@ -162,9 +162,20 @@ export const MemberCard = React.memo(function MemberCard({
 
   // Battery level
   const battery = member.batteryLevel ?? member.lastKnownLocation?.batteryLevelAtCapture;
-  const normalizedBatteryTs = normalizeTimestampMs(
-    member.batteryUpdatedAt ?? member.location?.timestamp ?? member.lastKnownLocation?.timestamp,
-  );
+  // KRİTİK (aile-pil-tazelik): pil zaman damgası, pil DEĞERİYLE aynı kaynaktan
+  // gelmeli. Önceki kod `?? member.location?.timestamp` ile CANLI GPS zaman
+  // damgasına düşüyordu — pil ve GPS bağımsız telemetri; GPS taze ama pil 1 gün
+  // önceyse, batarya simgesi yanlışlıkla "taze" görünüyordu (kullanıcı orijinal
+  // bug raporu — "şarj yanlıştı"). Doğru fallback zinciri:
+  //   batteryLevel (canlı) → batteryUpdatedAt
+  //   lastKnownLocation.batteryLevelAtCapture → lastKnownLocation.timestamp
+  //   GPS timestamp'i ASLA kullanılmaz.
+  const batteryTs = member.batteryLevel !== undefined
+    ? member.batteryUpdatedAt
+    : member.lastKnownLocation?.batteryLevelAtCapture !== undefined
+      ? member.lastKnownLocation?.timestamp
+      : undefined;
+  const normalizedBatteryTs = normalizeTimestampMs(batteryTs);
   const isBatteryStale = !!normalizedBatteryTs && Date.now() - normalizedBatteryTs > STALE_OLD_MS;
   const batteryColor = battery !== undefined
     ? isBatteryStale ? '#94a3b8' : battery > 40 ? '#22c55e' : battery > 20 ? '#f59e0b' : '#ef4444'
