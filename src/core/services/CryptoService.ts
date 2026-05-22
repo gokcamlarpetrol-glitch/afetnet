@@ -178,7 +178,12 @@ class CryptoService {
         // SECURITY FIX: Use nacl.box.keyPair for real Curve25519 ECDH key pair
         const keyPair = nacl.box.keyPair();
 
-        this.encryptionKeyPair = {
+        // post-mortem CRITICAL: in-memory atamayı persist'ten SONRAYA al. Eski sıra
+        // (atama → store → throw) keypair'i RAM'de bırakırdı; bu oturumda mesajları
+        // şifreler ama restart'ta yeni keypair üretilince eski mesajlar OKUNAMAZ
+        // hale gelirdi (auth-race + SecureStore I/O hatasında veri kaybı).
+        // Şimdi: önce başarılı persist (veya null-UID guard skip), SONRA atama.
+        const newKeyPair: EncryptionKeyPair = {
             publicKey: naclUtil.encodeBase64(keyPair.publicKey),
             privateKey: naclUtil.encodeBase64(keyPair.secretKey),
             createdAt: Date.now(),
@@ -188,9 +193,11 @@ class CryptoService {
         // görev #29 ITEM 4: null-guard — skip persist if no UID available
         const _storePriv = getPrivateKeyStorage();
         const _storePub = getPublicKeyStorage();
-        if (_storePriv) await this.storeSecurely(_storePriv, this.encryptionKeyPair.privateKey, true);
-        if (_storePub) await this.storeSecurely(_storePub, this.encryptionKeyPair.publicKey);
+        if (_storePriv) await this.storeSecurely(_storePriv, newKeyPair.privateKey, true);
+        if (_storePub) await this.storeSecurely(_storePub, newKeyPair.publicKey);
 
+        // Persist başarılı (veya null-UID guard skip) — şimdi RAM'e ata.
+        this.encryptionKeyPair = newKeyPair;
         return this.encryptionKeyPair;
     }
 
@@ -201,7 +208,9 @@ class CryptoService {
         // SECURITY FIX: Use nacl.sign.keyPair for real Ed25519 signing key pair
         const keyPair = nacl.sign.keyPair();
 
-        this.signingKeyPair = {
+        // post-mortem CRITICAL: aynı encryptionKeyPair'deki atama-sonra-persist
+        // sırası signing için de geçerli — persist'ten sonra ata.
+        const newKeyPair: SigningKeyPair = {
             publicKey: naclUtil.encodeBase64(keyPair.publicKey),
             privateKey: naclUtil.encodeBase64(keyPair.secretKey),
             createdAt: Date.now(),
@@ -211,9 +220,11 @@ class CryptoService {
         // görev #29 ITEM 4: null-guard — skip persist if no UID available
         const _storeSignPriv = getSignPrivateKeyStorage();
         const _storeSignPub = getSignPublicKeyStorage();
-        if (_storeSignPriv) await this.storeSecurely(_storeSignPriv, this.signingKeyPair.privateKey, true);
-        if (_storeSignPub) await this.storeSecurely(_storeSignPub, this.signingKeyPair.publicKey);
+        if (_storeSignPriv) await this.storeSecurely(_storeSignPriv, newKeyPair.privateKey, true);
+        if (_storeSignPub) await this.storeSecurely(_storeSignPub, newKeyPair.publicKey);
 
+        // Persist başarılı — şimdi RAM'e ata.
+        this.signingKeyPair = newKeyPair;
         return this.signingKeyPair;
     }
 

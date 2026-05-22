@@ -1686,12 +1686,15 @@ class MeshNetworkService {
     const magic = payload.readUInt8(0);
     if (magic !== BLE_CHUNK_MAGIC) return false;
     const totalChunks = payload.readUInt8(4);
-    // mesh-chunk fix: totalChunks==1 da geçerli. chunkForGATT sınır durumlarda 1
-    // chunk üretebilir (payload.length === chunkDataSize); eskiden bu durumda
-    // false dönüp alıcı ham 0xCE-başlıklı veriyi JSON olarak ayrıştırmaya
-    // çalışıyor ve sessizce düşürüyordu. processIncomingChunk 1-chunk durumunu
-    // zaten doğru ele alıyor (tek parça = tam mesaj, anında reassemble).
-    return totalChunks >= 1 && totalChunks <= 255;
+    if (totalChunks < 1 || totalChunks > 255) return false;
+    // post-mortem CRITICAL: sanity-check chunkIndex. >= 1'e geçiş 0xCE-prefixed
+    // non-chunk payload (örn. UTF-8 Yunan/Kiril başlı bir mesaj) yanlış-eşleşme
+    // riskini artırdı. chunkIndex < totalChunks olmalı; tek-chunk durumunda
+    // (totalChunks==1) chunkIndex MUTLAKA 0. Bu, 1/65536 false-positive olasılığını
+    // 1/16M'a indirir — gerçek random binary için pratikte imkânsız.
+    const chunkIndex = payload.readUInt8(3);
+    if (chunkIndex >= totalChunks) return false;
+    return true;
   }
 
   /**
@@ -2978,7 +2981,14 @@ class MeshNetworkService {
             try {
               const { AppState, DeviceEventEmitter } = require('react-native');
               const directName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
-              if (AppState.currentState === 'active') {
+              // post-mortem HIGH: 'inactive' state (gelen telefon banner'ı, notif
+              // center açık, app switcher) de UI emit'i kabul etmeli — React tree
+              // hâlâ mounted, listener canlı. SADECE 'background'da emit dışlanmalı
+              // (JS suspended). Eski `=== 'active'` 5sn'lik 'inactive' pencere
+              // boyunca BOTH yolları (emit + OS notif fallback) kapatabilirdi —
+              // expo-notifications init olmadığı senaryoda kullanıcı hiçbir şey
+              // görmezdi.
+              if (AppState.currentState !== 'background') {
                 DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
                   signalId: messageId,
                   senderDeviceId: senderId,

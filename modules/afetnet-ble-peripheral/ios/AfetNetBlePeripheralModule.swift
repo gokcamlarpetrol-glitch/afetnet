@@ -316,6 +316,36 @@ public class AfetNetBlePeripheralModule: Module {
     }
   }
 
+  // post-mortem CRITICAL: BT power cycle sonrasında setupGATTService karakteristikleri
+  // yeniden yaratır (characteristics.removeAll + yeni CBMutableCharacteristic). Korunan
+  // pendingNotifications içindeki eski CBMutableCharacteristic refs CoreBluetooth
+  // tarafından discard edilmiştir → updateValue(_, for: staleChar, ...) sessizce
+  // false döner ve SOS notification sonsuza dek queue'da kalır. Bu helper, korunan
+  // pending'leri taze char map'ine remap eder; uuid eşleşmeyen pending atılır
+  // (alternatif retry'da sessizce başarısız olur, bu daha temiz).
+  private func remapPendingNotificationsToFreshChars() {
+    guard !pendingNotifications.isEmpty else { return }
+    let beforeCount = pendingNotifications.count
+    var remapped: [PendingNotification] = []
+    for n in pendingNotifications {
+      let uuid = n.characteristic.uuid.uuidString.lowercased()
+      guard let freshChar = characteristics[uuid] else {
+        NSLog("[AfetNetBlePeripheral] remap: \(uuid) için taze char yok — pending atılıyor")
+        continue
+      }
+      remapped.append(PendingNotification(
+        data: n.data,
+        characteristic: freshChar,
+        timestamp: n.timestamp,
+        isHighPriority: n.isHighPriority
+      ))
+    }
+    pendingNotifications = remapped
+    if remapped.count != beforeCount {
+      NSLog("[AfetNetBlePeripheral] remap: \(beforeCount - remapped.count) pending uyumsuz uuid nedeniyle atıldı, \(remapped.count) korundu")
+    }
+  }
+
   // MARK: - Delegate Handlers (called by PeripheralDelegate)
 
   func handleStateUpdate(_ peripheral: CBPeripheralManager) {
@@ -326,19 +356,24 @@ public class AfetNetBlePeripheralModule: Module {
         isRunning = true
         pendingStartPromise?.resolve(nil)
         pendingStartPromise = nil
-        // (görev mesh-M1): BT geri açıldı + start sürüyordu → bekleyen yüksek
-        // öncelikli SOS notification'larını yeniden dene.
+        // (görev mesh-M1 + post-mortem CRITICAL): BT geri açıldı + start sürüyordu.
+        // setupGATTService characteristics'i KAPATIP YENİDEN yaratır (line 222) —
+        // pendingNotifications içindeki PendingNotification.characteristic refs
+        // STALE; updateValue stale ref ile sessizce false döner ve SOS sonsuz
+        // queue'da kalır. Korunan pendings'i taze char'a remap et, sonra retry.
+        remapPendingNotificationsToFreshChars()
         if !pendingNotifications.isEmpty {
-          NSLog("[AfetNetBlePeripheral] BT geri açıldı — \(pendingNotifications.count) bekleyen notification retry ediliyor")
+          NSLog("[AfetNetBlePeripheral] BT geri açıldı — \(pendingNotifications.count) bekleyen notification retry ediliyor (taze char'a remap edildi)")
           retryPendingNotifications()
         }
       } else if isRunning {
         // Bluetooth was turned back on while running — resume
         setupGATTService()
         startAdvertising()
-        // (görev mesh-M1): BT geri açıldı → korunan SOS notification'larını retry.
+        // post-mortem CRITICAL: aynı stale-char senaryosu — remap sonra retry.
+        remapPendingNotificationsToFreshChars()
         if !pendingNotifications.isEmpty {
-          NSLog("[AfetNetBlePeripheral] BT geri açıldı (running) — \(pendingNotifications.count) bekleyen notification retry ediliyor")
+          NSLog("[AfetNetBlePeripheral] BT geri açıldı (running) — \(pendingNotifications.count) bekleyen notification retry ediliyor (taze char'a remap edildi)")
           retryPendingNotifications()
         }
       }

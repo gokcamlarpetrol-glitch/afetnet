@@ -211,8 +211,16 @@ class SOSChannelRouter {
             }
         });
 
-        if (failedChannels.length === channelNames.length) {
-            logger.error(`🆘 SOS broadcast FAILED on ALL channels: ${failedChannels.join(', ')}`);
+        // KRİTİK (post-mortem review): "all failed" hesabından 'push' kanalını
+        // ÇIKAR. broadcastViaPush kasıtlı olarak 'idle' set edip exception ATMAZ
+        // (gönderene self-push gitmez — görev #17). Promise.allSettled gözünde hep
+        // 'fulfilled' → failedChannels'a ASLA girmiyor → failedChannels.length
+        // ASLA channelNames.length(=6)'a eşit olmuyor → kullanıcı tamamen offline
+        // + 0 BLE peer iken bile "⚠️ SOS GÖNDERİLEMEDİ!" alarmı tetiklenmiyordu.
+        // Gerçek başarı sayısı = push HARİÇ succeeded kanal sayısı.
+        const realSucceededCount = succeededChannels.filter(c => c !== 'push').length;
+        if (realSucceededCount === 0) {
+            logger.error(`🆘 SOS broadcast FAILED on ALL real channels: ${failedChannels.join(', ')}`);
             this.enqueueCloudOutbox(signal, failedChannels);
             // LIFE-SAFETY: Notify user that SOS was not delivered — they must take manual action
             try {
@@ -1410,6 +1418,13 @@ class SOSChannelRouter {
             // signal.userId may have fallen back to a device ID (AFN-XXXX) during cold start
             // when auth wasn't ready yet. Firestore rules require senderUid == request.auth.uid.
             // If we use the device ID, the write is SILENTLY REJECTED by Firestore rules.
+            // post-mortem C3: lastKnown fallback ile gelen konum 1 SAAT eski olabilir;
+            // 'cached' kaynak + orijinal GPS-fix zamanını CF push payload'ına taşı ki
+            // kurtarıcı UI'sı "Son bilinen konum, X dakika önce" gösterebilsin —
+            // yoksa stale konum "şu anki" olarak yorumlanır ve kurtarıcılar kullanıcının
+            // saatler önce ayrıldığı yere koşar.
+            const locationSource = hasLocation ? signal.location?.source : null;
+            const locationCapturedAt = hasLocation ? signal.location?.timestamp : null;
             const broadcastData = {
                 signalId: signal.id,
                 senderDeviceId: senderDeviceId || signal.userId,
@@ -1422,6 +1437,8 @@ class SOSChannelRouter {
                 longitude: hasLocation ? (signal.location?.longitude ?? null) : null,
                 accuracy: hasLocation ? (signal.location?.accuracy || 0) : null,
                 hasLocation: hasLocation,
+                locationSource,
+                locationCapturedAt,
                 trapped: signal.trapped,
                 battery: signal.device.batteryLevel,
                 // KRİTİK (görev #1): `timestamp` = YAYIN zamanı. sos_broadcasts create
