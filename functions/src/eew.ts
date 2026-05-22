@@ -467,7 +467,9 @@ async function fetchUSGSEvents(): Promise<EEWEvent[]> {
         }
         const data = await response.json();
 
-        if (!data.features) return [];
+        // Bozuk upstream yanıtına karşı savunma: features bir dizi değilse (null,
+        // obje, string) .filter() patlardı — boş liste dön, redundant kaynaklar devreye girer.
+        if (!Array.isArray(data?.features)) return [];
 
         return data.features
             .filter((f: any) => {
@@ -487,11 +489,13 @@ async function fetchUSGSEvents(): Promise<EEWEvent[]> {
                 magnitude: f.properties.mag,
                 latitude: f.geometry.coordinates[1],
                 longitude: f.geometry.coordinates[0],
-                depth: f.geometry.coordinates[2],
+                // depth bozuk gelirse (eksik 3. koordinat) 10km varsayılanına düş.
+                depth: typeof f.geometry.coordinates[2] === 'number' ? f.geometry.coordinates[2] : 10,
                 location: f.properties.place || 'Turkey Region',
                 source: 'USGS' as const,
                 timestamp: Date.now(),
-                issuedAt: f.properties.time,
+                // time eksik/bozuk olabilir — sayı değilse şu anki zamana düş.
+                issuedAt: typeof f.properties.time === 'number' ? f.properties.time : Date.now(),
             }));
     } catch (error) {
         functions.logger.error('USGS fetch error:', error);
@@ -511,10 +515,15 @@ async function fetchEMSCEvents(): Promise<EEWEvent[]> {
         }
         const data = await response.json();
 
-        if (!data.features) return [];
+        // Bozuk upstream yanıtına karşı savunma: features bir dizi değilse (null,
+        // obje, string) .filter() patlardı — boş liste dön, redundant kaynaklar devreye girer.
+        if (!Array.isArray(data?.features)) return [];
 
         return data.features
             .filter((f: any) => {
+                // properties.mag eksik/sayı değilse olayı ele — aksi halde map
+                // adımı magnitude: undefined üretip downstream'de NaN'a yol açardı.
+                if (typeof f?.properties?.mag !== 'number') return false;
                 const coords = f?.geometry?.coordinates;
                 if (!Array.isArray(coords) || coords.length < 2) return false;
                 const lon = coords[0];
@@ -523,17 +532,21 @@ async function fetchEMSCEvents(): Promise<EEWEvent[]> {
                     lon >= TURKEY_BOUNDS.minLon && lon <= TURKEY_BOUNDS.maxLon;
             })
             .slice(0, 10)
-            .map((f: any) => ({
-                id: `emsc-${f.id}`,
-                magnitude: f.properties.mag,
-                latitude: f.geometry.coordinates[1],
-                longitude: f.geometry.coordinates[0],
-                depth: f.geometry.coordinates[2] || 10,
-                location: f.properties.flynn_region || 'Turkey Region',
-                source: 'EMSC' as const,
-                timestamp: Date.now(),
-                issuedAt: new Date(f.properties.time).getTime(),
-            }));
+            .map((f: any) => {
+                // time eksik/bozuk olabilir — geçersiz tarih NaN döner, şu ana düş.
+                const parsedTime = new Date(f.properties.time).getTime();
+                return {
+                    id: `emsc-${f.id}`,
+                    magnitude: f.properties.mag,
+                    latitude: f.geometry.coordinates[1],
+                    longitude: f.geometry.coordinates[0],
+                    depth: f.geometry.coordinates[2] || 10,
+                    location: f.properties.flynn_region || 'Turkey Region',
+                    source: 'EMSC' as const,
+                    timestamp: Date.now(),
+                    issuedAt: Number.isFinite(parsedTime) ? parsedTime : Date.now(),
+                };
+            });
     } catch (error) {
         functions.logger.error('EMSC fetch error:', error);
         return [];
