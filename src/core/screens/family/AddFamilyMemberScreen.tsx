@@ -50,9 +50,19 @@ interface AddFamilyMemberScreenProps {
     navigate: (screen: string, params?: Record<string, unknown>) => void;
     goBack: () => void;
   };
+  // görev #25 madde 1: afetnet://add deep link'i prefilledUid/prefilledName param'larıyla
+  // bu ekrana yönlendiriyordu ama ekran route param'ları okumuyordu → boş ekran.
+  // route prop'u typed olarak eklendi; mount'ta state'e aktarılır.
+  route?: {
+    params?: {
+      prefilledUid?: string;
+      prefilledName?: string;
+      source?: string;
+    };
+  };
 }
 
-export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScreenProps) {
+export default function AddFamilyMemberScreen({ navigation, route }: AddFamilyMemberScreenProps) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -79,6 +89,28 @@ export default function AddFamilyMemberScreen({ navigation }: AddFamilyMemberScr
         scannerResetTimeoutRef.current = null;
       }
     };
+  }, []);
+
+  // görev #25 madde 1: afetnet://add deep link'inden gelen prefilledUid/prefilledName
+  // param'larını mount'ta forma aktar. Param geldiğinde manuel sekmeye geç ki
+  // kullanıcı doğrudan onay akışını görsün (QR tarama gerekmeden).
+  useEffect(() => {
+    const prefilledUid = normalizeId(route?.params?.prefilledUid);
+    if (!prefilledUid) return;
+    setManualId(prefilledUid);
+    if (isLikelyUid(prefilledUid)) {
+      setTargetUid(prefilledUid);
+    } else {
+      setTargetDeviceId(prefilledUid);
+    }
+    const prefilledName = (route?.params?.prefilledName || '').trim();
+    if (prefilledName) {
+      setMemberName(prefilledName.substring(0, 50));
+    }
+    setAddMethod('manual');
+    // route.params yalnızca ekran açılışında okunur — bağımlılık olarak
+    // route.params verilirse aynı param'lar her render'da state'i ezebilir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scheduleScannerReset = useCallback((delayMs: number = 1200) => {

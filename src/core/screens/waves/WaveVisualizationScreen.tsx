@@ -26,7 +26,9 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-// @ts-ignore - useFocusEffect is available in @react-navigation/native but TypeScript types may be outdated
+// ADV (M8+): @ts-ignore removed — @react-navigation/core re-exports
+// useFocusEffect with proper types since v6. Tested with current versions
+// of @react-navigation/native@^6 and @react-navigation/core@^6.
 import { useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import * as Location from 'expo-location';
@@ -313,13 +315,14 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
   const calculateWavesRef = useRef(calculateWaves);
   calculateWavesRef.current = calculateWaves;
 
-  // CRITICAL: Continuous monitoring - runs even when screen is not focused
-  // This ensures P and S wave calculations are always up-to-date
+  // görev #23: Poller'lar ekran fokusta değilken durduruldu (useFocusEffect).
+  // PERF: Screen unfocused → isMounted=false → tüm interval'lar durur.
+  // CRITICAL: Continuous monitoring - paused when screen is not focused (saves CPU/battery)
   // ELITE: AUTOMATIC START - No user interaction required
   // ELITE: PROFESSIONAL ERROR HANDLING - All errors caught and handled gracefully
-  // PERF: Consolidated status+monitoring into single 5000ms interval (was 2 separate: 5000ms + 2000ms)
+  // PERF: Consolidated status+monitoring into single 30000ms interval (was 5000ms)
   // PERF: Ring buffer for fallback seismic data (avoids [...spread].slice() GC pressure)
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let isMounted = true; // CRITICAL: Track component mount status to prevent state updates after unmount
     let monitoringInterval: NodeJS.Timeout | null = null;
     // PERF: statusInterval removed — status check consolidated into monitoringInterval
@@ -495,7 +498,8 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
         // PERF: Consolidated monitoring interval — wave calculations + status check in one 5000ms timer
         // (Previously: separate 5000ms monitoring + 2000ms status = 2 timers)
         // Status is now checked every 5s instead of 2s — acceptable for a status badge
-        const MONITORING_INTERVAL = 5000; // 5 seconds - ELITE: Real-time continuous monitoring
+        // görev #23: Monitoring interval 5s → 30s; pollerlar unfocused iken durduğu için yeterli.
+        const MONITORING_INTERVAL = 30000; // 30 seconds — pollers pause on blur, so 30s is sufficient
 
         monitoringInterval = setInterval(() => {
           if (!isMounted) {
@@ -835,7 +839,8 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
         }
       }
     };
-  }, []); // Stable deps — calculateWaves is called via ref inside intervals
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])); // Stable deps — calculateWaves is called via ref inside intervals
 
   // CRITICAL: Also recalculate when screen comes into focus
   // ELITE: Professional error handling
@@ -887,8 +892,9 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
     };
   }, [selectedWave, isAnimating]);
 
+  // görev #23: Countdown 50ms interval — pause when screen unfocused.
   // Real-time animation progress and countdown timer with haptic feedback
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (selectedWave) {
       let lastPWaveAlert = false;
       let lastSWaveAlert = false;
@@ -944,7 +950,8 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
         countdownIntervalRef.current = null;
       }
     };
-  }, [selectedWave]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWave]));
 
   // ELITE: Professional error handling for refresh
   const handleRefresh = async () => {
@@ -1031,6 +1038,22 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
 
   const { animationProgress, elapsed, timeUntilSWave, timeUntilPWave } = waveCalculations;
   const currentWave = selectedWave || waveData[0];
+
+  /**
+   * Kaynağa göre kaynak etiketi döndürür.
+   * AFAD/Kandilli/EMSC kaynaklı uyarılar resmi; AI/sensör kaynaklı uyarılar tahmin.
+   */
+  const getSourceLabel = (source?: string): { label: string; isOfficial: boolean } => {
+    const rawSource: unknown = source;
+    const s = typeof rawSource === 'string' ? rawSource.toUpperCase() : '';
+    if (s === 'AFAD') return { label: 'AFAD', isOfficial: true };
+    if (s === 'KANDILLI' || s === 'KOERI') return { label: 'Kandilli', isOfficial: true };
+    if (s === 'EMSC') return { label: 'EMSC', isOfficial: true };
+    if (s === 'USGS') return { label: 'USGS', isOfficial: true };
+    if (s === 'P_WAVE_DETECTION') return { label: 'Cihaz Sensörü', isOfficial: false };
+    if (s === 'AI' || s === 'AI_PREDICTION') return { label: 'AI', isOfficial: false };
+    return { label: s || 'Bilinmeyen', isOfficial: false };
+  };
 
   if (loading && waveData.length === 0) {
     return (
@@ -1168,6 +1191,10 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
                 <View style={styles.aiAnalysisTitleContainer}>
                   <Ionicons name="pulse" size={20} color="#fff" />
                   <Text style={styles.aiAnalysisTitle}>Sensör Analizi</Text>
+                  {/* TAHMİN badge — AI/sensör kaynaklı, resmi uyarı değil */}
+                  <View style={styles.sourceBadgeAI}>
+                    <Text style={styles.sourceBadgeTextAI}>TAHMİN</Text>
+                  </View>
                   {aiAnalysisLoading && (
                     <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
                   )}
@@ -1592,6 +1619,20 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
               </Text>
             </View>
             <View style={styles.infoHeaderRight}>
+              {/* Kaynak badge — RESMİ UYARI (kırmızı) veya TAHMİN (turuncu) */}
+              {(() => {
+                const { label, isOfficial } = getSourceLabel((currentWave.earthquake as any).source);
+                return isOfficial ? (
+                  <View style={styles.sourceBadgeOfficial}>
+                    <Ionicons name="shield-checkmark" size={12} color="#fff" />
+                    <Text style={styles.sourceBadgeTextOfficial}>RESMİ UYARI · {label}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.sourceBadgeAI}>
+                    <Text style={styles.sourceBadgeTextAI}>TAHMİN · {label}</Text>
+                  </View>
+                );
+              })()}
               <Ionicons name="location" size={16} color={colors.text.secondary} />
               <Text style={styles.locationText}>{currentWave.earthquake.location}</Text>
             </View>
@@ -1852,9 +1893,24 @@ export default function WaveVisualizationScreen({ navigation }: { navigation: Wa
                   }}
                 >
                   <View style={styles.listItemLeft}>
-                    <Text style={styles.listItemMagnitude}>
-                      M{wave.earthquake.magnitude.toFixed(1)}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.listItemMagnitude}>
+                        M{wave.earthquake.magnitude.toFixed(1)}
+                      </Text>
+                      {/* Kaynak badge — liste öğesi */}
+                      {(() => {
+                        const { label, isOfficial } = getSourceLabel((wave.earthquake as any).source);
+                        return isOfficial ? (
+                          <View style={[styles.sourceBadgeOfficial, { paddingHorizontal: 6, paddingVertical: 2 }]}>
+                            <Text style={[styles.sourceBadgeTextOfficial, { fontSize: 9 }]}>{label}</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.sourceBadgeAI, { paddingHorizontal: 6, paddingVertical: 2 }]}>
+                            <Text style={[styles.sourceBadgeTextAI, { fontSize: 9 }]}>{label}</Text>
+                          </View>
+                        );
+                      })()}
+                    </View>
                     <Text style={styles.listItemLocation}>
                       {wave.earthquake.location}
                     </Text>

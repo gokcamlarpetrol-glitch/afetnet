@@ -25,6 +25,15 @@ import { useMeshStore } from './mesh/MeshStore';
 
 const logger = createLogger('AccountDeletionService');
 
+// görev #25 madde 6: "zombie hesap" koruması.
+// Hesap silme akışı Firestore verilerini sildikten SONRA, Firebase Auth hesabını
+// silmeden ÖNCE bu bayrak yazılır. Auth silme aşamasında requires-recent-login
+// hatası alınır ve kullanıcı re-auth'u tamamlamadan uygulamayı kapatırsa:
+// Firestore verisi gitmiş ama Auth hesabı ayakta kalır → sonraki açılışta
+// "zombie" hesap. Açılışta init.ts bu bayrağı kontrol eder; set ise ve kullanıcı
+// hâlâ authenticated ise silme işlemini tekrar dener.
+const PENDING_ACCOUNT_DELETION_KEY = 'afetnet_pending_account_deletion';
+
 // ELITE: Type-safe Firebase error interface
 interface FirebaseError extends Error {
   code?: string;
@@ -55,7 +64,7 @@ class AccountDeletionService {
   ): Promise<{ success: boolean; errors: string[]; reauthRequired?: boolean }> {
     const errors: string[] = [];
     let progress = 0;
-    const totalSteps = 19;
+    const totalSteps = 20;
     // CRITICAL: Capture UID NOW, before auth deletion nullifies it
     const capturedUid = getFirebaseAuth()?.currentUser?.uid || '';
 
@@ -237,7 +246,22 @@ class AccountDeletionService {
         logger.error('Failed to delete V3 conversations:', error);
       });
 
-      // Step 15: Delete user profile
+      // Step 15: görev #22 — UID ile anahtar lanan PII koleksiyonları sil
+      // eew_history, eew_pwave_detections, plum_observations, seismicDetections,
+      // feltEarthquakes, preparedness_plans, circles, geofences/{uid},
+      // eew_analytics, reports, feedback
+      progress++;
+      onProgress?.({
+        step: 'Deprem/afet geçmişi ve raporlar siliniyor...',
+        progress,
+        total: totalSteps,
+      });
+      await this.deleteUidKeyedPIICollections(capturedUid).catch((error) => {
+        errors.push(`UID-keyed PII collections: ${error.message}`);
+        logger.error('Failed to delete UID-keyed PII collections:', error);
+      });
+
+      // Step 16: Delete user profile
       progress++;
       onProgress?.({
         step: 'Kullanıcı profili siliniyor...',
@@ -301,6 +325,10 @@ class AccountDeletionService {
         progress,
         total: totalSteps,
       });
+      // görev #25 madde 6: Auth silmeden ÖNCE pending bayrağını yaz. Bu noktada
+      // Firestore verileri zaten silindi; Auth silme yarıda kalırsa açılışta
+      // tekrar denenebilmesi için bayrak set edilir.
+      try { DirectStorage.setString(PENDING_ACCOUNT_DELETION_KEY, 'true'); } catch { /* best-effort */ }
       let reauthRequired = false;
       try {
         await this.deleteFirebaseAuthAccount();
@@ -351,6 +379,10 @@ class AccountDeletionService {
         errors.push(`Secure storage: ${error.message}`);
         logger.error('Failed to clear secure storage:', error);
       });
+
+      // görev #25 madde 6: Auth silme aşaması geçildi (reauthRequired erken dönmedi),
+      // hesap artık tamamen silinmiş — pending bayrağını temizle.
+      try { DirectStorage.delete(PENDING_ACCOUNT_DELETION_KEY); } catch { /* best-effort */ }
 
       logger.info('Account deletion completed', { errors: errors.length });
 
@@ -463,8 +495,33 @@ class AccountDeletionService {
     await signOut(auth).catch(e => { if (__DEV__) logger.debug('Sign-out after delete failed:', e); });
     logger.info('Firebase auth account deleted (after re-auth retry)');
 
+    // görev #25 madde 6: Auth hesabı başarıyla silindi — zombie koruma bayrağını temizle.
+    try { DirectStorage.delete(PENDING_ACCOUNT_DELETION_KEY); } catch { /* best-effort */ }
+
     // Now finish local cleanup (was deferred when reauthRequired was returned)
     await this.clearLocalDataAfterDeletion(uid);
+  }
+
+  /**
+   * görev #25 madde 6: Açılışta çağrılır — yarıda kalmış bir hesap silme var mı?
+   * true dönerse Firestore verisi zaten silinmiş ama Auth hesabı hâlâ ayakta
+   * ("zombie hesap"). Çağıran (init.ts) kullanıcı authenticated ise retry tetikler.
+   */
+  hasPendingDeletion(): boolean {
+    try {
+      return DirectStorage.getString(PENDING_ACCOUNT_DELETION_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * görev #25 madde 6: Yarıda kalmış silme bayrağını temizle.
+   * Kullanıcı re-auth'tan vazgeçip retry'ı bırakırsa veya açılış-retry'ı
+   * çözümlerse bayrağın takılı kalmaması için kullanılır.
+   */
+  clearPendingDeletionFlag(): void {
+    try { DirectStorage.delete(PENDING_ACCOUNT_DELETION_KEY); } catch { /* best-effort */ }
   }
 
   /**
@@ -664,6 +721,8 @@ class AccountDeletionService {
 
   /**
    * Delete health profile subcollection
+   * görev #22 — Gerçek yol devices/{deviceId}/health/{healthId} (koleksiyon).
+   * Eski kod healthProfile/current tek dokümanını hedef alıyordu — yanlış yol.
    */
   private async deleteHealthProfile(deviceId: string): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
@@ -672,9 +731,11 @@ class AccountDeletionService {
       const db = await getFirestoreInstanceAsync();
       if (!db) return;
 
-      const healthRef = doc(db, 'devices', deviceId, 'healthProfile', 'current');
-      await deleteDoc(healthRef);
-      logger.info('Health profile deleted');
+      // Enumerate and delete all docs in the health subcollection
+      const healthColRef = collection(db, 'devices', deviceId, 'health');
+      const healthSnap = await getDocs(healthColRef);
+      await Promise.allSettled(healthSnap.docs.map((d) => deleteDoc(d.ref)));
+      logger.info(`Health profile deleted (${healthSnap.docs.length} docs)`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code !== 'permission-denied') {
@@ -685,6 +746,8 @@ class AccountDeletionService {
 
   /**
    * Delete ICE data subcollection
+   * görev #22 — Gerçek yol devices/{deviceId}/ice/{iceId} (koleksiyon).
+   * Eski kod ice/current tek dokümanını hedef alıyordu — yanlış yol.
    */
   private async deleteICEData(deviceId: string): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
@@ -693,9 +756,11 @@ class AccountDeletionService {
       const db = await getFirestoreInstanceAsync();
       if (!db) return;
 
-      const iceRef = doc(db, 'devices', deviceId, 'ice', 'current');
-      await deleteDoc(iceRef);
-      logger.info('ICE data deleted');
+      // Enumerate and delete all docs in the ice subcollection
+      const iceColRef = collection(db, 'devices', deviceId, 'ice');
+      const iceSnap = await getDocs(iceColRef);
+      await Promise.allSettled(iceSnap.docs.map((d) => deleteDoc(d.ref)));
+      logger.info(`ICE data deleted (${iceSnap.docs.length} docs)`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code !== 'permission-denied') {
@@ -945,12 +1010,44 @@ class AccountDeletionService {
   }
 
   /**
-   * Clear all local storage (AsyncStorage)
+   * Clear all local storage (Zustand stores + MMKV/AsyncStorage).
+   *
+   * K1 (cleanup order fix): Zustand store-clear MUST happen BEFORE
+   * DirectStorage.clearAll(). Previously stores were cleared in Step 19 inside
+   * clearSecureStorage() — but Step 18 had already wiped the underlying
+   * MMKV/AsyncStorage backing the stores' persist middleware. That meant:
+   *   1. store.clear() wrote default state to in-memory snapshot
+   *   2. persist middleware tried to flush defaults back to storage
+   *   3. Storage was empty (already wiped) → flush either no-op'd or
+   *      re-created the keys we just deleted (double-work + race).
+   *
+   * Correct order:
+   *   a. Drain in-memory Zustand state via .clear()/reset() — these mark the
+   *      persist middleware "dirty" so it writes EMPTY state to storage.
+   *   b. Then DirectStorage.clearAll() to nuke whatever survived.
+   *
+   * This eliminates the double-work and guarantees no stale state survives
+   * across re-login (GDPR/KVKK compliance).
    */
   private async clearLocalStorage(): Promise<void> {
     try {
+      // Step a: Clear ALL user-scoped Zustand stores BEFORE wiping storage.
+      // Each .clear()/reset() writes empty default state to MMKV via persist.
+      await useFamilyStore.getState().clear();
+      await useHealthProfileStore.getState().clearProfile();
+      useSettingsStore.getState().resetToDefaults();
+      usePremiumStore.getState().clear();
+      await useMessageStore.getState().clear();
+      await useContactStore.getState().clearLocalCache();
+      useUserStatusStore.getState().reset();
+      useEarthquakeStore.getState().clear();
+      useEEWHistoryStore.getState().clearHistory();
+      useMeshStore.getState().clearMessages();
+
+      // Step b: Nuke everything else (raw MMKV keys not behind a store).
       DirectStorage.clearAll();
-      logger.info('Local storage cleared');
+
+      logger.info('Local storage cleared (stores drained + MMKV wiped)');
     } catch (error) {
       logger.error('Failed to clear local storage:', error);
       throw error;
@@ -958,7 +1055,11 @@ class AccountDeletionService {
   }
 
   /**
-   * Clear secure storage (SecureStore)
+   * Clear secure storage (SecureStore).
+   *
+   * K1 (cleanup order fix): Step 19 is now ONLY SecureStore/legacy keys.
+   * Zustand store clears moved to clearLocalStorage() (Step 18) — see comment
+   * there for rationale.
    */
   private async clearSecureStorage(uid: string): Promise<void> {
     try {
@@ -987,22 +1088,93 @@ class AccountDeletionService {
         }
       }
 
-      // Clear ALL user-scoped stores (GDPR/KVKK compliance)
-      await useFamilyStore.getState().clear();
-      await useHealthProfileStore.getState().clearProfile();
-      useSettingsStore.getState().resetToDefaults();
-      usePremiumStore.getState().clear();
-      await useMessageStore.getState().clear();
-      await useContactStore.getState().clearLocalCache();
-      useUserStatusStore.getState().reset();
-      useEarthquakeStore.getState().clear();
-      useEEWHistoryStore.getState().clearHistory();
-      useMeshStore.getState().clearMessages();
-
       logger.info('Secure storage cleared');
     } catch (error) {
       logger.error('Failed to clear secure storage:', error);
       throw error;
+    }
+  }
+  /**
+   * görev #22 — UID ile anahtar lanan PII koleksiyonlarını sil.
+   * Bu koleksiyonlar Firestore'da doküman kimliği olarak uid kullanır;
+   * istemci SDK'sı uid bilindiğinde bunları sorgusuz silebilir.
+   *
+   * Sunucu tarafında admin-SDK ile silinmesi gereken koleksiyonlar için not:
+   * - eew_analytics/{uid}/events/*  → büyük alt-koleksiyon; Cloud Function admin silmesi önerilir.
+   * - seismicDetections/{uid}/detections/* → aynı şekilde.
+   * Bunlar için istemci üst dokümanı siler, alt-koleksiyon Cloud Function'a bırakılır.
+   */
+  private async deleteUidKeyedPIICollections(uid: string): Promise<void> {
+    if (!uid) return;
+    if (!firebaseDataService.isInitialized) return;
+
+    try {
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+
+      let totalDeleted = 0;
+
+      // Yardımcı: üst-doküman + alt-koleksiyonları sil (best-effort)
+      const deleteTopDoc = async (path: string): Promise<void> => {
+        try { await deleteDoc(doc(db, path)); totalDeleted++; } catch { /* olmayabilir */ }
+      };
+
+      const deleteSubcollectionDocs = async (colPath: string): Promise<void> => {
+        try {
+          const snap = await getDocs(collection(db, colPath));
+          await Promise.allSettled(snap.docs.map((d) => deleteDoc(d.ref)));
+          totalDeleted += snap.docs.length;
+        } catch { /* olmayabilir */ }
+      };
+
+      // eew_history/{uid} — EEW geçmiş dokümanı
+      await deleteTopDoc(`eew_history/${uid}`);
+
+      // eew_pwave_detections/{uid}
+      await deleteTopDoc(`eew_pwave_detections/${uid}`);
+
+      // plum_observations/{uid}
+      await deleteTopDoc(`plum_observations/${uid}`);
+
+      // seismicDetections/{uid} — üst doküman; alt-koleksiyon admin-SDK ile silinmeli
+      await deleteTopDoc(`seismicDetections/${uid}`);
+      await deleteSubcollectionDocs(`seismicDetections/${uid}/detections`);
+
+      // feltEarthquakes/{uid}
+      await deleteTopDoc(`feltEarthquakes/${uid}`);
+
+      // preparedness_plans/{uid}
+      await deleteTopDoc(`preparedness_plans/${uid}`);
+
+      // circles/{uid}
+      await deleteTopDoc(`circles/${uid}`);
+      await deleteSubcollectionDocs(`circles/${uid}/members`);
+
+      // geofences/{uid}
+      await deleteTopDoc(`geofences/${uid}`);
+      await deleteSubcollectionDocs(`geofences/${uid}/zones`);
+
+      // eew_analytics/{uid} — üst doküman; events alt-koleksiyonu admin-SDK ile silinmeli
+      await deleteTopDoc(`eew_analytics/${uid}`);
+      await deleteSubcollectionDocs(`eew_analytics/${uid}/events`);
+
+      // reports/{uid}
+      await deleteTopDoc(`reports/${uid}`);
+      await deleteSubcollectionDocs(`reports/${uid}/items`);
+
+      // feedback — uid ile sorgu (belge kimliği uid değil, field)
+      try {
+        const feedbackSnap = await getDocs(
+          query(collection(db, 'feedback'), where('uid', '==', uid)),
+        );
+        await Promise.allSettled(feedbackSnap.docs.map((d) => deleteDoc(d.ref)));
+        totalDeleted += feedbackSnap.docs.length;
+      } catch { /* izin sorununda atla */ }
+
+      logger.info(`görev #22: UID-keyed PII koleksiyonları silindi — ${totalDeleted} doküman (uid=${uid})`);
+    } catch (error: unknown) {
+      const fbError = error as FirebaseError;
+      if (fbError?.code !== 'permission-denied') throw error;
     }
   }
 }

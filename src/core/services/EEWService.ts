@@ -29,6 +29,14 @@ export interface EEWEvent {
 
 type EEWCallback = (event: EEWEvent) => void;
 
+// görev #18: WebSocket KALICI olarak devre dışı. wsUrls sahte/erişilemez
+// endpoint'lerdir (eew.afad.gov.tr/ws vb. gerçek değil). startWebSocket /
+// handleReconnect / detectRegion makinesi hâlâ kodda duruyor ama bu açık
+// bayrakla artık ASLA çalışamaz — aksi halde doomed bir reconnect döngüsü
+// sahte URL'lere bağlanmaya çalışıp pil tüketirdi. Tüm EEW akışı polling
+// (AFAD apiv2) + SeismicSensorService (P-dalga) üzerinden ilerler.
+const WEBSOCKET_ENABLED = false;
+
 class EEWService {
   private ws: WebSocket | null = null;
   private polling = false;
@@ -40,6 +48,13 @@ class EEWService {
   private readonly maxSeenEvents = 2000;
   private seismicDetectionUnsubscribe: (() => void) | null = null;
   private pollFailureCount = 0;
+  // görev #18: pollFailureCount 3'te tavanlıdır (geri-çekilme zamanlaması için);
+  // saatlerce süren bir besleme kesintisini ölçemez. Bu sayaç tavansızdır ve
+  // yalnızca üst üste başarısızlıkları sayar — N'i aşınca production-görünür
+  // logger.error + EEW store'da degraded durum (görev #13 start() catch deseni).
+  private consecutivePollFailures = 0;
+  private pollOutageReported = false;
+  private static readonly POLL_OUTAGE_THRESHOLD = 6; // ~6 başarısız poll ≈ 30-90sn
   private lastPWaveAlertAt = 0;
   private reconnectAttempts = 0;
   private isFirstPollCompleted = false;
@@ -211,6 +226,9 @@ class EEWService {
 
     this.polling = false;
     this.pollFailureCount = 0;
+    // görev #18: kesinti izleme durumunu sıfırla
+    this.consecutivePollFailures = 0;
+    this.pollOutageReported = false;
     this.reconnectAttempts = 0;
     this.maxAttemptsReachedLogged = false;
     this.isFirstPollCompleted = false;
@@ -277,6 +295,14 @@ class EEWService {
   }
 
   private async startWebSocket(region: 'TR' | 'GLOBAL') {
+    // görev #18: WebSocket kalıcı devre dışı — sahte URL'lere bağlanmayı önle.
+    if (!WEBSOCKET_ENABLED) {
+      if (__DEV__) {
+        logger.debug('startWebSocket çağrıldı ama WebSocket devre dışı — atlanıyor (polling modu)');
+      }
+      return;
+    }
+
     const urls: string[] = [];
 
     if (region === 'TR') {
@@ -390,6 +416,12 @@ class EEWService {
   }
 
   private handleReconnect() {
+    // görev #18: WebSocket kalıcı devre dışı — doomed reconnect döngüsünü
+    // (sahte URL'lere bağlanma, pil tüketimi) tamamen engelle.
+    if (!WEBSOCKET_ENABLED) {
+      return;
+    }
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       // Only log once to prevent spam
       if (!this.maxAttemptsReachedLogged) {
@@ -462,6 +494,39 @@ class EEWService {
     }
   }
 
+  /**
+   * görev #18: Üst üste poll başarısızlığını kaydet. Eşik aşılınca
+   * production-görünür hata + EEW store'da kullanıcı-görünür degraded durum.
+   */
+  private recordPollFailure(): void {
+    this.consecutivePollFailures++;
+    if (
+      this.consecutivePollFailures >= EEWService.POLL_OUTAGE_THRESHOLD &&
+      !this.pollOutageReported
+    ) {
+      this.pollOutageReported = true;
+      logger.error(
+        `AFAD beslemesi kesintisi — ${this.consecutivePollFailures} ardışık poll başarısız; resmi kaynak deprem verisi gelmiyor olabilir`,
+      );
+      useEEWStore.getState().setStatus(
+        'connected',
+        'Sınırlı: resmi kaynak (AFAD) beslemesine ulaşılamıyor — uyarılar gecikebilir',
+      );
+    }
+  }
+
+  /**
+   * görev #18: Başarılı poll — kesinti sayacını sıfırla, degraded durumdan çık.
+   */
+  private recordPollSuccess(): void {
+    if (this.pollOutageReported) {
+      logger.info('AFAD beslemesi yeniden erişilebilir — EEW durumu normale döndü');
+      useEEWStore.getState().setStatus('connected', 'Using polling mode');
+    }
+    this.consecutivePollFailures = 0;
+    this.pollOutageReported = false;
+  }
+
   private getNextPollDelayMs(): number {
     const base = 5000;
     if (this.pollFailureCount <= 0) {
@@ -510,6 +575,7 @@ class EEWService {
                 logger.warn(`AFAD API response not OK: ${response.status}`);
               }
               this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              this.recordPollFailure(); // görev #18: kesinti izleme
               await this.waitForNextPoll(this.getNextPollDelayMs());
               continue;
             }
@@ -521,6 +587,7 @@ class EEWService {
                 logger.warn(`Non-JSON response from AFAD: ${contentType}`);
               }
               this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              this.recordPollFailure(); // görev #18: kesinti izleme
               await this.waitForNextPoll(this.getNextPollDelayMs());
               continue;
             }
@@ -533,6 +600,7 @@ class EEWService {
                 logger.warn(`Invalid JSON response from AFAD: ${text.substring(0, 100)}`);
               }
               this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+              this.recordPollFailure(); // görev #18: kesinti izleme
               await this.waitForNextPoll(this.getNextPollDelayMs());
               continue;
             }
@@ -562,6 +630,7 @@ class EEWService {
             }
 
             this.pollFailureCount = 0;
+            this.recordPollSuccess(); // görev #18: kesinti sayacını sıfırla
 
             if (__DEV__ && eventsArray.length > 0) {
               logger.info(`Polled ${eventsArray.length} events from AFAD`);
@@ -577,9 +646,15 @@ class EEWService {
             logger.debug('EEW poll error (expected in offline scenarios):', error);
           }
           this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+          // görev #18: tek bir ağ hatası sessiz kalabilir ama saatlerce süren
+          // kesinti recordPollFailure eşiğiyle production'da görünür olur.
+          this.recordPollFailure();
         }
       } else {
         this.pollFailureCount = Math.min(this.pollFailureCount + 1, 3);
+        // görev #18: ağ yokken de kesinti say — fark istemci tarafında
+        // (cihaz offline) ama EEW yine de "sınırlı" durumda olmalı.
+        this.recordPollFailure();
       }
 
       await this.waitForNextPoll(this.getNextPollDelayMs());
@@ -1048,7 +1123,32 @@ class EEWService {
           logger.info(`✅ ELITE EEW notification sent: ${magnitude.toFixed(1)}M - ${event.region} (${Math.round(guaranteedWarningTime)}s advance)`);
         }
       } catch (error) {
-        logger.error('Failed to show magnitude-based EEW notification:', error);
+        // görev #18: notificationCenter.notify başarısız olursa EEW uyarısı
+        // SESSİZCE kaybolur — backend eew_broadcasts push'u hiçbir uyarı
+        // göstermez. Hayati güvenlik: kritik fallback teslimatı dene
+        // (multiChannelAlertService — alarm sesi + tam ekran + titreşim).
+        // notify yolu kullanıcıya hiçbir şey ulaştıramadığı için
+        // magnitudeNotificationSent false kalır ve aşağıdaki alertChannels
+        // push'u da açık tutar; burada ek olarak garanti bir kritik alarm atılır.
+        logger.error('EEW notificationCenter.notify başarısız — kritik fallback teslimat deneniyor:', error);
+        try {
+          await multiChannelAlertService.sendAlert({
+            title: '🚨 DEPREM UYARISI',
+            body: `${event.region || 'Bilinmeyen bölge'} — M${magnitude.toFixed(1)} deprem tespit edildi. GÜVENLİ YERE GEÇİN!`,
+            priority: 'critical',
+            ttsText: personalizedMessage || `${magnitude.toFixed(1)} büyüklüğünde deprem tespit edildi. Güvenli yere geçin.`,
+            channels: {
+              pushNotification: false, // notify yolu zaten çöktü; aşağıdaki alertChannels push'u taşır
+              fullScreenAlert: true,
+              alarmSound: true,
+              vibration: true,
+              tts: true,
+            },
+            data: { type: 'eew', eventId: event.id },
+          });
+        } catch (fallbackError) {
+          logger.error('EEW kritik fallback teslimatı da başarısız:', fallbackError);
+        }
       }
     }
 

@@ -14,8 +14,22 @@ import MessagesScreen from '../screens/messages';
 import SettingsScreen from '../screens/settings';
 
 import EliteTabBar from './components/EliteTabBar';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 const Tab = createBottomTabNavigator();
+
+// LIFE-SAFETY (görev #20): MapScreen ağır bir ekran (Skia + harita render).
+// MainNavigator'daki lazy ekranlar withLazy → LazyScreenErrorBoundary ile zaten
+// izole; ancak tab ekranları eager yüklenir ve sarmalanmamıştı. Burada
+// MapScreen'i kendi ErrorBoundary'sine alıyoruz ki harita render crash'i
+// uygulamayı (ve global SOS/EEW overlay'lerini) çökertmesin.
+function MapScreenWithBoundary(props: React.ComponentProps<typeof MapScreen>) {
+  return (
+    <ErrorBoundary>
+      <MapScreen {...props} />
+    </ErrorBoundary>
+  );
+}
 
 export default function MainTabs() {
   return (
@@ -34,7 +48,7 @@ export default function MainTabs() {
       }}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Map" component={MapScreen} />
+      <Tab.Screen name="Map" component={MapScreenWithBoundary} />
       <Tab.Screen name="Family" component={FamilyScreen} />
       <Tab.Screen name="Messages" component={MessagesScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />

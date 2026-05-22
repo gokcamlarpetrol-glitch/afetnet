@@ -193,8 +193,19 @@ class NotificationCenter {
     // 3 EEW servisi (EEWService, MultiSourceEEW, RealtimeMonitor) aynı depremi
     // farklı eventId'lerle bildirebilir. eventKey magnitude+coords+time normalize
     // edilmiş hali → 5dk içinde aynı eventKey gelirse dedup edilir.
+    //
+    // H10 (TTL-based eviction): the previous 500-entry hard cap could overflow
+    // during an M5+ aftershock storm (one event every ~30s = 100 keys/hour, plus
+    // RealtimeMonitor + multi-source duplicates → easily 1000+/hour). With FIFO
+    // eviction we'd lose recent dedup state, causing duplicate notifications.
+    // Now we lazily evict expired entries (>10min) on every set, with an
+    // emergency cap at 1000 entries as last-resort overflow protection.
     private readonly eventKeyDedupMap = new Map<string, number>();
     private static readonly EVENT_KEY_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+    // H10: TTL beyond which an entry is provably stale (twice the dedup window).
+    private static readonly EVENT_KEY_DEDUP_TTL_MS = 10 * 60 * 1000;
+    // H10: storm-protection cap — should never be hit if TTL eviction is working.
+    private static readonly EVENT_KEY_DEDUP_MAX_ENTRIES = 1000;
 
     // FIX: Track currently active conversation to suppress OS banner.
     // WhatsApp/Telegram suppress notifications when viewing the same chat.
@@ -344,6 +355,42 @@ class NotificationCenter {
                                     shouldShowBanner: true,
                                     shouldShowList: true,
                                 };
+                            }
+
+                            // görev #25 madde 5: foreground handler önceden non-message
+                            // her kategori için koşulsuz shouldShowAlert/Sound:true dönüyordu.
+                            // Foreground'a düşen remote FCM push (earthquake/news/system)
+                            // kullanıcının sessiz modu / sessiz saatlerini baypas ediyordu.
+                            // notify() lines ~824-834'teki gating mantığını burada da uygula:
+                            // life-safety dışı türler sessiz mod / aktif sessiz saatlerde
+                            // ses+banner bastırılır. Life-safety türleri (earthquake/family_sos)
+                            // yukarıdaki eew/sos blokları gibi tam görünür kalır.
+                            const LIFE_SAFETY_FG = ['earthquake', 'eew', 'sos', 'sos_alert',
+                                'sos_received', 'sos_family', 'family_sos', 'sos_proximity',
+                                'nearby_sos', 'family_status_update'];
+                            const isLifeSafetyFg = LIFE_SAFETY_FG.includes(notifType);
+                            if (!isLifeSafetyFg) {
+                                try {
+                                    const fgSettings = await this.getSettings();
+                                    const silentModeActive =
+                                        fgSettings.notificationMode === 'silent'
+                                        || fgSettings.notificationMode === 'critical-only'
+                                        || (this.isQuietHoursActive(fgSettings)
+                                            && fgSettings.quietHoursCriticalOnly !== false);
+                                    if (silentModeActive) {
+                                        // Bildirim listede görünür ama ses/banner sessiz —
+                                        // kullanıcıyı rahatsız etmeden geçmişe kaydedilir.
+                                        return {
+                                            shouldShowAlert: false,
+                                            shouldPlaySound: false,
+                                            shouldSetBadge: true,
+                                            shouldShowBanner: false,
+                                            shouldShowList: true,
+                                        };
+                                    }
+                                } catch (settingsErr) {
+                                    logger.debug('Foreground settings gate failed (showing notification):', settingsErr);
+                                }
                             }
 
                             return {
@@ -503,15 +550,6 @@ class NotificationCenter {
                                 }
                             }
 
-
-                            // === FOREGROUND VOICE CALL ===
-                            if (fgType === 'voice_call') {
-                                DeviceEventEmitter.emit('VOICE_CALL_INCOMING', {
-                                    callId: fgData?.callId,
-                                    callerUid: fgData?.callerUid,
-                                    callerName: fgData?.callerName || 'Bilinmeyen',
-                                });
-                            }
 
                             // === FOREGROUND EEW ALERT ===
                             // When an EEW push arrives in foreground, trigger full-screen countdown,
@@ -761,10 +799,33 @@ class NotificationCenter {
                     return { delivered: false, reason: 'Cross-pipeline duplicate (eventKey)', priority: 'low' };
                 }
                 this.eventKeyDedupMap.set(eventKey, now);
-                // Bound memory: keep last 500 entries
-                if (this.eventKeyDedupMap.size > 500) {
+                // H10: TTL-based eviction. Lazily prune entries older than
+                // EVENT_KEY_DEDUP_TTL_MS (10min). We bound the iteration to
+                // 100 entries per call to avoid O(n) work on the hot path
+                // during a notification storm. Map iteration order is insertion
+                // order, so the oldest entries surface first.
+                if (this.eventKeyDedupMap.size > 50) {
+                    let evicted = 0;
+                    const cutoff = now - NotificationCenter.EVENT_KEY_DEDUP_TTL_MS;
+                    for (const [k, ts] of this.eventKeyDedupMap) {
+                        if (ts < cutoff) {
+                            this.eventKeyDedupMap.delete(k);
+                            evicted++;
+                            if (evicted >= 100) break;
+                        } else {
+                            // Map is insertion-ordered; first non-stale entry
+                            // means rest are even fresher → safe to stop.
+                            break;
+                        }
+                    }
+                }
+                // H10: emergency cap — if TTL eviction couldn't keep up (e.g.
+                // every entry inserted within 10min), drop oldest to stay
+                // under the hard cap.
+                while (this.eventKeyDedupMap.size > NotificationCenter.EVENT_KEY_DEDUP_MAX_ENTRIES) {
                     const oldestKey = this.eventKeyDedupMap.keys().next().value;
-                    if (oldestKey) this.eventKeyDedupMap.delete(oldestKey);
+                    if (!oldestKey) break;
+                    this.eventKeyDedupMap.delete(oldestKey);
                 }
             }
 
@@ -1991,37 +2052,6 @@ class NotificationCenter {
                             break;
                         }
                         navigateTo('MainTabs', { screen: 'Messages' });
-                    }
-                    break;
-                }
-
-                // ═══ VOICE CALL — Navigate to call screen ═══
-                case 'voice_call': {
-                    const callerUid = toNonEmptyString(data.callerUid);
-                    const callerName = data.callerName || 'Bilinmeyen';
-                    const tapCallId = toNonEmptyString(data.callId);
-                    if (callerUid && tapCallId) {
-                        // CRITICAL FIX: On cold start, DeviceEventEmitter.emit('VOICE_CALL_INCOMING')
-                        // fires before IncomingCallOverlay is mounted, so the event is permanently lost.
-                        // Navigate to VoiceCall screen directly (which IS in MAIN_ONLY_SCREENS),
-                        // and ALSO emit the event for the case where the overlay IS mounted (warm start).
-                        navigateTo('VoiceCall', {
-                            callId: tapCallId,
-                            callerUid,
-                            callerName,
-                            isIncoming: true,
-                        });
-                        DeviceEventEmitter.emit('VOICE_CALL_INCOMING', {
-                            callId: tapCallId,
-                            callerUid,
-                            callerName,
-                        });
-                    } else {
-                        // FIX: Fallback when callId or callerUid is missing from push payload.
-                        // Without this, tapping a voice call notification with incomplete data
-                        // does nothing — the user sees the notification, taps, and nothing happens.
-                        logger.warn('voice_call tap: missing callId or callerUid, navigating to Home');
-                        navigateTo('MainTabs', { screen: 'Home' });
                     }
                     break;
                 }

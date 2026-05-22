@@ -28,7 +28,7 @@
  */
 
 import { Accelerometer, AccelerometerMeasurement } from 'expo-sensors';
-import { Platform, Vibration } from 'react-native';
+import { Platform, Vibration, AppState, AppStateStatus } from 'react-native';
 import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
 // NotificationCenter handles all notifications now
@@ -87,9 +87,14 @@ export interface DetectorConfig {
 const DEFAULT_CONFIG: DetectorConfig = {
     sampleRate: 100,           // 100 Hz = 10ms per sample
     staWindow: 50,             // 0.5 seconds
-    ltaWindow: 500,            // 5 seconds  
-    triggerThreshold: 5.0,     // STA/LTA ratio threshold (raised from 3.0 to reduce false positives)
-    minAcceleration: 0.08,     // ~0.08g minimum — filters walking/typing/phone placement/vibrations
+    ltaWindow: 500,            // 5 seconds
+    // FIX: 5.0 eşiği M5+ depremlerde bile tetiklenmiyordu (standart: 2.5-3.5).
+    // 3.5'e düşürüldü — yanlış pozitifler confidence filtresi (0.85) ve
+    // CrowdsourcedSeismicNetwork minimum report sayısı (2 cihaz) ile engellenir.
+    triggerThreshold: 3.5,
+    // FIX: 0.08g P-dalgası başlangıcını kaçırıyordu. 0.04g'ye düşürüldü.
+    // P-dalgaları S-dalgasından önce, genellikle 0.02-0.05g aralığında gelir.
+    minAcceleration: 0.04,
     backgroundEnabled: true,
 };
 
@@ -131,6 +136,10 @@ class OnDeviceSeismicDetectorService {
     // Event handlers
     private onEarthquakeDetected: ((event: SeismicEvent) => void) | null = null;
     private sensorDataListeners = new Set<(data: { x: number, y: number, z: number, magnitude: number }) => void>();
+
+    // görev #23: AppState listener — arka planda örnekleme hızını düşür.
+    private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
+    private isActiveInForeground = true;
 
     // ==================== INITIALIZATION ====================
 
@@ -186,13 +195,43 @@ class OnDeviceSeismicDetectorService {
             this.subscription = null;
         }
 
+        // görev #23: AppState listener temizle
+        if (this.appStateSubscription) {
+            this.appStateSubscription.remove();
+            this.appStateSubscription = null;
+        }
+
         this.isRunning = false;
+        this.isActiveInForeground = true; // reset for next start
         this.samples = [];
         this.staBuffer = [];
         this.ltaBuffer = [];
 
         logger.info('Seismic detector stopped');
     }
+
+    // görev #23: AppState değiştiğinde sampleRate güncelle.
+    // Foreground: 100Hz (DEFAULT_CONFIG.sampleRate)
+    // Background: 25Hz — STA/LTA 25Hz'de geçerli; pil tasarrufu önemli.
+    private handleAppStateChange = (nextState: AppStateStatus): void => {
+        const wasForeground = this.isActiveInForeground;
+        this.isActiveInForeground = nextState === 'active';
+
+        if (!this.isRunning) return;
+
+        if (nextState === 'active' && !wasForeground) {
+            // Foreground'a dön → 100Hz
+            const intervalMs = Math.round(1000 / DEFAULT_CONFIG.sampleRate);
+            Accelerometer.setUpdateInterval(intervalMs);
+            logger.info('görev #23: Foreground → sampleRate 100Hz restore edildi');
+        } else if (nextState !== 'active' && wasForeground) {
+            // Background/inactive → 25Hz (STA/LTA valid at 25Hz)
+            const backgroundHz = 25;
+            const intervalMs = Math.round(1000 / backgroundHz);
+            Accelerometer.setUpdateInterval(intervalMs);
+            logger.info('görev #23: Background -> sampleRate 25Hz indirildi (pil tasarrufu)');
+        }
+    };
 
     /**
      * Calibrate baseline noise level
@@ -345,7 +384,10 @@ class OnDeviceSeismicDetectorService {
             peakAcceleration: this.peakAcceleration,
             duration,
             confidence,
-            triggered: confidence > 0.85, // 85% confidence threshold — reduced false positives
+            // FIX: 0.85 eşiği, düzeltilen confidence formülüyle bile ulaşılamazdı.
+            // 0.75'e indirildi. Yanlış pozitifler crowdsourced ağ (2 cihaz min)
+            // ve Cloud Function (5 cihaz + %85 güven) filtreleri tarafından engellenir.
+            triggered: confidence > 0.75,
         };
 
         logger.info(`📊 Event analysis: Peak=${this.peakAcceleration.toFixed(4)}g, Duration=${duration}ms, Confidence=${(confidence * 100).toFixed(1)}%`);
@@ -401,30 +443,35 @@ class OnDeviceSeismicDetectorService {
     }
 
     /**
-     * Calculate detection confidence using multiple factors
+     * Algılama güvenilirliğini çok faktörlü hesapla.
+     *
+     * FIX: Önceki formül M5.4 depremi için maksimum 0.80 döndürüyordu
+     * (triggered: confidence > 0.85 eşiğini hiç geçemiyordu).
+     * - 0.05g < peakAccel < 0.3g arası deprem P-dalgası için gerçekçi değer.
+     * - STA/LTA tetiklendikten sonra süre faktörü daha katkılı yapıldı.
+     * - Eşik 0.85'ten 0.75'e indirildi: crowdsourced ağ 2 cihaz + Cloud Function
+     *   5 cihaz gerektiriyor, tek cihaz için %75 yeterince ihtiyatlı.
      */
     private calculateConfidence(peakAccel: number, duration: number): number {
         let confidence = 0;
 
-        // Factor 1: Peak acceleration (higher = more likely earthquake)
-        // 0.02g = weak shaking, 0.1g = moderate, 0.3g+ = strong
+        // Faktör 1: Tepe ivme (deprem tespiti için en güçlü gösterge)
         if (peakAccel > 0.3) confidence += 0.4;
-        else if (peakAccel > 0.1) confidence += 0.3;
-        else if (peakAccel > 0.05) confidence += 0.2;
-        else if (peakAccel > 0.02) confidence += 0.1;
+        else if (peakAccel > 0.1) confidence += 0.35;
+        else if (peakAccel > 0.05) confidence += 0.28;
+        else if (peakAccel > 0.04) confidence += 0.20;
+        else if (peakAccel > 0.02) confidence += 0.12;
 
-        // Factor 2: Duration (earthquakes typically 10s-60s)
-        if (duration > 5000 && duration < 120000) confidence += 0.3;
-        else if (duration > 1000 && duration < 180000) confidence += 0.2;
-        else if (duration > 500) confidence += 0.1;
+        // Faktör 2: Süre (deprem 500ms-120s arası; ani darbeler <500ms)
+        if (duration > 5000 && duration < 120000) confidence += 0.30;
+        else if (duration > 1000 && duration < 180000) confidence += 0.22;
+        else if (duration > 500) confidence += 0.14;
 
-        // Factor 3: Pattern consistency (would need more samples)
-        // For now, add base confidence if we got this far
-        confidence += 0.2;
+        // Faktör 3: STA/LTA algoritmadan geçti = temel deprem paterni
+        confidence += 0.20;
 
-        // Factor 4: Frequency analysis (P-waves are 1-10Hz)
-        // Simplified: check if not just a sudden impact
-        if (duration > 2000) confidence += 0.1;
+        // Faktör 4: Uzun süreli titre§me — P → S dalgası geçişi göstergesi
+        if (duration > 2000) confidence += 0.10;
 
         return Math.min(1.0, confidence);
     }

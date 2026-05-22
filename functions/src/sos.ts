@@ -116,12 +116,10 @@ export const onSOSAlert = functions
                     functions.logger.warn(`No ownerUid on device ${targetDeviceId} — using device pushToken fallback`);
                     const fbTitle = `🆘 ACİL SOS: ${alert.senderName || 'Aile Üyesi'}`;
                     const fbBody = alert.message || 'Acil yardım gerekiyor!';
-                    // Include battery + healthInfo for SOSHelpScreen display
+                    // Include battery for SOSHelpScreen display
+                    // görev #22 — healthInfo (kan grubu/alerji/ilaç) FCM payload'ından çıkarıldı (KVKK özel kategori veri).
+                    // Alıcı uygulama SOS dokümanını Firestore'dan (erişim kontrollü) direkt okur.
                     const fbBattery = typeof alert.battery === 'number' ? String(alert.battery) : '';
-                    let fbHealthInfo = '';
-                    if (alert.healthInfo && typeof alert.healthInfo === 'object') {
-                        try { fbHealthInfo = JSON.stringify(alert.healthInfo); } catch { /* skip */ }
-                    }
                     const fbPushData: Record<string, string> = {
                         type: 'sos_family',
                         signalId: alert.signalId || context.params.alertId,
@@ -135,7 +133,8 @@ export const onSOSAlert = functions
                         latitude: alert.location?.latitude ? String(alert.location.latitude) : '',
                         longitude: alert.location?.longitude ? String(alert.location.longitude) : '',
                         ...(fbBattery ? { battery: fbBattery } : {}),
-                        ...(fbHealthInfo ? { healthInfo: fbHealthInfo } : {}),
+                        // Sağlık verisi mevcut olduğunu işaret eder; değeri push'a eklenmez.
+                        ...((alert.healthInfo && typeof alert.healthInfo === 'object') ? { hasHealthInfo: 'true' } : {}),
                     };
                     const fbSuccess = await sendPushToToken(fallbackToken, fbTitle, fbBody, fbPushData);
                     if (fbSuccess) {
@@ -238,17 +237,10 @@ export const onSOSAlert = functions
                 : (typeof alert.userId === 'string' ? alert.userId : '');
 
             // Send push notification via Expo Push API (tokens are ExponentPushToken[xxx])
-            // CRITICAL FIX: Include battery and healthInfo in push data.
-            // SOSHelpScreen displays these life-saving fields (battery level, blood type,
-            // allergies, medications). Without them in push data, tapping the notification
-            // when app is killed/background opens SOSHelp with battery=undefined and
-            // healthInfo=undefined — rescue teams lose critical medical info.
+            // Include battery in push data. SOSHelpScreen reads it from notification payload.
+            // görev #22 — healthInfo (kan grubu/alerji/ilaç) FCM payload'ından çıkarıldı (KVKK özel kategori veri).
+            // Alıcı uygulama SOS dokümanını açarken Firestore'dan (erişim kontrollü) direkt okur.
             const batteryStr = typeof alert.battery === 'number' ? String(alert.battery) : '';
-            // FCM push data values must be strings — JSON-encode healthInfo object
-            let healthInfoStr = '';
-            if (alert.healthInfo && typeof alert.healthInfo === 'object') {
-                try { healthInfoStr = JSON.stringify(alert.healthInfo); } catch { /* skip */ }
-            }
 
             const pushData: Record<string, string> = {
                 type: 'sos_family',
@@ -267,7 +259,8 @@ export const onSOSAlert = functions
                 latitude: alert.location?.latitude ? String(alert.location.latitude) : '',
                 longitude: alert.location?.longitude ? String(alert.location.longitude) : '',
                 ...(batteryStr ? { battery: batteryStr } : {}),
-                ...(healthInfoStr ? { healthInfo: healthInfoStr } : {}),
+                // Sağlık verisi mevcut olduğunu işaret eder; değeri push'a eklenmez.
+                ...((alert.healthInfo && typeof alert.healthInfo === 'object') ? { hasHealthInfo: 'true' } : {}),
             };
 
             // LIFE-SAFETY: Send to all tokens with retry on failure
@@ -395,12 +388,10 @@ export const onSOSAlertV3 = functions
                 ? alert.senderUid
                 : (typeof alert.userId === 'string' ? alert.userId : '');
 
-            // CRITICAL FIX: Include battery and healthInfo in push data (same as legacy onSOSAlert).
+            // Include battery in push data (same as legacy onSOSAlert).
+            // görev #22 — healthInfo (kan grubu/alerji/ilaç) FCM payload'ından çıkarıldı (KVKK özel kategori veri).
+            // Alıcı uygulama SOS dokümanını açarken Firestore'dan (erişim kontrollü) direkt okur.
             const batteryStrV3 = typeof alert.battery === 'number' ? String(alert.battery) : '';
-            let healthInfoStrV3 = '';
-            if (alert.healthInfo && typeof alert.healthInfo === 'object') {
-                try { healthInfoStrV3 = JSON.stringify(alert.healthInfo); } catch { /* skip */ }
-            }
 
             const pushData: Record<string, string> = {
                 type: 'sos_family',
@@ -416,7 +407,8 @@ export const onSOSAlertV3 = functions
                 latitude: alert.location?.latitude ? String(alert.location.latitude) : '',
                 longitude: alert.location?.longitude ? String(alert.location.longitude) : '',
                 ...(batteryStrV3 ? { battery: batteryStrV3 } : {}),
-                ...(healthInfoStrV3 ? { healthInfo: healthInfoStrV3 } : {}),
+                // Sağlık verisi mevcut olduğunu işaret eder; değeri push'a eklenmez.
+                ...((alert.healthInfo && typeof alert.healthInfo === 'object') ? { hasHealthInfo: 'true' } : {}),
             };
 
             // LIFE-SAFETY: Send to all tokens with retry on failure

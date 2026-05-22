@@ -11,6 +11,14 @@ import SOSHelpScreen from '../screens/sos/SOSHelpScreen';
 
 // ELITE: Per-screen Suspense wrapper — prevents tab bar disappearing during lazy load
 // Also catches import errors gracefully (network failure, bundle corruption)
+//
+// LIFE-SAFETY (görev #20): withLazy her ekranı LazyScreenErrorBoundary'ye sarar.
+// Bu boundary import hatalarının yanı sıra RENDER crash'lerini de yakalar
+// (getDerivedStateFromError koşulsuz). Dolayısıyla ağır ekranlar —
+// DisasterMapScreen, WaveVisualizationScreen, LocalAIAssistantScreen — zaten
+// kendi per-ekran boundary'sine sahip: birinde çökme diğerlerine ve App.tsx'teki
+// global SOS/EEW overlay'lerine sıçramaz. (Eager yüklenen MapScreen ayrıca
+// MainTabs.tsx içinde ErrorBoundary'ye sarıldı.)
 function withLazy(importFn: () => Promise<{ default: React.ComponentType<any> }>) {
   const LazyComponent = React.lazy(importFn);
   return function LazyScreen(props: any) {
@@ -31,8 +39,22 @@ class LazyScreenErrorBoundary extends React.Component<
 > {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     if (__DEV__) console.error('Lazy screen load failed:', error);
+    // LIFE-SAFETY (görev #20): Bu boundary ekran render crash'ini izole eder;
+    // ekran çökse de uygulama ve global SOS/EEW overlay'leri ayakta kalır.
+    // İzole edilen crash production'da görünmez kalmasın diye Crashlytics'e
+    // raporla (önceki kod yalnızca __DEV__ console.error yapıyordu).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { firebaseCrashlyticsService } = require('../services/FirebaseCrashlyticsService');
+      firebaseCrashlyticsService.recordError(error, {
+        componentStack: errorInfo.componentStack || 'unknown',
+        errorBoundary: 'LazyScreenErrorBoundary',
+      });
+    } catch {
+      /* Crashlytics import/report hatası — izole crash yine de yutulur */
+    }
   }
   handleRetry = () => {
     this.setState({ hasError: false });
@@ -61,7 +83,6 @@ class LazyScreenErrorBoundary extends React.Component<
 const NewMessageScreen = withLazy(() => import('../screens/messages/NewMessageScreen'));
 const SOSConversationScreen = withLazy(() => import('../screens/messages/SOSConversationScreen'));
 const CreateGroupScreen = withLazy(() => import('../screens/messages/CreateGroupScreen'));
-const VoiceCallScreen = withLazy(() => import('../screens/messages/VoiceCallScreen'));
 
 const DisasterMapScreen = withLazy(() => import('../screens/map/DisasterMapScreen'));
 const MeshNetworkScreen = withLazy(() => import('../screens/mesh/MeshNetworkScreen'));
@@ -179,7 +200,6 @@ export default function MainNavigator() {
         <Stack.Screen name="Security" component={SecurityScreen} options={{ headerShown: false }} />
         <Stack.Screen name="EEWSettings" component={EEWSettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="RescueTeam" component={RescueTeamScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="VoiceCall" component={VoiceCallScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
   );
 }

@@ -101,7 +101,8 @@ class Logger {
     if (!cs) return;
     try {
       cs.setUserId(userId);
-      if (email) cs.setAttribute('email', email);
+      // görev #22 — E-posta PII Crashlytics'e gönderilmez; UID çökme korelasyonu için yeterli.
+      // if (email) cs.setAttribute('email', email); // KALDIRILDI
       if (displayName) cs.setAttribute('displayName', displayName);
     } catch (e) {
       // Ignore if Crashlytics not available

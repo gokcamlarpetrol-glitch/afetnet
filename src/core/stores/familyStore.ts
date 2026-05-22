@@ -540,6 +540,19 @@ const mergeMembers = (local: FamilyMember[], remote: FamilyMember[]): FamilyMemb
         ...filtered,
         uid: m.uid,
       };
+      // görev #21 — "şarj kalan bug" fix: families/members'tan gelen BAYAT pil
+      // store'daki TAZE pili ezmesin. preserveFresherLocationState sadece konumu
+      // koruyor; pil için ayrı guard: batteryUpdatedAt'i karşılaştır, daha tazeyi tut.
+      const existingBatteryTs = normalizeTimestamp(existing.batteryUpdatedAt);
+      const incomingBatteryTs = normalizeTimestamp(m.batteryUpdatedAt);
+      if (
+        existing.batteryLevel !== undefined
+        && existingBatteryTs > 0
+        && existingBatteryTs > incomingBatteryTs
+      ) {
+        mergedMember.batteryLevel = existing.batteryLevel;
+        mergedMember.batteryUpdatedAt = existingBatteryTs;
+      }
       map.set(m.uid, preserveFresherLocationState(existing, m, mergedMember));
     }
   }

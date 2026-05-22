@@ -28,8 +28,21 @@ export const auditFirestore = functions
             const locSnap = await db.collection('locations_current').limit(5).get();
             result.locations_current = locSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+            // Görev #24 — yalnızca hassas olmayan alanları döndür; token/pushToken/credential
+            // alanlarını sızdırma. privacy.ts:sanitizeDevice deseninin yansıması.
             const tokenSnap = await db.collectionGroup('devices').limit(5).get();
-            result.push_tokens = tokenSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            result.push_tokens = tokenSnap.docs.map(d => {
+                const raw = d.data();
+                return {
+                    id: d.id,
+                    platform: typeof raw.platform === 'string' ? raw.platform : null,
+                    lastUpdated: typeof raw.lastUpdated === 'number' ? raw.lastUpdated : null,
+                    hasLocation: Boolean(raw.location),
+                    hasToken: Boolean(raw.token || raw.pushToken),
+                    ownerUid: typeof raw.ownerUid === 'string' ? raw.ownerUid : null,
+                    // token, pushToken, fcmToken, credential alanları kasıtlı olarak çıkarıldı
+                };
+            });
 
             return { success: true, data: result };
         } catch (err) {

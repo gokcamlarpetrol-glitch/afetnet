@@ -25,14 +25,25 @@ describe('EEW safety guards', () => {
     expect(source).toContain('limit(MAX_OBSERVATIONS)');
   });
 
-  it('keeps backend EEW provider timestamps in Turkey local time and rejects stale/future events', () => {
+  it('parses backend EEW provider timestamps with correct timezone handling and rejects stale/future events', () => {
+    // görev #18: v1.6.3 yeniden çalışması sembolleri yeniden adlandırdı —
+    // AFAD apiv2 UTC döndürdüğü için sorgu penceresi artık UTC üretilir
+    // (formatTurkeyApiDateTimeFromMs → formatUtcApiDateTimeFromMs) ve AFAD
+    // olayları parseAfadUtcDateTime ile UTC ayrıştırılır. parseTurkeyLocalDateTime
+    // YALNIZCA Kandilli (yerel saatle yayımlar) için korundu. Test'in amacı
+    // (saat dilimi doğruluğu + bayat/gelecek olay reddi) değişmedi.
     const source = fs.readFileSync(
       path.join(repoRoot, 'functions/src/eew.ts'),
       'utf8',
     );
 
-    expect(source).toContain('formatTurkeyApiDateTimeFromMs');
+    // AFAD sorgu penceresi UTC üretilir (yerel saat değil)
+    expect(source).toContain('formatUtcApiDateTimeFromMs');
+    // AFAD olay zaman damgaları UTC ayrıştırılır
+    expect(source).toContain('parseAfadUtcDateTime');
+    // Kandilli (yerel saat) için ayrı ayrıştırıcı korunur
     expect(source).toContain('parseTurkeyLocalDateTime');
+    // Bayat / gelecek tarihli olaylar reddedilir
     expect(source).toContain('isFreshOfficialEvent');
     expect(source).toContain('OFFICIAL_EVENT_MAX_FUTURE_SKEW_MS');
   });

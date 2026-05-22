@@ -191,7 +191,12 @@ class EmergencyModeService {
       // Get current location and broadcast
       const location = await locationService.getCurrentPosition();
       if (location) {
-        logger.info(`Current location: ${location.latitude}, ${location.longitude}`);
+        // görev #22 — Hassas GPS koordinatları production log'una yazılmaz (Crashlytics breadcrumb = PII).
+        if (__DEV__) {
+          logger.info(`Current location: ${location.latitude}, ${location.longitude}`);
+        } else {
+          logger.info('Konum alındı — koordinatlar üretimde loglanmaz');
+        }
 
         // Update user status with location
         useUserStatusStore.getState().updateStatus('needs_help', {

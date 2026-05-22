@@ -27,6 +27,10 @@ const logger = createLogger('EarthquakeAlertHook');
 // ELITE: Alert settings storage key
 const ALERT_SETTINGS_KEY = '@afetnet_earthquake_alert_settings';
 
+// görev #18: processedEarthquakes Set üst sınırı — artçı şok dizilerinde
+// sınırsız büyümeyi (memory leak) önler. Sınır aşılınca en eski yarısı atılır.
+const MAX_PROCESSED_EARTHQUAKES = 500;
+
 // ELITE: Alert settings interface
 export interface EarthquakeAlertSettings {
     enabled: boolean;
@@ -167,6 +171,19 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
 
         newEarthquakes.forEach((eq) => {
             processedEarthquakes.current.add(eq.id);
+            // görev #18: processedEarthquakes Set'i yalnızca .add() yapıyordu, hiç
+            // boşaltmıyordu — uzun artçı şok dizilerinde sınırsız büyüyordu (leak).
+            // EEWService.seenEvents / SOS listener'larındaki gibi: bir üst sınıra
+            // ulaşınca en eski yarısı toplu olarak atılır (Set ekleme sırasını korur).
+            if (processedEarthquakes.current.size > MAX_PROCESSED_EARTHQUAKES) {
+                const evictCount = Math.floor(MAX_PROCESSED_EARTHQUAKES / 2);
+                const iterator = processedEarthquakes.current.values();
+                for (let i = 0; i < evictCount; i++) {
+                    const oldest = iterator.next().value;
+                    if (oldest === undefined) break;
+                    processedEarthquakes.current.delete(oldest);
+                }
+            }
             checkAndTriggerAlert(eq);
         });
     }, [earthquakes, settings, userLocation]);

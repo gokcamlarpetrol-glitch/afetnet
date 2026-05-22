@@ -25,7 +25,7 @@ interface UseLiveLocationOptions {
     distanceInterval?: number;
     /** Minimum time (ms) between updates. Default: 5000 */
     timeInterval?: number;
-    /** GPS accuracy level. Default: High */
+    /** GPS accuracy level. Default: Balanced (görev #23 — High yerine Balanced, pil tasarrufu) */
     accuracy?: Location.Accuracy;
     /** Whether to actively track. Default: true */
     enabled?: boolean;
@@ -48,7 +48,8 @@ export function useLiveLocation(options: UseLiveLocationOptions = {}): UseLiveLo
     const {
         distanceInterval = 10,
         timeInterval = 5000,
-        accuracy = Location.Accuracy.High,
+        // görev #23: Default High → Balanced. Callers needing High pass it explicitly.
+        accuracy = Location.Accuracy.Balanced,
         enabled = true,
     } = options;
 
@@ -79,8 +80,11 @@ export function useLiveLocation(options: UseLiveLocationOptions = {}): UseLiveLo
             if (subscriptionRef.current) {
                 subscriptionRef.current.remove();
                 subscriptionRef.current = null;
-                setIsTracking(false);
             }
+            setLocation(null);
+            setLocationData(null);
+            setPermissionGranted(false);
+            setIsTracking(false);
             return;
         }
 
@@ -146,13 +150,16 @@ export function useLiveLocation(options: UseLiveLocationOptions = {}): UseLiveLo
     }, [enabled, distanceInterval, timeInterval, accuracy, updateLocation]);
 
     const refreshLocation = useCallback(async () => {
+        if (!enabled) {
+            return;
+        }
         try {
             const loc = await Location.getCurrentPositionAsync({ accuracy });
             updateLocation(loc);
         } catch (error) {
             logger.warn('Manual location refresh failed:', error);
         }
-    }, [accuracy, updateLocation]);
+    }, [accuracy, enabled, updateLocation]);
 
     return {
         location,

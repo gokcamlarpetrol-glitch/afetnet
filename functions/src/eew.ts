@@ -170,6 +170,35 @@ function isFreshOfficialEvent(event: EEWEvent): boolean {
         eventAge >= -OFFICIAL_EVENT_MAX_FUTURE_SKEW_MS;
 }
 
+/**
+ * görev #18: FCM push data payload'una `warningSeconds` ekle.
+ *
+ * SORUN: EEW push'unun `data` payload'ı `warningSeconds` içermiyordu;
+ * NotificationCenter `Number(warningSeconds) || 0` okuduğu için alınan-EEW
+ * geri sayımı her zaman 0sn gösteriyordu (geri sayım anlamsızdı).
+ *
+ * Gerçek S-dalgası varış süresi alıcının konumuna bağlıdır — sunucu bunu
+ * bilemez (her alıcı için ayrı). Bu yüzden büyüklük-bazlı TUTUCU bir tahmin
+ * üretiriz: büyük depremler daha uzaktan da hissedilir, dolayısıyla daha geniş
+ * uyarı penceresi olur. Bu yalnızca güvenli bir varsayılan; istemci kendi
+ * konumuyla daha kesin bir geri sayım hesaplarsa onu kullanır.
+ *
+ * Tutuculuk: olay yaşı (issuedAt → şimdi) düşülür — tespit + yayın gecikmesi
+ * uyarı penceresini zaten tüketmiştir. Negatife düşerse 0 döner.
+ */
+function estimateWarningSeconds(event: EEWEvent): number {
+    // Büyüklük-bazlı tipik uyarı penceresi (yakın-alan kullanıcı için tutucu).
+    let baseWindow: number;
+    if (event.magnitude >= 7.0) baseWindow = 30;
+    else if (event.magnitude >= 6.0) baseWindow = 20;
+    else if (event.magnitude >= 5.0) baseWindow = 12;
+    else baseWindow = 8;
+
+    // Tespit + yayın gecikmesini düş — bu süre uyarı penceresinden gitmiştir.
+    const elapsedSec = Math.max(0, (Date.now() - event.issuedAt) / 1000);
+    return Math.max(0, Math.round(baseWindow - elapsedSec));
+}
+
 // ============================================================
 // HELPER FUNCTIONS - DATA FETCHING
 // ============================================================
@@ -600,6 +629,9 @@ export async function sendEEWPushWithRetry(event: EEWEvent): Promise<{ sent: num
             source: event.source,
             timestamp: String(event.timestamp),
             verified: String(event.verified || false),
+            // görev #18: NotificationCenter'ın okuduğu uyarı süresi — bu alan
+            // eksik olunca alınan-EEW geri sayımı her zaman 0sn gösteriyordu.
+            warningSeconds: String(estimateWarningSeconds(event)),
         };
 
         if (isCritical) {
@@ -962,6 +994,9 @@ async function sendToTokensWithRetry(
         source: event.source,
         timestamp: String(event.timestamp),
         verified: String(event.verified || false),
+        // görev #18: NotificationCenter'ın okuduğu uyarı süresi — bu alan
+        // eksik olunca alınan-EEW geri sayımı her zaman 0sn gösteriyordu.
+        warningSeconds: String(estimateWarningSeconds(event)),
     };
 
     // CRITICAL FIX: Use collapseKey/tag/apns-collapse-id matching the topic message
@@ -1213,15 +1248,19 @@ export const eewMonitorFast = functions
     });
 
 // ============================================================
-// 2. BACKUP MONITOR (Every 30 seconds) - REDUNDANCY
+// 2. BACKUP MONITOR (Every 1 minute) - REDUNDANCY
+// görev #18: Yorum "30 saniye" diyordu ama schedule 'every 3 minutes' idi —
+// kod ve yorum tutarsızdı. Yedek monitörün gerçek görevi fast monitör
+// tamamen başarısız olursa kritik (M5.5+) olayları yakalamaktır; 1 dakikalık
+// kadans v1 için makul bir yedek aralığıdır. Yorum + schedule hizalandı.
 // ============================================================
 
 export const eewMonitorBackup = functions
     .region(REGION)
-    .pubsub.schedule('every 3 minutes')
+    .pubsub.schedule('every 1 minutes')
     .onRun(async () => {
-        // Same logic as fast monitor but offset by 30 seconds internally
-        // This provides redundancy if fast monitor fails
+        // Fast monitör ile aynı mantık — yedeklilik: fast monitör çökerse
+        // kritik olaylar yine de tespit edilir.
         functions.logger.info('🔄 EEW Backup Monitor running...');
 
         try {

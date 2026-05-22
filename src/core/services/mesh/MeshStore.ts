@@ -10,6 +10,38 @@ import { eliteStorage } from '../../utils/storage';
 
 // O(1) dedup lookup — hydrated from persisted seenMessageIds array
 const seenSet = new Set<string>();
+
+// görev #23: Persist yazımını kısıtla — her setState'de MMKV'ye yazmak yerine
+// 500ms coalesce (debounce). Mesaj/seenId listesi persist'ten DÜŞÜRÜLMEDİ.
+function createThrottledStorage(base: { getItem: (k: string) => string | null | Promise<string | null>; setItem: (k: string, v: string) => void | Promise<void>; removeItem: (k: string) => void | Promise<void> }) {
+  const pendingWrites = new Map<string, string>();
+  const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const DEBOUNCE_MS = 500;
+  return {
+    getItem: (key: string) => base.getItem(key),
+    setItem: (key: string, value: string) => {
+      pendingWrites.set(key, value);
+      const existing = debounceTimers.get(key);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        const latest = pendingWrites.get(key);
+        if (latest !== undefined) {
+          base.setItem(key, latest);
+          pendingWrites.delete(key);
+        }
+        debounceTimers.delete(key);
+      }, DEBOUNCE_MS);
+      debounceTimers.set(key, timer);
+    },
+    removeItem: (key: string) => {
+      pendingWrites.delete(key);
+      const existing = debounceTimers.get(key);
+      if (existing) { clearTimeout(existing); debounceTimers.delete(key); }
+      base.removeItem(key);
+    },
+  };
+}
+const throttledEliteStorage = createThrottledStorage(eliteStorage as Parameters<typeof createThrottledStorage>[0]);
 const MAX_MESSAGES = 2000;
 const MAX_SEEN_IDS = 5000;
 const MAX_OUTGOING_QUEUE = 500;
@@ -121,12 +153,17 @@ interface MeshState {
   // Simulation
   isSimulationMode: boolean;
 
+  // K3: Mesh availability state — UI surfaces this to users when BLE is off
+  // or permissions are denied. null = mesh is healthy / running normally.
+  meshUnavailableReason: 'no-permission' | 'bluetooth-off' | 'unsupported' | null;
+
   // Actions
   setConnected: (connected: boolean) => void;
   setScanning: (scanning: boolean) => void;
   setAdvertising: (advertising: boolean) => void;
   setMyDeviceId: (id: string) => void;
   setSimulationMode: (enabled: boolean) => void;
+  setMeshUnavailable: (reason: 'no-permission' | 'bluetooth-off' | 'unsupported' | null) => void;
   toggleMesh: (enabled: boolean) => void;
 
   addPeer: (peer: MeshNode) => void;
@@ -180,6 +217,7 @@ export const useMeshStore = create<MeshState>()(
       failedQueue: [],
       seenMessageIds: [],
       isSimulationMode: false, // ELITE: Default to real BLE — simulation must be toggled explicitly
+      meshUnavailableReason: null, // K3: null = mesh healthy
       stats: { totalPeers: 0, totalMessages: 0, sosAlerts: 0 },
 
       // Setters
@@ -194,6 +232,7 @@ export const useMeshStore = create<MeshState>()(
         }
         set({ isSimulationMode: enabled });
       },
+      setMeshUnavailable: (reason) => set({ meshUnavailableReason: reason }),
       toggleMesh: (enabled) => set({ isConnected: enabled }), // Simplified toggle
 
       addPeer: (peer) => set((state) => {
@@ -423,7 +462,8 @@ export const useMeshStore = create<MeshState>()(
     }),
     {
       name: 'mesh-storage-v2',
-      storage: createJSONStorage(() => eliteStorage),
+      // görev #23: Throttled storage — 500ms debounce, tüm persist alanları korunur.
+      storage: createJSONStorage(() => throttledEliteStorage),
       partialize: (state) => ({
         messages: state.messages,
         outgoingQueue: state.outgoingQueue,

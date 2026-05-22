@@ -25,6 +25,8 @@ interface MemberCardProps {
   onDelete?: (memberId: string) => void;
   onMessage?: (member: FamilyMember) => void;
   onLocate?: (member: FamilyMember) => void;
+  onResendInvite?: (member: FamilyMember) => void;
+  onCancelInvite?: (member: FamilyMember) => void;
 }
 
 // Staleness thresholds
@@ -36,10 +38,13 @@ const STALE_OLD_MS = 2 * 60 * 60 * 1000; // 2 hours → red "Konum eski"
 const STATUS_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export const MemberCard = React.memo(function MemberCard({
-  member, onPress, index, onEdit, onDelete, onMessage, onLocate,
+  member, onPress, index, onEdit, onDelete, onMessage, onLocate, onResendInvite, onCancelInvite,
 }: MemberCardProps) {
   const scale = useSharedValue(1);
   const { color, text: statusText, icon, bgGradient } = getStatusRenderInfo(member.status);
+  const isPendingApproval = member.approvalState === 'pending';
+  const isDeclinedApproval = member.approvalState === 'declined';
+  const isApprovalLocked = isPendingApproval || isDeclinedApproval;
 
   // PREMIUM: Pulse animation for critical/need-help status
   const pulseOpacity = useSharedValue(1);
@@ -70,6 +75,7 @@ export const MemberCard = React.memo(function MemberCard({
 
   const handlePress = () => {
     haptics.impactLight();
+    if (isApprovalLocked) return;
     onPress();
   };
 
@@ -91,6 +97,7 @@ export const MemberCard = React.memo(function MemberCard({
 
   // Long-press: show Edit/Delete options
   const handleLongPress = () => {
+    if (isApprovalLocked) return;
     haptics.impactMedium();
     if (Platform.OS === 'ios') {
       const options = ['İptal', 'Düzenle', 'Sil'];
@@ -145,10 +152,6 @@ export const MemberCard = React.memo(function MemberCard({
   const isStatusStale = isSelfReportedStatus && statusAgeMs !== null && statusAgeMs > STATUS_STALE_MS;
   const statusStaleDays = isStatusStale ? Math.floor((statusAgeMs ?? 0) / (24 * 60 * 60 * 1000)) : 0;
 
-  // HATA 5 FIX: Pending approval state — KVKK + stalking koruma
-  const isPendingApproval = member.approvalState === 'pending';
-  const isDeclinedApproval = member.approvalState === 'declined';
-
   // Avatar
   const initial = member.name.charAt(0).toUpperCase();
   const avatarGradient = getAvatarGradient(member.name);
@@ -174,11 +177,12 @@ export const MemberCard = React.memo(function MemberCard({
           : 'battery-dead' as const
     : 'battery-dead' as const;
 
+  // görev #23: FadeInDown delay üst sınırı 300ms — uzun listede son kartlar 5s+ beklemesin.
   return (
-    <Animated.View entering={FadeInDown.delay(index * 60).springify()} style={animatedStyle}>
+    <Animated.View entering={FadeInDown.delay(Math.min(index * 60, 300)).springify()} style={animatedStyle}>
       <Pressable
         onPress={handlePress}
-        onLongPress={handleLongPress}
+        onLongPress={isApprovalLocked ? undefined : handleLongPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         style={styles.cardOuter}
@@ -235,12 +239,12 @@ export const MemberCard = React.memo(function MemberCard({
                 {isPendingApproval ? (
                   <View style={[styles.statusBadge, { backgroundColor: '#fbbf24' + '20' }]}>
                     <Ionicons name="hourglass" size={11} color="#d97706" />
-                    <Text style={[styles.statusText, { color: '#d97706' }]}>Onay Bekliyor</Text>
+                    <Text style={[styles.statusText, { color: '#d97706' }]}>Davet bekleniyor</Text>
                   </View>
                 ) : isDeclinedApproval ? (
                   <View style={[styles.statusBadge, { backgroundColor: '#94a3b8' + '14' }]}>
                     <Ionicons name="close-circle" size={11} color="#64748b" />
-                    <Text style={[styles.statusText, { color: '#64748b' }]}>Reddedildi</Text>
+                    <Text style={[styles.statusText, { color: '#64748b' }]}>Davet reddedildi</Text>
                   </View>
                 ) : (
                   /* Status badge — degraded if stale (>24h self-reported) */
@@ -252,14 +256,16 @@ export const MemberCard = React.memo(function MemberCard({
                   </View>
                 )}
                 {/* Time with staleness color */}
-                <View style={styles.timeBadge}>
-                  <Ionicons name="time-outline" size={10} color={isLocationVeryStale ? '#ef4444' : isLocationStale ? '#f59e0b' : '#94a3b8'} />
-                  <Text style={[styles.timeText, isLocationVeryStale ? { color: '#ef4444', fontWeight: '700' } : isLocationStale ? { color: '#f59e0b' } : null]}>
-                    {isLocationVeryStale ? `Konum eski (${lastSeenText})` : lastSeenText}
-                  </Text>
-                </View>
+                {!isApprovalLocked && (
+                  <View style={styles.timeBadge}>
+                    <Ionicons name="time-outline" size={10} color={isLocationVeryStale ? '#ef4444' : isLocationStale ? '#f59e0b' : '#94a3b8'} />
+                    <Text style={[styles.timeText, isLocationVeryStale ? { color: '#ef4444', fontWeight: '700' } : isLocationStale ? { color: '#f59e0b' } : null]}>
+                      {isLocationVeryStale ? `Konum eski (${lastSeenText})` : lastSeenText}
+                    </Text>
+                  </View>
+                )}
                 {/* Battery level */}
-                {battery !== undefined && (
+                {!isApprovalLocked && battery !== undefined && (
                   <View style={styles.batteryBadge}>
                     <Ionicons name={batteryIcon} size={11} color={batteryColor} />
                     <Text style={[styles.batteryText, { color: batteryColor }]}>
@@ -270,7 +276,7 @@ export const MemberCard = React.memo(function MemberCard({
               </View>
 
               {/* Location indicator */}
-              {hasLocation && (
+              {!isApprovalLocked && hasLocation && (
                 <Pressable
                   style={styles.locationChip}
                   onPress={() => {
@@ -287,7 +293,57 @@ export const MemberCard = React.memo(function MemberCard({
           </View>
 
           {/* Bottom: Quick action icons (Edit/Delete via long-press) */}
-          {(onMessage || onLocate) && (
+          {isPendingApproval ? (
+            <View style={[styles.actionsRow, styles.pendingActionsRow]}>
+              <View style={styles.pendingNotice}>
+                <Ionicons name="hourglass-outline" size={14} color="#b45309" />
+                <Text style={styles.pendingNoticeText}>Davet bekleniyor</Text>
+              </View>
+              {onResendInvite && (
+                <Pressable
+                  style={styles.pendingActionBtn}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onResendInvite(member);
+                  }}
+                >
+                  <Ionicons name="refresh" size={14} color="#2563eb" />
+                  <Text style={styles.pendingActionText}>Yeniden gönder</Text>
+                </Pressable>
+              )}
+              {onCancelInvite && (
+                <Pressable
+                  style={[styles.pendingActionBtn, styles.pendingCancelBtn]}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onCancelInvite(member);
+                  }}
+                >
+                  <Ionicons name="close" size={14} color="#dc2626" />
+                  <Text style={[styles.pendingActionText, styles.pendingCancelText]}>İptal</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : isDeclinedApproval ? (
+            <View style={[styles.actionsRow, styles.pendingActionsRow]}>
+              <View style={styles.declinedNotice}>
+                <Ionicons name="close-circle-outline" size={14} color="#64748b" />
+                <Text style={styles.declinedNoticeText}>Davet reddedildi</Text>
+              </View>
+              {onCancelInvite && (
+                <Pressable
+                  style={[styles.pendingActionBtn, styles.pendingCancelBtn]}
+                  onPress={() => {
+                    haptics.impactLight();
+                    onCancelInvite(member);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={14} color="#dc2626" />
+                  <Text style={[styles.pendingActionText, styles.pendingCancelText]}>Kaldır</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : (onMessage || onLocate) && (
             <View style={styles.actionsRow}>
               {onMessage && (
                 <Pressable
@@ -590,6 +646,60 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
+  },
+  pendingActionsRow: {
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pendingNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#fffbeb',
+  },
+  pendingNoticeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#b45309',
+  },
+  declinedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#f8fafc',
+  },
+  declinedNoticeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  pendingActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+  },
+  pendingCancelBtn: {
+    backgroundColor: '#fef2f2',
+  },
+  pendingActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563eb',
+  },
+  pendingCancelText: {
+    color: '#dc2626',
   },
   actionBtn: {
     alignItems: 'center',

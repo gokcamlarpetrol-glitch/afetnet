@@ -30,10 +30,12 @@ import { saveEEWEvent, sendEEWPushWithRetry } from './eew';
 
 // ============================================================
 // SMTP CONFIGURATION
+// SMTP_PASSWORD Secret Manager'a taşındı: functions.runWith({ secrets: ['SMTP_PASSWORD'] })
+// Plaintext deploy artifact'ına girmemesi için process.env yerine secrets API kullanılır.
+// Deploy: firebase functions:secrets:set SMTP_PASSWORD
 // ============================================================
 
 const SMTP_EMAIL = process.env.SMTP_EMAIL || '';
-const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
 
 // ============================================================
 // OPENAI PROXY RATE LIMITING
@@ -146,10 +148,12 @@ function getVerificationEmailHTML(displayName: string, link: string): string {
 </div>`;
 }
 
-function getEmailChangeHTML(displayName: string, newEmail: string, link: string): string {
+// Görev #24 — `link` parametresi kaldırıldı. Firebase Admin SDK'nın generateEmailVerificationLink
+// yöntemi e-posta değişikliğini "geri al" (revoke) bağlantısı üretmez; boş href="" bırakmak
+// kullanıcıyı yanıltır. Buton kaldırılıp yerine destek talimatı metni getirildi.
+function getEmailChangeHTML(displayName: string, newEmail: string): string {
     const safeDisplayName = escapeHtml(displayName);
     const safeNewEmail = escapeHtml(newEmail);
-    const safeLink = escapeHtml(link);
     return `<div style="max-width:600px;margin:0 auto;font-family:'Helvetica Neue',Arial,sans-serif;background:#ffffff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;">
 <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:32px 24px;text-align:center;">
 <h1 style="color:#ffffff;font-size:24px;margin:0;font-weight:700;letter-spacing:-0.5px;">AfetNet</h1>
@@ -157,11 +161,9 @@ function getEmailChangeHTML(displayName: string, newEmail: string, link: string)
 </div>
 <div style="padding:32px 28px;">
 <p style="font-size:17px;color:#1a1a2e;margin:0 0 8px;font-weight:600;">Merhaba ${safeDisplayName},</p>
-<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet hesabınızın e-posta adresi <strong>${safeNewEmail}</strong> olarak değiştirildi. Eğer bu değişikliği siz yapmadıysanız, aşağıdaki butona tıklayarak geri alabilirsiniz.</p>
-<div style="text-align:center;margin:28px 0;">
-<a href="${safeLink}" style="display:inline-block;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#ffffff;padding:16px 48px;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">Değişikliği Geri Al</a>
-</div>
-<p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Eğer bu değişikliği siz yaptıysanız, bu e-postayı görmezden gelebilirsiniz.</p>
+<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">AfetNet hesabınızın e-posta adresi <strong>${safeNewEmail}</strong> olarak değiştirildi.</p>
+<p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 24px;">Bu değişikliği siz yapmadıysanız lütfen <strong>destek@afetnet.app</strong> adresine e-posta gönderin. Destek ekibimiz hesabınızı güvence altına almanıza yardımcı olacaktır.</p>
+<p style="font-size:13px;color:#94a3b8;line-height:1.6;margin:24px 0 0;">Bu değişikliği siz yaptıysanız bu e-postayı görmezden gelebilirsiniz.</p>
 </div>
 <div style="background:#f8fafc;padding:20px 28px;border-top:1px solid #e8e8e8;text-align:center;">
 <p style="font-size:12px;color:#94a3b8;margin:0;">Bu e-posta AfetNet tarafından otomatik olarak gönderilmiştir.</p>
@@ -245,11 +247,14 @@ export const tokenCleanup = functions
     .pubsub.schedule('every sunday 03:00')
     .timeZone('Europe/Istanbul')
     .onRun(async () => {
-        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        // K5: 30 days too aggressive for a disaster app — users may not open
+        // for 1-2 months but still need to receive earthquake alerts when they do.
+        // 90 days balances stale-token cleanup with reachability.
+        const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
 
         const oldTokens = await db
             .collection('fcm_tokens')
-            .where('lastUpdated', '<', thirtyDaysAgo)
+            .where('lastUpdated', '<', ninetyDaysAgo)
             .limit(5000)
             .get();
 
@@ -266,10 +271,12 @@ export const tokenCleanup = functions
             deletedCount += chunk.length;
         }
 
-        // Also cleanup device subcollections for deleted users
+        // Also cleanup device subcollections for deleted users.
+        // K14: bounded read — at most 50 devices/user. Real users have 1-3
+        // devices; 50 cap protects billing against pathological cases.
         for (const tokenDoc of docs) {
             try {
-                const devicesSnapshot = await tokenDoc.ref.collection('devices').get();
+                const devicesSnapshot = await tokenDoc.ref.collection('devices').limit(50).get();
                 if (devicesSnapshot.size > 0) {
                     const subBatch = db.batch();
                     devicesSnapshot.docs.forEach(d => subBatch.delete(d.ref));
@@ -280,12 +287,12 @@ export const tokenCleanup = functions
             }
         }
 
-        // V3: Also cleanup old push_tokens (same 30-day threshold)
+        // V3: Also cleanup old push_tokens (same 90-day threshold)
         let v3DeletedCount = 0;
         try {
             const oldV3Tokens = await db
                 .collectionGroup('devices')
-                .where('lastUpdated', '<', thirtyDaysAgo)
+                .where('lastUpdated', '<', ninetyDaysAgo)
                 .limit(10000)
                 .get();
 
@@ -408,13 +415,12 @@ export const openAIChatProxy = functions
             'https://afetnet-app.firebaseapp.com',
         ];
         const reqOrigin = req.headers.origin || '';
+        // SECURITY: Yalnızca bilinen web origin'lerine CORS izni ver. Mobil native
+        // istemci CORS'a tabi değildir (origin header göndermez) — wildcard '*'
+        // gereksizdir ve yabancı bir web sayfasının yanıtı okumasına yol açardı.
+        // Asıl yetkilendirme aşağıdaki Firebase ID token doğrulamasıdır.
         if (proxyAllowedOrigins.includes(reqOrigin)) {
             res.set('Access-Control-Allow-Origin', reqOrigin);
-        } else {
-            // Allow mobile apps (no origin header) but block unknown web origins
-            if (!reqOrigin) {
-                res.set('Access-Control-Allow-Origin', '*');
-            }
         }
         res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -497,10 +503,30 @@ export const openAIChatProxy = functions
             return;
         }
 
-        // SECURITY FIX: Lock model to approved whitelist to prevent cost abuse
-        const ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-3.5-turbo'];
+        // SECURITY FIX: Lock model to approved whitelist to prevent cost abuse.
+        //
+        // H4 (env-driven whitelist): ALLOWED_OPENAI_MODELS env var (comma-
+        // separated) allows ops to add new models (e.g. when OpenAI ships a
+        // cheaper variant) WITHOUT a CF redeploy. Defaults preserve current
+        // behavior if env is unset/empty.
+        //
+        // Example: `firebase functions:secrets:set ALLOWED_OPENAI_MODELS`
+        //   → input: "gpt-4o-mini,gpt-4o,gpt-3.5-turbo"
+        // CF picks up the new list on next cold start (max ~1 hour).
+        const DEFAULT_ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-3.5-turbo'] as const;
+        const envAllowedRaw = process.env.ALLOWED_OPENAI_MODELS;
+        const envAllowedModels = (envAllowedRaw ?? '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+        const ALLOWED_MODELS: readonly string[] = envAllowedModels.length > 0
+            ? envAllowedModels
+            : DEFAULT_ALLOWED_MODELS;
         const requestedModel = typeof body.model === 'string' ? body.model.trim() : '';
-        const model = ALLOWED_MODELS.includes(requestedModel) ? requestedModel : 'gpt-4o-mini';
+        const model = ALLOWED_MODELS.includes(requestedModel)
+            ? requestedModel
+            // Use first allowed model as default — typically the cheapest.
+            : (ALLOWED_MODELS[0] ?? 'gpt-4o-mini');
         const requestedMaxTokens = typeof body.max_tokens === 'number'
             ? body.max_tokens
             : typeof body.maxTokens === 'number'
@@ -662,6 +688,9 @@ export const openAIChatProxy = functions
 
 export const sendCustomEmail = functions
     .region(REGION)
+    // SMTP_PASSWORD Secret Manager'dan enjekte edilir — plaintext env'e yazılmaz.
+    // firebase functions:secrets:set SMTP_PASSWORD ile kayıt yapılır.
+    .runWith({ secrets: ['SMTP_PASSWORD'] })
     .https.onCall(async (data, context) => {
         // Security: Only authenticated users can send emails
         if (!context.auth) {
@@ -708,8 +737,13 @@ export const sendCustomEmail = functions
             );
         }
 
+        // SMTP_PASSWORD Secret Manager'dan runtime'da enjekte edilir.
+        // runWith({ secrets: ['SMTP_PASSWORD'] }) sayesinde process.env.SMTP_PASSWORD
+        // Cloud Function çalışırken Secret Manager'dan otomatik doldurulur.
+        const smtpPassword = process.env.SMTP_PASSWORD ?? '';
+
         // Validate SMTP credentials before attempting to send
-        if (!SMTP_EMAIL || !SMTP_PASSWORD) {
+        if (!SMTP_EMAIL || !smtpPassword) {
             throw new functions.https.HttpsError(
                 'failed-precondition',
                 'SMTP kimlik bilgileri yapılandırılmamış. Lütfen yöneticiyle iletişime geçin.'
@@ -723,7 +757,7 @@ export const sendCustomEmail = functions
             secure: false,
             auth: {
                 user: SMTP_EMAIL,
-                pass: SMTP_PASSWORD,
+                pass: smtpPassword,
             },
         });
 
@@ -748,11 +782,10 @@ export const sendCustomEmail = functions
                     break;
                 }
                 case 'emailChange': {
-                    // For email change, we send notification about the change
-                    // The actual change link is managed by Firebase internally
+                    // Görev #24 — boş link kaldırıldı; getEmailChangeHTML artık link almıyor.
                     const newEmail = data.newEmail || email;
                     subject = 'AfetNet - E-posta Adresi Değişikliği';
-                    html = getEmailChangeHTML(name, newEmail, '');
+                    html = getEmailChangeHTML(name, newEmail);
                     break;
                 }
                 default:
@@ -809,7 +842,34 @@ export const sendCustomEmail = functions
 export const onSeismicReportCreated = functions
     .region(REGION)
     .database.ref('seismic_reports/{reportId}')
-    .onCreate(async (snapshot, _context) => {
+    .onCreate(async (snapshot, context) => {
+        // Görev #24 — idempotency: RTDB onCreate birden fazla tetiklenebilir.
+        // Firestore transaction ile işlemi atomik olarak işaretliyoruz;
+        // eewMonitorFast deseninin aynısı (admin.ts satır 67-86).
+        const reportKey = context.params.reportId as string;
+        const processedRef = db.collection('_rtdb_processed').doc(`seismic_${reportKey}`);
+        let alreadyProcessed = false;
+        try {
+            await db.runTransaction(async (tx) => {
+                const doc = await tx.get(processedRef);
+                if (doc.exists) {
+                    alreadyProcessed = true;
+                    return;
+                }
+                tx.set(processedRef, {
+                    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    reportKey,
+                });
+            });
+        } catch (txErr) {
+            functions.logger.error('onSeismicReportCreated: idempotency transaction hatası', { txErr, reportKey });
+            throw txErr; // CF retry'a bırak — kesinlikle işlenmeli
+        }
+        if (alreadyProcessed) {
+            functions.logger.info('onSeismicReportCreated: tekrarlı tetikleme, atlandı', { reportKey });
+            return null;
+        }
+
         const report = snapshot.val();
         functions.logger.info('📱 New seismic report received', {
             hasLocation: Boolean(report?.location),
@@ -845,13 +905,17 @@ export const onSeismicReportCreated = functions
         const reportsByUser = new Map<string, any>();
         nearbyReportsSnapshot.forEach(child => {
             const r = child.val();
+            // SECURITY: userId'si olmayan kayıtları cluster'a dahil etme. Sybil dedup
+            // yalnızca doğrulanmış kullanıcı kimliği üzerinden çalışır — RTDB rules
+            // userId === auth.uid zorunlu kılar. userId'siz legacy/bozuk kayıtların
+            // 'unknown' anahtarı altında tek sahte kümeye dönüşmesi engellenir.
+            if (typeof r.userId !== 'string' || r.userId.length === 0) return;
             if (r.location && r.detection) {
                 const dist = calculateDistance(latitude, longitude, r.location.latitude, r.location.longitude);
                 if (dist <= 100) { // 100km radius
-                    const userId = r.userId || 'unknown';
                     // Only keep the first report per user
-                    if (!reportsByUser.has(userId)) {
-                        reportsByUser.set(userId, {
+                    if (!reportsByUser.has(r.userId)) {
+                        reportsByUser.set(r.userId, {
                             ...r,
                             distance: dist
                         });

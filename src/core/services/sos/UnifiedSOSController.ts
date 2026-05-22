@@ -65,6 +65,11 @@ function isUsableSOSLocation(location: SOSLocation | null | undefined, maxAgeMs 
         && location.latitude <= 90
         && location.longitude >= -180
         && location.longitude <= 180
+        // WP-3.3: (0,0) "Null Island" reddi — GPS fix alamadığında veya konum izni
+        // yokken bazı API'lar (0,0) döndürür. Gerçek kullanıcı okyanus ortasından
+        // SOS göndermez; (0,0) ile SOS kurtarma ekibini yanlış konuma yönlendirir.
+        // (0,0) → konum kullanılamaz → SOS konumsuz gider (sunucu tüm kullanıcılara yayar).
+        && !(location.latitude === 0 && location.longitude === 0)
         && Number.isFinite(accuracy)
         && accuracy >= 0
         && accuracy <= 5000
@@ -314,9 +319,29 @@ class UnifiedSOSController {
 
         const store = useSOSStore.getState();
 
-        // Check if already active
-        if (store.isActive || store.isCountingDown) {
-            logger.warn('SOS already in progress');
+        // KRİTİK (görev #17): Bayat/zombie kaçış kapısı — forceActivateSOS ile aynı.
+        // Önceki kod isActive/isCountingDown'da KOŞULSUZ return ediyordu; 30dk+ eski
+        // (uygulama çökmesinden orphan kalmış) ya da isActive=true + currentSignal=null
+        // (zombie) durumda kullanıcının yeni SOS'u SESSİZCE düşüyordu. Manuel SOS
+        // countdown'lı olduğundan iptal yarışı yok — cancelSOS() güvenle kullanılır.
+        if (store.isActive && store.currentSignal) {
+            const ageMs = Date.now() - (store.currentSignal.timestamp ?? 0);
+            const MAX_RECOVERY_AGE_MS = 30 * 60 * 1000;
+            if (ageMs > MAX_RECOVERY_AGE_MS) {
+                logger.warn(`triggerSOS: mevcut sinyal ${Math.floor(ageMs / 60000)}dk eski — yeni SOS öncesi iptal ediliyor`);
+                try {
+                    await this.cancelSOS();
+                } catch (err) {
+                    logger.error('triggerSOS: bayat SOS iptali başarısız:', err);
+                }
+            } else {
+                logger.warn('SOS zaten aktif (taze) — triggerSOS atlanıyor');
+                return;
+            }
+        } else if (store.isActive) {
+            logger.warn('SOS currentSignal olmadan aktif (zombie) — startCountdown ile üzerine yazılıyor');
+        } else if (store.isCountingDown) {
+            logger.warn('SOS countdown zaten sürüyor — triggerSOS atlanıyor');
             return;
         }
 
@@ -440,6 +465,36 @@ class UnifiedSOSController {
             // Restart location precache for future SOS readiness
             this.startLocationPrecache();
         }
+    }
+
+    /**
+     * KRİTİK (görev #17): Bayat (orphan) bir aktif SOS'u, hemen ardından YENİ bir
+     * SOS aktive edilecekken temizler. cancelSOS()'tan farkı: mesh emergency mode'u
+     * KAPATMAZ ve location precache'i yeniden başlatmaz — çünkü yeni SOS aktivasyonu
+     * zaten emergency mode'u açacaktır; cancelSOS()'un await'siz disableEmergencyMode()
+     * çağrısı yeni enableEmergencyMode() ile yarışıp mesh'i yanlışlıkla kapalı
+     * bırakabilirdi. İptal yayını burada AWAIT edilir.
+     */
+    private async supersedeStaleSOS(staleSignal: SOSSignal): Promise<void> {
+        sosBeaconService.stop();
+        this.stopAckTimeoutTracker();
+        try { sosChannelRouter.cancelChannelRetry(); } catch { /* non-critical */ }
+        this.stopAlarmAndVibration().catch(e => { if (__DEV__) logger.warn('Supersede: stop alarm failed:', e); });
+        this.stopAmbientRecording().catch(e => { if (__DEV__) logger.warn('Supersede: stop recording failed:', e); });
+        try {
+            const { stopSOSAckListener } = require('./SOSAckListener');
+            stopSOSAckListener();
+        } catch { /* non-critical */ }
+        // İptal yayınını AWAIT et — eski signalId'nin cancel'ı yeni SOS yayınından
+        // önce gitsin (responder'lar eski SOS'u kapatsın).
+        try {
+            await this.broadcastCancellation(staleSignal);
+        } catch (err) {
+            logger.error('Supersede: bayat SOS iptal yayını başarısız:', err);
+        }
+        useSOSStore.getState().stopSOS();
+        // NOT: disableEmergencyMode() ve startLocationPrecache() çağrılmaz — yeni SOS
+        // aktivasyonu emergency mode'u kuracak; precache zaten sürüyor.
     }
 
     /**
@@ -575,20 +630,31 @@ class UnifiedSOSController {
                 const installationId = await getInstallationId().catch(() => '');
                 const meshSenderId = installationId || originalSignal.userId || this.deviceId;
 
-                const cancelPayload = JSON.stringify({
-                    type: 'SOS_CANCEL',
-                    originalSignalId: originalSignal.id,
-                    senderUid: originalSignal.userId,
-                    senderName: (() => { try { const { identityService: idSvc } = require('../IdentityService'); return idSvc.getDisplayName() || 'Kullanıcı'; } catch { return 'Kullanıcı'; } })(),
-                    status: 'cancelled',
-                    timestamp: Date.now(),
-                });
+                const cancelSenderName = (() => { try { const { identityService: idSvc } = require('../IdentityService'); return idSvc.getDisplayName() || 'Kullanıcı'; } catch { return 'Kullanıcı'; } })();
 
-                await meshNetworkService.broadcastMessage(cancelPayload, MeshMessageType.SOS, {
-                    from: meshSenderId,
-                    messageId: `cancel-${originalSignal.id}`,
-                });
-                logger.info('✅ SOS cancellation sent via BLE Mesh');
+                // KRİTİK (görev #17): SOS_CANCEL'ı 3 kez, farklı messageId'lerle yay.
+                // Tek fire-and-forget cancel paketi — yalnızca periyodik beacon gören
+                // (ilk SOS broadcast'ini kaçırmış) mesh eşlerince kaçırılabilir; o
+                // zaman harita işareti sonsuza dek "aktif" kalır. 3 bağımsız messageId
+                // mesh dedup'a takılmadan 3 ayrı yayılma şansı verir.
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const cancelPayload = JSON.stringify({
+                        type: 'SOS_CANCEL',
+                        originalSignalId: originalSignal.id,
+                        senderUid: originalSignal.userId,
+                        senderName: cancelSenderName,
+                        status: 'cancelled',
+                        timestamp: Date.now(),
+                    });
+                    await meshNetworkService.broadcastMessage(cancelPayload, MeshMessageType.SOS, {
+                        from: meshSenderId,
+                        messageId: `cancel-${originalSignal.id}-${attempt}`,
+                    });
+                    if (attempt < 2) {
+                        await new Promise(resolve => setTimeout(resolve, 800));
+                    }
+                }
+                logger.info('✅ SOS cancellation sent via BLE Mesh (3x redundant)');
             } catch (meshErr) {
                 logger.warn('Mesh cancel broadcast failed (non-critical):', meshErr);
             }
@@ -623,11 +689,15 @@ class UnifiedSOSController {
             if (ageMs > MAX_RECOVERY_AGE_MS) {
                 logger.warn(`forceActivateSOS: existing signal ${Math.floor(ageMs / 60000)}min old — cancelling stale before re-activating`);
                 try {
-                    await this.cancelSOS();
+                    // KRİTİK (görev #17): cancelSOS() yerine supersedeStaleSOS() —
+                    // cancelSOS() mesh emergency mode'u (await'siz) KAPATIR; bu,
+                    // hemen ardından gelen activateSOS()'un enableEmergencyMode()
+                    // çağrısıyla yarışır (countdown buffer'ı olmayan bu yolda).
+                    await this.supersedeStaleSOS(store.currentSignal);
                 } catch (err) {
-                    logger.error('Stale SOS cancel failed in forceActivate:', err);
+                    logger.error('Stale SOS supersede failed in forceActivate:', err);
                 }
-                // cancelSOS calls store.stopSOS() synchronously → isActive=false now.
+                // supersedeStaleSOS calls store.stopSOS() → isActive=false now.
             } else {
                 logger.warn('SOS already active (fresh), skipping forceActivate');
                 return;

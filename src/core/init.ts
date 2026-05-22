@@ -27,8 +27,9 @@ let backgroundSeismicMonitor: any;
 let multiSourceBleAutoUnsubscribe: (() => void) | null = null;
 // CRITICAL FIX: Store HybridMessageService subscription unsubscribe to prevent listener leaks
 let hybridMessageUnsubscribe: (() => void) | null = null;
-// FIX: Store VoiceCallService listener unsubscriber to prevent leak on re-init
-let voiceCallListenerUnsubscribe: (() => void) | null = null;
+// KRITIK FIX: eew_broadcasts Firestore listener — backend→client EEW zinciri kopuktu.
+// subscribeToEEWBroadcasts() fonksiyonu vardı ama init.ts hiç çağırmıyordu.
+let eewBroadcastUnsubscribe: (() => void) | null = null;
 
 let isInitialized = false;
 let isInitializing = false;
@@ -226,26 +227,17 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     // -----------------------------------------------------------------------
     // Crash diagnostics baseline (must start before feature modules)
     // -----------------------------------------------------------------------
-    try {
-      const { firebaseCrashlyticsService } = await import('./services/FirebaseCrashlyticsService');
-      await firebaseCrashlyticsService.initialize();
-      logger.info('✅ Crashlytics');
-    } catch (e: unknown) {
-      logger.warn('Crashlytics init failed (non-blocking):', e);
-    }
+    // görev #23: Crashlytics fire-and-forget — cold start'ı bloke etmez.
+    import('./services/FirebaseCrashlyticsService').then(({ firebaseCrashlyticsService }) =>
+      firebaseCrashlyticsService.initialize().then(() => logger.info('✅ Crashlytics')).catch((e: unknown) => logger.warn('Crashlytics init failed:', e))
+    ).catch((e: unknown) => logger.warn('Crashlytics import failed:', e));
 
-    // Sentry initialization (no-op if @sentry/react-native not installed)
-    try {
-      const { sentryService } = await import('./services/SentryService');
-      await sentryService.initialize();
-      if (sentryService.isReady()) {
-        logger.info('✅ Sentry (remote crash reporting active)');
-      } else {
-        logger.info('✅ Sentry (no-op — SDK or DSN missing)');
-      }
-    } catch (e: unknown) {
-      logger.warn('Sentry init failed (non-blocking):', e);
-    }
+    // görev #23: Sentry fire-and-forget — cold start'ı bloke etmez.
+    import('./services/SentryService').then(({ sentryService }) =>
+      sentryService.initialize().then(() =>
+        logger.info(sentryService.isReady() ? '✅ Sentry (remote crash reporting active)' : '✅ Sentry (no-op — SDK or DSN missing)')
+      ).catch((e: unknown) => logger.warn('Sentry init failed:', e))
+    ).catch((e: unknown) => logger.warn('Sentry import failed:', e));
 
     try {
       const { globalErrorHandlerService } = await import('./services/GlobalErrorHandler');
@@ -304,6 +296,17 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
     const backgroundEEWService = bewsModule?.backgroundEEWService;
     const mlPWaveClassifier = mlcModule?.mlPWaveClassifier;
     const watchBridgeService = wbsModule?.watchBridgeService;
+
+    // görev #18: KRİTİK servis import'u başarısız olursa (modül yüklenmedi VEYA
+    // singleton yok) production'da GÖRÜNÜR şekilde logla. safeImport yalnızca
+    // import THROW ederse error basar; modül yüklenip singleton'ı eksikse hata
+    // tamamen sessizdi → erken deprem uyarısı/sismik izleme habersizce ölü kalırdı.
+    if (!earthquakeService) {
+      logger.error('🚨 KRİTİK: EarthquakeService kullanılamıyor — sismik izleme devre dışı (degraded mod)');
+    }
+    if (!multiSourceEEWService) {
+      logger.error('🚨 KRİTİK: MultiSourceEEWService kullanılamıyor — çok kaynaklı EEW devre dışı (degraded mod)');
+    }
 
     logger.info('✅ Services loaded');
 
@@ -453,6 +456,38 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         }
       } catch { /* non-blocking */ }
 
+      // görev #25 madde 6: "Zombie hesap" kurtarma.
+      // Hesap silme akışı Firestore verilerini sildikten sonra Auth hesabını
+      // silmeden önce pendingAccountDeletion bayrağı yazar. Auth silme yarıda
+      // kalır (requires-recent-login → kullanıcı uygulamayı kapatır) ise:
+      // veri gitmiş ama Auth hesabı ayakta kalır. Açılışta bayrak set ise ve
+      // kullanıcı hâlâ authenticated ise silme işlemini sessizce tekrar dene.
+      try {
+        const { accountDeletionService } = await import('./services/AccountDeletionService');
+        if (accountDeletionService.hasPendingDeletion()) {
+          const fbZombie = await import('../lib/firebase');
+          const zombieUser = fbZombie.getFirebaseAuth()?.currentUser;
+          if (zombieUser) {
+            logger.warn('🧟 Pending account deletion detected on launch — retrying auth deletion');
+            try {
+              await accountDeletionService.retryDeleteAuthAccount();
+              logger.info('✅ Zombie account cleaned up — auth deletion retry succeeded');
+            } catch (retryErr) {
+              // requires-recent-login hâlâ geçerli — bayrak takılı kalır,
+              // kullanıcı Ayarlar > Hesabı Sil ile re-auth tamamlayıp bitirebilir.
+              logger.warn('Zombie account retry needs re-auth — flag kept for Settings retry:', retryErr);
+            }
+          } else {
+            // Kullanıcı authenticated değil ve veri zaten silinmiş —
+            // bayrağı temizle, başka yapılacak bir şey yok.
+            logger.info('Pending deletion flag set but no authenticated user — clearing flag');
+            accountDeletionService.clearPendingDeletionFlag();
+          }
+        }
+      } catch (zombieCheckErr) {
+        logger.debug('Pending account deletion check failed (non-blocking):', zombieCheckErr);
+      }
+
       try {
         const { identityService } = await import('./services/IdentityService');
         await withTimeout(identityService.initialize(), 10_000, undefined);
@@ -522,7 +557,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         if (r.status === 'rejected') logger.error('Phase B core init:', r.reason);
       }
 
-      // PERF: Parallel optional services — GroupChat + MeshBridge + VoiceCall + Presence + Contacts
+      // PERF: Parallel optional services — GroupChat + MeshBridge + Presence + Contacts
       // CRITICAL FIX: PresenceService, ContactService, ContactRequestService were ONLY initialized
       // inside AuthService (login flow). When the app restores from MMKV cache after kill,
       // these services were NEVER started — breaking online/offline status and contacts.
@@ -536,20 +571,6 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
           const { meshMessageBridge } = await import('./services/mesh/MeshMessageBridge');
           await meshMessageBridge.initialize();
           logger.info('✅ MeshMessageBridge');
-        })(),
-        (async () => {
-          const { voiceCallService } = await import('./services/VoiceCallService');
-          // CRITICAL FIX: Reset isDestroyed flag from previous shutdown.
-          // destroy() sets isDestroyed=true which permanently disables retry logic
-          // in listenForIncomingCalls(). Without reinitialize(), incoming call listener
-          // retries are dead for the new user session after logout+login.
-          voiceCallService.reinitialize();
-          if (voiceCallService.isAvailable()) {
-            // FIX: Store unsubscriber to prevent listener leak on re-init
-            if (voiceCallListenerUnsubscribe) { voiceCallListenerUnsubscribe(); voiceCallListenerUnsubscribe = null; }
-            voiceCallListenerUnsubscribe = voiceCallService.listenForIncomingCalls();
-            logger.info('✅ VoiceCallService listener');
-          }
         })(),
         (async () => {
           const { presenceService } = await import('./services/PresenceService');
@@ -573,36 +594,10 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
           await sessionSecurityService.initialize();
           logger.info('✅ SessionSecurityService (inactivity + background timeout)');
         })(),
-        (async () => {
-          // Sprint 2: ClockSkewService — detect device clock drift > 5min.
-          // Without this, all Firestore writes silently fail (rules reject stale timestamps).
-          const { clockSkewService } = await import('./services/ClockSkewService');
-          await clockSkewService.start();
-          logger.info('✅ ClockSkewService (drift monitor)');
-        })(),
-        (async () => {
-          // Sprint 4: DeepLinkService — afetnet:// URL handler for family invites,
-          // SOS detail, earthquake detail, etc. Viral loop için kritik.
-          const { deepLinkService } = await import('./services/DeepLinkService');
-          await deepLinkService.start();
-          // Process any pending URL captured before auth was ready
-          deepLinkService.processPending();
-          logger.info('✅ DeepLinkService (afetnet:// handler)');
-        })(),
-        (async () => {
-          // Sprint 18-19: MultiDeviceService — primary device tracking.
-          // Prevents duplicate SOS when user is logged in on multiple devices.
-          const { multiDeviceService } = await import('./services/MultiDeviceService');
-          await multiDeviceService.initialize();
-          logger.info('✅ MultiDeviceService (primary device gate)');
-        })(),
-        (async () => {
-          // Sprint 16-17: Mesh hierarchy v2 — backbone peer election.
-          // Battery/peer-count'a göre cihaz otomatik backbone/leaf mode'una geçer.
-          const { meshBackbonePeerService } = await import('./services/mesh/MeshBackbonePeerService');
-          await meshBackbonePeerService.start();
-          logger.info('✅ MeshBackbonePeerService (hierarchy v2)');
-        })(),
+        // görev #23: ClockSkewService → ertelendi (deferred 2s after setReady)
+        // görev #23: DeepLinkService → ertelendi (deferred 2s after setReady)
+        // görev #23: MultiDeviceService → ertelendi (deferred 2s after setReady)
+        // görev #23: MeshBackbonePeerService → ertelendi (deferred 2s after setReady)
         (async () => {
           // HATA 1 FIX: EmergencyHealthSharingService initialize.
           // Servis vardı ama init.ts'e WIRE EDİLMEMİŞTİ → SOS sırasında sağlık verisi
@@ -617,12 +612,7 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         if (r.status === 'rejected') logger.error('Phase B optional service init failed:', r.reason);
       }
 
-      // Settings cloud sync — cross-device settings persistence
-      try {
-        const { settingsSyncService } = await import('./services/SettingsSyncService');
-        await settingsSyncService.initialize();
-        logger.info('✅ SettingsSyncService (cloud settings)');
-      } catch (e: unknown) { logger.error('SettingsSyncService:', e); }
+      // görev #23: SettingsSyncService → ertelendi (deferred 2s after setReady)
 
     } else {
       logger.info('ℹ️ Auth-gated services deferred');
@@ -704,6 +694,12 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         await meshNetworkService.initialize();
         await meshNetworkService.start();
         logger.info('✅ MeshNetworkService started (BLE mesh active)');
+        // EEW-FIX-3: MeshPowerManager hiç initialize edilmiyordu — pil-duyarlı scan
+        // duty-cycle ve emergency-mode profil yönetimi ölü kalıyordu. shutdownApp
+        // zaten meshPowerManager.destroy() çağırıyor; başlatma karşılığı eksikti.
+        const { meshPowerManager } = await import('./services/mesh/MeshPowerManager');
+        await meshPowerManager.initialize();
+        logger.info('✅ MeshPowerManager started (pil-duyarlı BLE duty-cycle)');
       } catch (e: unknown) { logger.debug('Mesh start (optional):', e); }
     } else {
       logger.info('ℹ️ BLE Mesh deferred (not authenticated)');
@@ -772,6 +768,39 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
         await eewService.start();
         logger.info('✅ EEWService (5s AFAD polling + SeismicSensor)');
       } catch (e: unknown) { logger.error('EEWService start:', e); }
+
+      // KRITIK FIX: eew_broadcasts Firestore listener'ı bağla.
+      // Cloud Functions eew_broadcasts koleksiyonuna yazıyordu ama client
+      // hiç dinlemiyordu → backend→client EEW zinciri tamamen kopuktu.
+      try {
+        const { subscribeToEEWBroadcasts } = await import('./services/firebase/FirebaseEEWOperations');
+        const { firebaseDataService } = await import('./services/FirebaseDataService');
+        const { eewService } = await import('./services/EEWService');
+        if (eewBroadcastUnsubscribe) { eewBroadcastUnsubscribe(); eewBroadcastUnsubscribe = null; }
+        const unsub = subscribeToEEWBroadcasts((broadcasts) => {
+          for (const broadcast of broadcasts) {
+            // EEWBroadcast → EEWEvent dönüşümü
+            void eewService.processEEWEvent({
+              id: broadcast.id ?? `broadcast-${broadcast.originTime}`,
+              latitude: broadcast.latitude,
+              longitude: broadcast.longitude,
+              magnitude: broadcast.magnitude,
+              depth: broadcast.depth,
+              region: broadcast.location,
+              source: broadcast.source,
+              issuedAt: broadcast.broadcastAt ?? broadcast.detectedAt,
+              certainty: broadcast.severity === 'critical' || broadcast.severity === 'high' ? 'high'
+                : broadcast.severity === 'medium' ? 'medium' : 'low',
+            });
+          }
+        }, firebaseDataService.isInitialized);
+        if (unsub) {
+          eewBroadcastUnsubscribe = unsub;
+          logger.info('✅ eew_broadcasts Firestore listener aktif (backend→client EEW)');
+        } else {
+          logger.warn('⚠️ eew_broadcasts listener kurulamadı (Firebase henüz hazır değil)');
+        }
+      } catch (e: unknown) { logger.error('eew_broadcasts listener:', e); }
     }
 
     watchBridgeService?.initialize?.().catch((e: unknown) => logger.debug('Watch:', e));
@@ -974,6 +1003,55 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       isInitializing = false;
       appStore.setReady(true);
       logger.info('✨ Initialization complete');
+
+      // görev #23: 5 opsiyonel servis 2s ertelendi — first render'ı bloke etmez.
+      // Sadece clearly non-blocking servisler: settings sync, deeplink, clock skew,
+      // multi-device, mesh backbone. Auth gerektirenler currentEpoch guard ile korunur.
+      if (isAuthed) {
+        setTimeout(async () => {
+          if (currentEpoch !== initEpoch) return; // shutdown geldi, iptal
+          const deferredServices = [
+            (async () => {
+              try {
+                const { settingsSyncService } = await import('./services/SettingsSyncService');
+                await settingsSyncService.initialize();
+                logger.info('✅ SettingsSyncService (deferred)');
+              } catch (e) { logger.error('SettingsSyncService deferred:', e); }
+            })(),
+            (async () => {
+              try {
+                const { deepLinkService } = await import('./services/DeepLinkService');
+                await deepLinkService.start();
+                deepLinkService.processPending();
+                logger.info('✅ DeepLinkService (deferred)');
+              } catch (e) { logger.error('DeepLinkService deferred:', e); }
+            })(),
+            (async () => {
+              try {
+                const { clockSkewService } = await import('./services/ClockSkewService');
+                await clockSkewService.start();
+                logger.info('✅ ClockSkewService (deferred)');
+              } catch (e) { logger.error('ClockSkewService deferred:', e); }
+            })(),
+            (async () => {
+              try {
+                const { multiDeviceService } = await import('./services/MultiDeviceService');
+                await multiDeviceService.initialize();
+                logger.info('✅ MultiDeviceService (deferred)');
+              } catch (e) { logger.error('MultiDeviceService deferred:', e); }
+            })(),
+            (async () => {
+              try {
+                const { meshBackbonePeerService } = await import('./services/mesh/MeshBackbonePeerService');
+                await meshBackbonePeerService.start();
+                logger.info('✅ MeshBackbonePeerService (deferred)');
+              } catch (e) { logger.error('MeshBackbonePeerService deferred:', e); }
+            })(),
+          ];
+          await Promise.allSettled(deferredServices);
+          logger.info('✅ Deferred optional services complete');
+        }, 2000);
+      }
     } else {
       isInitializing = false;
       logger.warn('⚠️ Initialization completed but epoch changed (concurrent shutdown detected) — NOT marking as initialized');
@@ -1077,6 +1155,12 @@ export async function shutdownApp() {
     multiSourceBleAutoUnsubscribe = null;
   }
 
+  // KRITIK FIX: eew_broadcasts listener'ı kapat
+  if (eewBroadcastUnsubscribe) {
+    eewBroadcastUnsubscribe();
+    eewBroadcastUnsubscribe = null;
+  }
+
   // Flush and cleanup settings sync before shutdown
   try {
     const { settingsSyncService } = await import('./services/SettingsSyncService');
@@ -1105,17 +1189,6 @@ export async function shutdownApp() {
   try {
     const { voiceCommandService } = await import('./services/VoiceCommandService');
     await voiceCommandService.stopListening();
-  } catch { /* already stopped */ }
-
-  // FIX: Clean up VoiceCallService listener unsubscriber
-  if (voiceCallListenerUnsubscribe) { voiceCallListenerUnsubscribe(); voiceCallListenerUnsubscribe = null; }
-
-  // CRITICAL FIX: Destroy VoiceCallService (Firestore onSnapshot listener for incoming calls).
-  // Without this, the listener for voice_calls_incoming/{uid} survives logout.
-  // On account switch, the old user's incoming calls could trigger on the new user's device.
-  try {
-    const { voiceCallService } = await import('./services/VoiceCallService');
-    voiceCallService.destroy();
   } catch { /* already stopped */ }
 
   // Cleanup BackgroundEEWService (AppState listener + background tasks)
@@ -1524,10 +1597,19 @@ export async function shutdownApp() {
   try { useSettingsStore.getState().setFamilyLocationSharing(false); } catch { /* best-effort */ }
 
   // AUDIT FIX: Clear familyStore subscriptions (Firestore onSnapshot listeners)
+  // M3: typeof guard so an API refactor that removes/renames `clear` fails loud
+  // (with a logger.warn) rather than silently leaking family data across accounts.
   try {
     const { useFamilyStore } = await import('./stores/familyStore');
-    useFamilyStore.getState().clear();
-  } catch { /* best-effort */ }
+    const state = useFamilyStore.getState();
+    if (typeof state.clear === 'function') {
+      state.clear();
+    } else {
+      logger.warn('familyStore.clear is not a function — cross-account family leak risk');
+    }
+  } catch (e) {
+    logger.warn('familyStore clear failed:', e);
+  }
 
   // PRIVACY UX HARDENING: make sure no legacy location tasks remain active after shutdown.
   try {

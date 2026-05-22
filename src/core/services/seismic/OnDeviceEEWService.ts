@@ -39,11 +39,14 @@ const MIN_CONFIDENCE_FOR_ALERT = 80;       // 85→80: S-WAVE olaylarını da ya
 const MIN_MAGNITUDE_FOR_ALERT = 0.02;      // 0.15→0.02: 100km'deki M5+ deprem ~0.005-0.02g
 
 // Super confidence threshold for FULL COUNTDOWN experience
-// ELITE: Lowered from 95/0.3 — EnsembleDetectionService's 5-layer filter (70% threshold +
-// 2+ method consensus) already eliminates false positives. 88/0.2 lets real M4.0+ earthquakes
-// trigger the countdown while still requiring very high ensemble confidence.
-const SUPER_CONFIDENCE_THRESHOLD = 88;     // Ensemble 5-layer filter provides upstream protection
-const SUPER_MAGNITUDE_THRESHOLD = 0.2;     // 0.2g ≈ MMI V (~M4.5 nearby) — actionable shaking
+// görev #18: Eşikler 88/0.2'den tutucu tek-dedektör değerlerine geri yükseltildi.
+// Önceki yorum "EnsembleDetectionService 5 katmanlı filtre yukarı akışta koruma
+// sağlar" diyordu — ama bu yol EnsembleDetectionService'i HİÇ çağırmıyor
+// (SeismicSensorService.handleDetection doğrudan onDeviceEEWService.handleDetection'a
+// gider). Tek dedektörle ~0.2g'lik bir sarsıntı bile tam ekran geri sayımı
+// tetikleyebiliyordu. Tek dedektör için 95/0.3 yanlış pozitifleri minimumda tutar.
+const SUPER_CONFIDENCE_THRESHOLD = 95;     // Tek dedektör — çok yüksek güven şart (ensemble yok)
+const SUPER_MAGNITUDE_THRESHOLD = 0.3;     // 0.3g ≈ MMI VI+ — gerçek, aksiyon gerektiren sarsıntı
 
 // Alert cooldown — 60s allows detection of rapid aftershock sequences (e.g. 2023 Kahramanmaraş)
 const ALERT_COOLDOWN_MS = 60000;           // 60s minimum between on-device EEW alerts

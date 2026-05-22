@@ -84,6 +84,16 @@ class HighPerformanceBle {
   private scanFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private useBroadScanFallback = false;
   private lastPeerDiscoveredAt = 0;
+  // görev #19: Tarama hatası kurtarma. Eskiden bir geçici tarama hatası
+  // isScanning=false yapıp dönüyordu; hiçbir şey yeniden başlatmadığından
+  // keşif bir sonraki BT toggle'a kadar ölüyordu (SOS peer'ları görünmez).
+  private scanRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private scanRetryAttempt = 0;
+  private static readonly MAX_SCAN_RETRY_ATTEMPTS = 6;
+  private static readonly SCAN_RETRY_BASE_MS = 2000;
+  // Watchdog: dualMode isteniyorken tarama düşmüşse yeniden silahlandırır.
+  private scanWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly SCAN_WATCHDOG_INTERVAL_MS = 15000;
   private foundPeers: Map<string, BlePeer> = new Map();
   private scanListeners: ((peer: BlePeer) => void)[] = [];
 
@@ -124,6 +134,12 @@ class HighPerformanceBle {
           this.peripheralRunning = false;
           this.isAdvertising = false;
           this.clearScanFallbackTimer();
+          // görev #19: BT kapalıyken bekleyen tarama-retry'sini ve watchdog'u
+          // durdur — boş yere dönmesinler. PoweredOn olunca ensureDualModeActive
+          // taramayı yeniden başlatır.
+          this.clearScanRetryTimer();
+          this.stopScanWatchdog();
+          this.scanRetryAttempt = 0;
           this.useBroadScanFallback = false;
           // Clean up dead GATT connections — they become invalid when BT turns off
           for (const [, peer] of this.connectedPeers) {
@@ -709,19 +725,32 @@ class HighPerformanceBle {
         { allowDuplicates: true },
         (error: any, device: any) => {
           if (error) {
-            logger.warn('Scan error — resetting scan state:', error);
+            // görev #19: Geçici tarama hatasında durmuyoruz — sınırlı backoff
+            // ile yeniden deneme planlıyoruz. Eskiden burada return ediliyordu
+            // ve keşif bir sonraki BT toggle'a kadar ölüyordu.
+            logger.warn('Scan error — scheduling bounded retry:', error);
             this.isScanning = false;
             this.clearScanFallbackTimer();
+            this.scheduleScanRetry(forceBroadScan);
             return;
           }
           if (device) this.processDiscoveredDevice(device);
         },
       );
     } catch (e) {
-      logger.warn('startDeviceScan threw:', e);
+      logger.warn('startDeviceScan threw — scheduling bounded retry:', e);
       this.isScanning = false;
       this.clearScanFallbackTimer();
+      this.scheduleScanRetry(forceBroadScan);
       return;
+    }
+
+    // görev #19: Tarama başarıyla kuruldu — retry sayacını sıfırla ve dualMode
+    // isteniyorsa watchdog'u çalıştır (tarama beklenmedik şekilde düşerse re-arm).
+    this.scanRetryAttempt = 0;
+    this.clearScanRetryTimer();
+    if (this.dualModeRequested) {
+      this.startScanWatchdog();
     }
 
     if (!forceBroadScan) {
@@ -733,12 +762,80 @@ class HighPerformanceBle {
 
   stopScanning() {
     this.clearScanFallbackTimer();
+    // görev #19: Bilinçli durdurmada retry/watchdog timer'larını da temizle —
+    // aksi halde watchdog stopScanning sonrası taramayı tekrar başlatır.
+    this.clearScanRetryTimer();
+    this.stopScanWatchdog();
+    this.scanRetryAttempt = 0;
     if (this.manager) {
       this.manager.stopDeviceScan();
     }
     this.isScanning = false;
     this.useBroadScanFallback = false;
     logger.info('BLE Scanning Stopped');
+  }
+
+  // görev #19: Tarama hatası sonrası sınırlı üstel backoff ile yeniden deneme.
+  // dualMode istenmiyorsa veya manager yoksa planlama yapılmaz.
+  private scheduleScanRetry(forceBroadScan: boolean): void {
+    this.clearScanRetryTimer();
+    if (!this.manager || !this.dualModeRequested) {
+      return;
+    }
+    if (this.scanRetryAttempt >= HighPerformanceBle.MAX_SCAN_RETRY_ATTEMPTS) {
+      // Backoff tükendi — watchdog uzun aralıkta yeniden denemeyi sürdürür.
+      logger.warn('Scan retry attempts exhausted; watchdog will keep retrying');
+      if (this.dualModeRequested) this.startScanWatchdog();
+      return;
+    }
+    const attempt = this.scanRetryAttempt;
+    this.scanRetryAttempt += 1;
+    // 2s, 4s, 8s, ... 64s cap
+    const delay = Math.min(
+      HighPerformanceBle.SCAN_RETRY_BASE_MS * Math.pow(2, attempt),
+      64000,
+    );
+    logger.info(`BLE scan retry ${attempt + 1}/${HighPerformanceBle.MAX_SCAN_RETRY_ATTEMPTS} in ${delay}ms`);
+    this.scanRetryTimer = setTimeout(() => {
+      this.scanRetryTimer = null;
+      if (this.isScanning || !this.dualModeRequested) return;
+      this.startScanning(forceBroadScan).catch((e) => {
+        logger.warn('BLE scan retry failed:', e);
+      });
+    }, delay);
+  }
+
+  private clearScanRetryTimer(): void {
+    if (this.scanRetryTimer) {
+      clearTimeout(this.scanRetryTimer);
+      this.scanRetryTimer = null;
+    }
+  }
+
+  // görev #19: Watchdog — dualMode isteniyorken tarama düşmüşse yeniden başlat.
+  // Backoff tükense bile keşif kalıcı olarak ölmez.
+  private startScanWatchdog(): void {
+    if (this.scanWatchdogTimer) return;
+    this.scanWatchdogTimer = setInterval(() => {
+      if (!this.dualModeRequested) {
+        this.stopScanWatchdog();
+        return;
+      }
+      if (this.isScanning || this.scanRetryTimer) return;
+      // Tarama düşmüş ve bekleyen retry yok — yeniden silahlandır.
+      logger.warn('Scan watchdog: scanning is down while dual mode requested — re-arming');
+      this.scanRetryAttempt = 0;
+      this.startScanning(this.useBroadScanFallback).catch((e) => {
+        logger.warn('Scan watchdog re-arm failed:', e);
+      });
+    }, HighPerformanceBle.SCAN_WATCHDOG_INTERVAL_MS);
+  }
+
+  private stopScanWatchdog(): void {
+    if (this.scanWatchdogTimer) {
+      clearInterval(this.scanWatchdogTimer);
+      this.scanWatchdogTimer = null;
+    }
   }
 
   private processDiscoveredDevice(device: any) {

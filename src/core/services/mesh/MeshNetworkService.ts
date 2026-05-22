@@ -94,6 +94,13 @@ interface PendingMeshPacket {
   enqueuedAt: number; // Timestamp for TTL-based expiry
   sourceIdOverride?: string; // For relay: use original sender's ID instead of this.myId
   originalStringId?: string; // Original UUID message ID for MeshStore ACK status updates
+  // görev #19: Deferred-retry soğuma damgası. Gerçek tipli alan — eskiden
+  // (packet as any)._lastDeferredAt ile yazılıyordu ve normalizeQueuedPacket
+  // (deserialize) bunu düşürüyordu; background/restart sonrası soğuma kaybolup
+  // dolu critical queue her SOS'u her 1s tick'te yeniden deniyordu (pil tüketimi).
+  // Tipli alan olduğu için serializeQueue ({...packet}) ile kalıcı olur ve
+  // normalizeQueuedPacket'te round-trip'ten geçirilir.
+  _lastDeferredAt?: number;
 }
 
 // ===========================================================================
@@ -160,6 +167,23 @@ interface SentChunkCacheEntry {
 
 const ENC_BROADCAST = 1;
 const ENC_PEER = 2;
+
+/**
+ * K3: Thrown by broadcastPacket / start when BLE mesh cannot operate
+ * (no permission, Bluetooth off, hardware unsupported). Callers handle this
+ * by surfacing the reason to the user — they MUST NOT silently retry.
+ *
+ * The reason field maps to MeshStore.meshUnavailableReason for UI binding.
+ */
+export class MeshUnavailableError extends Error {
+  constructor(
+    public readonly reason: 'no-permission' | 'bluetooth-off' | 'unsupported',
+    message?: string,
+  ) {
+    super(message ?? `Mesh unavailable: ${reason}`);
+    this.name = 'MeshUnavailableError';
+  }
+}
 
 class MeshNetworkService {
   // Identity
@@ -347,14 +371,21 @@ class MeshNetworkService {
   }
 
   /**
-   * Start the mesh network (Real or Simulation)
+   * Start the mesh network (Real or Simulation).
+   *
+   * K3 (BLE permission UX): Before flipping isRunning=true, we resolve the
+   * BLE availability state. If the radio is off OR permission denied, we:
+   *   1. Keep isRunning=false (callers must not assume mesh is delivering)
+   *   2. Set meshUnavailableReason in the store so UI can render a banner
+   *   3. Return early — DON'T start the loop / heartbeat / scanner
+   *
+   * This prevents the false-positive UX where a user fires SOS, sees all
+   * channels report "sent", but in reality the mesh queue is just buffering
+   * to memory and nothing ever leaves the device.
    */
   async start(): Promise<void> {
     if (this.isRunning) return;
     await this.initialize();
-
-    this.isRunning = true;
-    useMeshStore.getState().toggleMesh(true);
 
     const isSimRequested = useMeshStore.getState().isSimulationMode;
     const isSim = __DEV__ && isSimRequested;
@@ -364,11 +395,36 @@ class MeshNetworkService {
     }
 
     if (isSim) {
+      // Simulation mode bypasses BLE entirely — always "available".
+      useMeshStore.getState().setMeshUnavailable(null);
+      this.isRunning = true;
+      useMeshStore.getState().toggleMesh(true);
       this.isRealMode = false;
       this.startSimulation();
-    } else {
-      await this.startRealBLE();
+      this.setupAppStateListener();
+      this.startStalePeerCleanup();
+      logger.info('🛜 Mesh Network V3 Started (Simulation: true)');
+      return;
     }
+
+    // Real BLE: pre-check availability before flipping any state.
+    const unavailableReason = await highPerformanceBle.getMeshAvailabilityReason();
+    if (unavailableReason !== null) {
+      // Surface to UI. Keep isRunning=false so broadcastPacket() refuses to
+      // enqueue (returns false), and SOSChannelRouter will mark mesh channel
+      // as failed instead of "sent".
+      useMeshStore.getState().setMeshUnavailable(unavailableReason);
+      useMeshStore.getState().toggleMesh(false);
+      logger.warn(`Mesh start aborted: ${unavailableReason}`);
+      return;
+    }
+
+    // BLE is ready. Now commit to running state.
+    useMeshStore.getState().setMeshUnavailable(null);
+    this.isRunning = true;
+    useMeshStore.getState().toggleMesh(true);
+
+    await this.startRealBLE();
 
     // P8: Listen to AppState changes
     this.setupAppStateListener();
@@ -376,7 +432,7 @@ class MeshNetworkService {
     // Start stale peer cleanup
     this.startStalePeerCleanup();
 
-    logger.info(`🛜 Mesh Network V3 Started (Simulation: ${isSim})`);
+    logger.info('🛜 Mesh Network V3 Started (Simulation: false)');
   }
 
   /**
@@ -387,6 +443,9 @@ class MeshNetworkService {
     useMeshStore.getState().toggleMesh(false);
     useMeshStore.getState().setScanning(false);
     useMeshStore.getState().setAdvertising(false);
+    // K3: Clear unavailable reason — next start() will re-evaluate fresh.
+    // Don't keep a stale "bluetooth-off" if user toggled BT back on.
+    useMeshStore.getState().setMeshUnavailable(null);
 
     // M1: Clear all timers
     this.clearAllTimers();
@@ -767,6 +826,10 @@ class MeshNetworkService {
       ttl?: unknown;
       priority?: unknown;
       messageId?: unknown;
+      enqueuedAt?: unknown;
+      sourceIdOverride?: unknown;
+      originalStringId?: unknown;
+      _lastDeferredAt?: unknown;
       header?: {
         ttl?: unknown;
         priority?: unknown;
@@ -788,7 +851,13 @@ class MeshNetworkService {
         ttl: packet.ttl,
         priority: packet.priority as MeshPriority,
         messageId: packet.messageId,
-        enqueuedAt: (packet as any).enqueuedAt ?? Date.now(),
+        enqueuedAt: typeof packet.enqueuedAt === 'number' ? packet.enqueuedAt : Date.now(),
+        ...(typeof packet.sourceIdOverride === 'string' ? { sourceIdOverride: packet.sourceIdOverride } : {}),
+        ...(typeof packet.originalStringId === 'string' ? { originalStringId: packet.originalStringId } : {}),
+        // görev #19: deferred-retry soğuma damgasını deserialize'da koru — aksi
+        // halde background/restart sonrası soğuma sıfırlanır ve dolu critical
+        // queue her tick'te yeniden denenir (pil tüketimi).
+        ...(typeof packet._lastDeferredAt === 'number' ? { _lastDeferredAt: packet._lastDeferredAt } : {}),
       };
     }
 
@@ -1427,7 +1496,9 @@ class MeshNetworkService {
         // CRITICAL FIX: Skip deferred packets still in cooldown to prevent rapid-fire retries.
         // When BLE is off, every packet fails and gets re-queued. Without cooldown,
         // processQueues retries all of them every 1s loop cycle — burning CPU and battery.
-        if ((packet as any)._lastDeferredAt && (now - (packet as any)._lastDeferredAt < DEFERRED_COOLDOWN_MS)) {
+        // görev #19: _lastDeferredAt artık tipli alan — normalizeQueuedPacket
+        // round-trip'te koruyor, böylece restart sonrası soğuma kaybolmuyor.
+        if (packet._lastDeferredAt !== undefined && (now - packet._lastDeferredAt < DEFERRED_COOLDOWN_MS)) {
           deferred.push(packet); // Still in cooldown — re-defer without attempting
           continue;
         }
@@ -1436,7 +1507,7 @@ class MeshNetworkService {
         if (ok) {
           sent++;
           // Clear deferred timestamp on success
-          delete (packet as any)._lastDeferredAt;
+          delete packet._lastDeferredAt;
           // Track for ACK if this is an outgoing message (not a relay) that requires delivery confirmation.
           // Without this, processACK never finds a matching pendingACK → delivery status never updates in UI.
           if (!packet.sourceIdOverride && packet.originalStringId && MeshProtocol.requiresACK(packet.type)) {
@@ -1446,7 +1517,7 @@ class MeshNetworkService {
             ).catch(() => { /* best-effort ACK tracking */ });
           }
         } else {
-          (packet as any)._lastDeferredAt = now; // Record when deferred for cooldown
+          packet._lastDeferredAt = now; // görev #19: tipli alan — soğuma damgası
           deferred.push(packet); // Re-queue at end instead of blocking
         }
       }
@@ -1721,6 +1792,15 @@ class MeshNetworkService {
   // ===========================================================================
 
   private async broadcastPacket(packet: PendingMeshPacket): Promise<boolean> {
+    // K3: If mesh isn't running (because BLE unavailable), do NOT silently
+    // report success. Returning false signals SOSChannelRouter / messaging
+    // layer that this channel is currently unusable so they mark it `failed`
+    // instead of `sent`.
+    if (!this.isRunning) {
+      logger.debug('broadcastPacket: mesh not running (BLE unavailable) — refusing packet');
+      return false;
+    }
+
     if (!this.isRealMode) {
       this.stats.packetsSent++;
       logger.debug('Simulation mode: skipped BLE for queued packet');
@@ -1729,6 +1809,17 @@ class MeshNetworkService {
 
     const bluetoothReady = await highPerformanceBle.isBluetoothPoweredOn();
     if (!bluetoothReady) {
+      // K3: Track the cause so the UI can update its banner mid-session
+      // (user toggles Bluetooth off after start) instead of staying in
+      // an "all good" state until next restart.
+      try {
+        const reason = await highPerformanceBle.getMeshAvailabilityReason();
+        if (reason !== null) {
+          useMeshStore.getState().setMeshUnavailable(reason);
+        }
+      } catch {
+        // Ignore — best-effort UX update
+      }
       logger.debug('Bluetooth not ready; deferring mesh packet for retry');
       return false;
     }
@@ -2534,7 +2625,12 @@ class MeshNetworkService {
           type: messageType,
           content,
           timestamp,
-          hops: MESSAGE_DEFAULT_TTL - packet.header.ttl,
+          // görev #19: hop sayısı = orijinalTTL - mevcutTTL. Eskiden sabit
+          // MESSAGE_DEFAULT_TTL(4) minuend olarak kullanılıyordu; SOS'un per-type
+          // TTL'i 15 olduğundan 4-15 = -11 (negatif hop) üretiyordu. Doğru minuend
+          // tipe özel orijinal TTL'dir (getAdaptiveTTL). Math.max(0,...) ile
+          // beklenmedik negatif değerlere (örn. elle üretilmiş paket) karşı koru.
+          hops: Math.max(0, getAdaptiveTTL(packet.header.type) - packet.header.ttl),
           status: 'delivered',
           ttl: packet.header.ttl,
           priority: this.getStorePriority(packet.header.type),
@@ -2922,7 +3018,7 @@ class MeshNetworkService {
     };
     const relayed = await this.broadcastPacket(relayMeshPacket);
     if (!relayed) {
-      this.relayQueue.push({
+      const deferredRelayPacket: PendingMeshPacket = {
         type: originalPacket.header.type,
         payloadBase64: originalPacket.payload.toString('base64'),
         ttl: newTtl,
@@ -2930,8 +3026,18 @@ class MeshNetworkService {
         messageId: originalPacket.header.messageId,
         enqueuedAt: Date.now(),
         sourceIdOverride: originalPacket.header.sourceId,
-      });
-      logger.debug('Relay deferred: added to relay queue for retry');
+      };
+      // görev #19: relay'lenmiş yaşam-güvenliği (SOS/EMERGENCY_BEACON/
+      // RESCUE_SIGNAL/HEALTH_SOS) paketleri criticalQueue'ya gider — relayQueue
+      // cycle başına yalnız 2 paket boşaltır ve normalQueue'nun arkasındadır,
+      // bu da relay'lenen bir SOS'u tıkanık ağda saniyelerce geciktirir.
+      if (isLifeSafetyPacket) {
+        this.criticalQueue.push(deferredRelayPacket);
+        logger.debug('Relay deferred: life-safety packet added to critical queue for retry');
+      } else {
+        this.relayQueue.push(deferredRelayPacket);
+        logger.debug('Relay deferred: added to relay queue for retry');
+      }
       return;
     }
 

@@ -363,7 +363,14 @@ public class AfetNetBlePeripheralModule: Module {
 
   func handleUnsubscribe(central: CBCentral) {
     subscribedCentrals.removeValue(forKey: central.identifier)
-    // Don't remove from connectedCentralIds — central may still be connected for writes
+    // görev #19: didUnsubscribeFrom'u disconnect proxy'si olarak kullan —
+    // central'ı connectedCentralIds'ten de çıkar. CBPeripheralManager'ın doğrudan
+    // bir "disconnect" callback'i yoktur; eskiden connectedCentralIds hiç
+    // küçülmüyordu ve getConnectedDeviceCount monoton büyüyordu (kalıcı sahte
+    // peer sayımı → yanlış mesh topoloji metrikleri). Bir central abonelikten
+    // çıktığında bağlantısının bittiğini varsayarız; tekrar yazma yaparsa
+    // handleWriteRequests onu yeniden ekler.
+    connectedCentralIds.remove(central.identifier)
     sendEvent("onDeviceDisconnected", [
       "deviceId": central.identifier.uuidString
     ])
@@ -371,6 +378,30 @@ public class AfetNetBlePeripheralModule: Module {
 
   func handleWriteRequests(peripheral: CBPeripheralManager, requests: [CBATTRequest]) {
     guard !requests.isEmpty else { return }
+
+    // görev #19: Bozuk/aşırı büyük yazmalarda artık koşulsuz .success dönmüyoruz.
+    // Eskiden her yazmaya .success deniyordu — istemci paketinin kabul edildiğini
+    // sanıp yeniden denemiyordu, oysa veri reddedilmeliydi. CoreBluetooth yazma
+    // protokolü gereği her didReceiveWrite çağrısında SADECE ilk request'e bir
+    // kez yanıt verilir; o yanıtın result'u tüm gruba uygulanır. Bu yüzden tüm
+    // request'leri önce doğrularız: herhangi biri geçersizse uygun hata koduyla
+    // yanıtlar ve hiçbir event yaymayız (istemci doğru hatayla yeniden dener).
+    // - Beklenmeyen offset > 0  → .invalidOffset (uzun/prepared write desteklenmez)
+    // - value nil / boş / > MAX → .invalidAttributeValueLength
+    let maxWriteLength = 512  // ATT MTU üst sınırı; AfetNet payload'ı bunun çok altında
+    for request in requests {
+      if request.offset != 0 {
+        NSLog("[AfetNetBlePeripheral] Yazma reddedildi — geçersiz offset \(request.offset)")
+        peripheral.respond(to: requests[0], withResult: .invalidOffset)
+        return
+      }
+      guard let value = request.value, !value.isEmpty, value.count <= maxWriteLength else {
+        let len = request.value?.count ?? -1
+        NSLog("[AfetNetBlePeripheral] Yazma reddedildi — geçersiz uzunluk \(len)")
+        peripheral.respond(to: requests[0], withResult: .invalidAttributeValueLength)
+        return
+      }
+    }
 
     for request in requests {
       guard let data = request.value else { continue }

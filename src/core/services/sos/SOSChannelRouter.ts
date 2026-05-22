@@ -161,6 +161,12 @@ class SOSChannelRouter {
         logger.warn('📡 Broadcasting SOS through all channels...');
         logger.debug(`[SOS] Signal: id=${signal.id}, timestamp=${signal.timestamp}, location=${signal.location ? 'YES' : 'NO'}`);
 
+        // KRİTİK (görev #17): Yeni SOS yayını başlıyor — kanal-retry tur sayacını
+        // sıfırla. Önceki kod channelRetryRound'u yalnızca başarı/iptal/destroy'da
+        // sıfırlıyordu; bir önceki SOS 3 retry turunu tükettiyse, aynı oturumda
+        // tetiklenen İKİNCİ SOS hiç otomatik kanal-retry alamıyordu.
+        this.channelRetryRound = 0;
+
         // LIFE-SAFETY: Check for airplane mode — warn user if ALL channels are blocked
         try {
             const netState = await NetInfo.fetch();
@@ -1111,8 +1117,14 @@ class SOSChannelRouter {
         // Remote family/nearby alerts are delivered via broadcastToFamily and broadcastToNearbyUsers.
         // Sending a push to self was confusing — the user thought their own phone was receiving
         // someone else's SOS when in reality it was their own confirmation.
-        updateStatus('push', 'sent');
-        logger.info('✅ Push channel: self-notification skipped (sender sees SOSModal UI)');
+        // KRİTİK (görev #17): 'sent' DEĞİL 'idle'. Bu kanal kasıtlı hiçbir şey
+        // yapmıyor (gönderene self-push atılmaz). 'sent' işaretlenince SOSModal
+        // dürüstlük banner'ı bunu "ulaşıldı" sayıyor ve diğer TÜM kanallar
+        // başarısız olsa bile kritik "hiçbir kanaldan ulaşılamıyor — 112'yi
+        // arayın" uyarısını susturuyordu. 'idle' bu kanalı "reached" hesabının
+        // dışında tutar (broadcastViaBackend'in yapılandırılmamış dalı ile aynı).
+        updateStatus('push', 'idle');
+        logger.info('Push channel idle: self-notification skipped (sender sees SOSModal UI)');
     }
 
     // ============================================================================

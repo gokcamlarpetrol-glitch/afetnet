@@ -103,6 +103,11 @@ export async function saveLocationUpdate(
     const battery = normalizeBatteryPercent(location.battery ?? location.batteryLevel);
     const currentRef = doc(db, 'locations_current', uid);
 
+    // görev #21 — "şarj kalan bug" fix: konum güncellemesi pil bilgisi
+    // İÇERMİYORSA (battery === null), battery/batteryLevel/batteryUpdatedAt
+    // alanlarını payload'a HİÇ ekleme. setDoc({merge:true}) per-field çalışır;
+    // null yazmak FamilyTrackingService'in yazdığı taze pili EZER. Alanı atlayınca
+    // merge önceki değeri korur ve aile üyesinin şarjı boş görünmez.
     const locationPayload = {
       userId: uid,
       deviceId: typeof location.deviceId === 'string' && location.deviceId.trim().length > 0
@@ -114,9 +119,11 @@ export async function saveLocationUpdate(
       altitude: location.altitude ?? null,
       speed: location.speed ?? null,
       heading: location.heading ?? null,
-      battery,
-      batteryLevel: battery,
-      batteryUpdatedAt: battery !== null ? timestamp : null,
+      ...(battery !== null ? {
+        battery,
+        batteryLevel: battery,
+        batteryUpdatedAt: timestamp,
+      } : {}),
       source: location.source || 'gps',
       updatedAt: now,
       timestamp,

@@ -33,6 +33,8 @@ interface SeismographVisualizationProps {
   isAnimating: boolean;
   isMonitoringActive?: boolean; // CRITICAL: Always show if monitoring is active
   realTimeData?: number[]; // CRITICAL: Real-time accelerometer data
+  /** görev #23: Ekran unfocused iken interval'ı durdur */
+  paused?: boolean;
 }
 
 export default function SeismographVisualization({
@@ -43,6 +45,7 @@ export default function SeismographVisualization({
   isAnimating,
   isMonitoringActive = true, // CRITICAL: Default to active
   realTimeData,
+  paused = false,
 }: SeismographVisualizationProps) {
   const [waveformData, setWaveformData] = useState<number[]>([]);
   const animationRef = useRef<Animated.Value>(new Animated.Value(0));
@@ -142,9 +145,12 @@ export default function SeismographVisualization({
       intervalRef.current = null;
     }
     
+    // görev #23: Pause interval when screen is unfocused (paused prop from parent).
     // CRITICAL: Set up continuous interval for ALWAYS-ON waveform updates (50ms = 20 Hz)
     // ELITE: High-frequency updates ensure smooth, uninterrupted real-time visualization
-    // CRITICAL: This interval runs CONTINUOUSLY - never stops
+    if (paused) {
+      return;
+    }
     intervalRef.current = setInterval(() => {
       // CRITICAL: Always update waveform - check for real data first, fallback to neutral baseline
       // ELITE: Use ref to always get latest realTimeData value
@@ -166,7 +172,7 @@ export default function SeismographVisualization({
         intervalRef.current = null;
       }
     };
-  }, [isMonitoringActive, isAnimating, pWaveArrivalTime, sWaveArrivalTime, magnitude, elapsed]); // CRITICAL: Removed realTimeData from dependencies to prevent restarts
+  }, [isMonitoringActive, isAnimating, pWaveArrivalTime, sWaveArrivalTime, magnitude, elapsed, paused]); // CRITICAL: Removed realTimeData from dependencies to prevent restarts
 
   // CRITICAL: Real-time data is handled by the main interval above
   // ELITE: No separate effect needed - main interval handles both real and simulated data continuously

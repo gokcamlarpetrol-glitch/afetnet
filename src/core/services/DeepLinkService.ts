@@ -179,7 +179,9 @@ class DeepLinkService {
 
       case 'family/group':
         if (params.id) {
-          navigateTo('FamilyGroupChat', { familyGroupId: params.id });
+          // görev #25 madde 2: FamilyGroupChatScreen route.params.groupId okur —
+          // önceki familyGroupId anahtarı eşleşmediğinden grup açılmıyordu.
+          navigateTo('FamilyGroupChat', { groupId: params.id });
         } else {
           navigateTo('Family');
         }
@@ -201,7 +203,9 @@ class DeepLinkService {
 
       case 'earthquake':
         if (params.id) {
-          navigateTo('EarthquakeDetail', { earthquakeId: params.id });
+          // görev #25 madde 2: EarthquakeDetailScreen route.params.id okur —
+          // önceki earthquakeId anahtarı eşleşmediğinden deprem detayı yüklenmiyordu.
+          navigateTo('EarthquakeDetail', { id: params.id });
         } else {
           navigateTo('AllEarthquakes');
         }

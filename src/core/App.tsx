@@ -464,19 +464,35 @@ export default function CoreApp() {
             {/* ELITE: Compliance - Mandatory EULA */}
               {isBootStorageReady ? <EULAModal /> : null}
 
+            {/* LIFE-SAFETY (görev #20): Her can-güvenliği overlay'i KENDİ
+                ErrorBoundary'sine sarılır. Tek bir kök ErrorBoundary vardı;
+                herhangi bir ekranda render crash'i TÜM uygulamayı (SOS ve EEW
+                overlay'leri dahil) çökertiyordu. Artık bir overlay'deki çökme
+                diğerlerini ve mahsur kalan kullanıcının SOS arayüzünü öldürmez.
+                fallback={null}: çöken bir overlay tam ekran hata UI'ı
+                göstermek yerine sessizce kaybolur, kalan overlay'ler çalışır. */}
+
             {/* ELITE V4: Full-screen SOS alert for foreground notifications */}
-            <SOSFullScreenAlert />
+            <ErrorBoundary fallback={null}>
+              <SOSFullScreenAlert />
+            </ErrorBoundary>
 
             {/* LIFE-SAFETY: Global EEW countdown overlay — covers every screen */}
-            <EEWCountdownAlert />
+            <ErrorBoundary fallback={null}>
+              <EEWCountdownAlert />
+            </ErrorBoundary>
 
             {/* LIFE-SAFETY: SOS 6/6 channel failure banner — persistent until SOS resolved */}
-            <SOSFailureBanner />
+            <ErrorBoundary fallback={null}>
+              <SOSFailureBanner />
+            </ErrorBoundary>
 
             {/* LIFE-SAFETY (görev #9): Aktif SOS varken HER ekranda görünen global
                 DURDUR kontrolü. SOSModal yalnızca HomeScreen'e bağlıydı; başka
                 ekrana geçilince SOS durdurulamadan yayında kalıyordu. */}
-            <ActiveSOSBanner />
+            <ErrorBoundary fallback={null}>
+              <ActiveSOSBanner />
+            </ErrorBoundary>
 
             {/* DATA-INTEGRITY: Clock skew banner — Firestore rejects ±5min stale writes */}
             <ClockSkewBanner />
