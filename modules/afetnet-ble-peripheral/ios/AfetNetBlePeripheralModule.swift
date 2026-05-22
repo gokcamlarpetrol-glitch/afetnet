@@ -75,6 +75,12 @@ public class AfetNetBlePeripheralModule: Module {
   // Track ALL connected centrals (write-only + subscribed)
   private var connectedCentralIds: Set<UUID> = []
   private var isRunning = false
+  // FAZ 0 — post-mortem regression fix: BT power cycle sırasında handleStateUpdate
+  // off branch'inde isRunning=false yapıyorduk. On branch'te `else if isRunning`
+  // check'i hep false → setupGATTService + startAdvertising ASLA çağrılmıyordu.
+  // Bu flag, off-anında running'i hatırlar; on-anında resume-or-not kararı verir.
+  // explicit stopPeripheral durumunda false kalır (resume yok).
+  private var shouldAutoResumeOnPowerOn: Bool = false
   private var pendingServiceUUID: String?
   private var pendingCharUUIDs: [String] = []
   private var advertisementData: Data?
@@ -154,6 +160,9 @@ public class AfetNetBlePeripheralModule: Module {
         self.pendingNotifications.removeAll()
         self.gattService = nil
         self.isRunning = false
+        // FAZ 0: explicit stop → BT toggle olsa bile resume YAPMA. JS taraf
+        // startPeripheral'ı tekrar çağırmadıkça peripheral inactive kalır.
+        self.shouldAutoResumeOnPowerOn = false
         // CRITICAL: Cancel pending start promise to prevent JS-side await hanging forever
         if let startPromise = self.pendingStartPromise {
           startPromise.reject("CANCELLED", "Peripheral stopped before start completed")
@@ -351,35 +360,46 @@ public class AfetNetBlePeripheralModule: Module {
   func handleStateUpdate(_ peripheral: CBPeripheralManager) {
     if peripheral.state == .poweredOn {
       if pendingStartPromise != nil {
+        // Fresh start in flight — JS startPeripheral bekliyor.
         setupGATTService()
         startAdvertising()
         isRunning = true
+        shouldAutoResumeOnPowerOn = false
         pendingStartPromise?.resolve(nil)
         pendingStartPromise = nil
-        // (görev mesh-M1 + post-mortem CRITICAL): BT geri açıldı + start sürüyordu.
-        // setupGATTService characteristics'i KAPATIP YENİDEN yaratır (line 222) —
-        // pendingNotifications içindeki PendingNotification.characteristic refs
-        // STALE; updateValue stale ref ile sessizce false döner ve SOS sonsuz
-        // queue'da kalır. Korunan pendings'i taze char'a remap et, sonra retry.
+        // FAZ 0: BT geri açıldı + start sürüyordu. setupGATTService characteristics'i
+        // YENİDEN yaratır (line 222) → pendingNotifications içindeki char refs
+        // STALE; updateValue stale ref ile sessizce false döner. Remap sonra retry.
         remapPendingNotificationsToFreshChars()
         if !pendingNotifications.isEmpty {
-          NSLog("[AfetNetBlePeripheral] BT geri açıldı — \(pendingNotifications.count) bekleyen notification retry ediliyor (taze char'a remap edildi)")
+          NSLog("[AfetNetBlePeripheral] BT geri açıldı (fresh start) — \(pendingNotifications.count) bekleyen notification retry ediliyor")
           retryPendingNotifications()
         }
-      } else if isRunning {
-        // Bluetooth was turned back on while running — resume
+      } else if shouldAutoResumeOnPowerOn {
+        // FAZ 0 KRİTİK FIX: BT toggle (off → on) sonrası resume.
+        // Eski kod `else if isRunning` idi → off branch'te isRunning=false set ettiği
+        // için bu BLOK ASLA tetiklenmiyordu → setupGATTService + startAdvertising
+        // çağrılmıyor → peripheral re-advertise etmiyor → mahsur kullanıcı
+        // rescuer scanner'lara GÖRÜNMÜYORDU. shouldAutoResumeOnPowerOn flag'i
+        // off-anında set edilir, on-anında okunur. explicit stopPeripheral false
+        // bırakır → resume yok.
+        NSLog("[AfetNetBlePeripheral] BT toggle resume — peripheral yeniden başlıyor")
         setupGATTService()
         startAdvertising()
-        // post-mortem CRITICAL: aynı stale-char senaryosu — remap sonra retry.
+        isRunning = true
+        shouldAutoResumeOnPowerOn = false
         remapPendingNotificationsToFreshChars()
         if !pendingNotifications.isEmpty {
-          NSLog("[AfetNetBlePeripheral] BT geri açıldı (running) — \(pendingNotifications.count) bekleyen notification retry ediliyor (taze char'a remap edildi)")
+          NSLog("[AfetNetBlePeripheral] BT toggle resume — \(pendingNotifications.count) bekleyen notification retry ediliyor")
           retryPendingNotifications()
         }
       }
     } else {
       // Handle ALL non-poweredOn states: poweredOff, unauthorized, resetting, unsupported, unknown
       let wasRunning = isRunning
+      // FAZ 0: was-running ise auto-resume için flag'i kaydet; explicit stop bunu
+      // false bırakacağı için resume yapılmaz (doğru davranış).
+      shouldAutoResumeOnPowerOn = wasRunning
       isRunning = false
       subscribedCentrals.removeAll()
       connectedCentralIds.removeAll()
@@ -397,10 +417,12 @@ public class AfetNetBlePeripheralModule: Module {
       if let promise = pendingStartPromise {
         promise.reject("BLE_UNAVAILABLE", "Bluetooth is not available (state: \(peripheral.state.rawValue))")
         pendingStartPromise = nil
+        // Fresh start fail oldu — auto-resume yapılmamalı.
+        shouldAutoResumeOnPowerOn = false
       }
 
       if wasRunning {
-        NSLog("[AfetNetBlePeripheral] BLE state changed to \(peripheral.state.rawValue) — peripheral stopped")
+        NSLog("[AfetNetBlePeripheral] BLE state changed to \(peripheral.state.rawValue) — peripheral stopped (auto-resume armed)")
       }
     }
   }

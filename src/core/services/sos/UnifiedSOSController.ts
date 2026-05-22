@@ -960,17 +960,33 @@ class UnifiedSOSController {
                     const lastKnownTs = typeof lastKnown.timestamp === 'number' && Number.isFinite(lastKnown.timestamp)
                         ? lastKnown.timestamp
                         : Date.now();
+                    // (deep-review): accuracy alanı için ?? kullan (|| 1000 honest-0'ı
+                    // 1000'e çevirirdi). Yine de Number.isFinite ile guard.
+                    const rawAccuracy = lastKnown.coords.accuracy;
+                    const accuracy = (typeof rawAccuracy === 'number' && Number.isFinite(rawAccuracy) && rawAccuracy >= 0)
+                        ? rawAccuracy
+                        : 1000;
                     const fallback: SOSLocation = {
                         latitude: lastKnown.coords.latitude,
                         longitude: lastKnown.coords.longitude,
-                        accuracy: lastKnown.coords.accuracy || 1000,
+                        accuracy,
                         timestamp: lastKnownTs,
                         source: 'cached',
                     };
-                    const ageSec = Math.floor((Date.now() - lastKnownTs) / 1000);
-                    logger.warn(`SOS son-bilinen konum kullanılıyor (yaş ${ageSec}sn) — gerçek-zamanlı GPS yok`);
-                    useSOSStore.getState().updateLocation(fallback);
-                    return fallback;
+                    // (deep-review CRITICAL): isUsableSOSLocation'ı koş ama 1 saatlik
+                    // genişletilmiş maxAge ile (life-safety: cached yol). Bu kontrol
+                    // (0,0) Null Island reddi, accuracy ≤ 5000m sınırı, future-skew
+                    // reddi ve lat/lon bounds'larını ortak validate ediyor. Eksikse
+                    // (örn. iOS bazen accuracy=-1 döndürür → reject) konumsuz git;
+                    // SOS yine mesh/family/firebase kanallarından ulaşır.
+                    if (!isUsableSOSLocation(fallback, 60 * 60 * 1000)) {
+                        logger.warn('Son-bilinen konum geçerlilik kontrolünden geçmedi (Null Island / accuracy / future-skew) — konumsuz devam');
+                    } else {
+                        const ageSec = Math.floor((Date.now() - lastKnownTs) / 1000);
+                        logger.warn(`SOS son-bilinen konum kullanılıyor (yaş ${ageSec}sn) — gerçek-zamanlı GPS yok`);
+                        useSOSStore.getState().updateLocation(fallback);
+                        return fallback;
+                    }
                 }
             } catch (lastErr) {
                 logger.warn('Son-bilinen konum fetch de başarısız:', lastErr);

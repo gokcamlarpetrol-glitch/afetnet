@@ -2981,14 +2981,15 @@ class MeshNetworkService {
             try {
               const { AppState, DeviceEventEmitter } = require('react-native');
               const directName = senderName || `Yakındaki Kullanıcı (${senderId.substring(0, 6)})`;
-              // post-mortem HIGH: 'inactive' state (gelen telefon banner'ı, notif
-              // center açık, app switcher) de UI emit'i kabul etmeli — React tree
-              // hâlâ mounted, listener canlı. SADECE 'background'da emit dışlanmalı
-              // (JS suspended). Eski `=== 'active'` 5sn'lik 'inactive' pencere
-              // boyunca BOTH yolları (emit + OS notif fallback) kapatabilirdi —
-              // expo-notifications init olmadığı senaryoda kullanıcı hiçbir şey
-              // görmezdi.
-              if (AppState.currentState !== 'background') {
+              // FAZ 0 — post-mortem regression revert: SOS-receive agent doğruladı
+              // ki iOS 'inactive' state'inde (gelen telefon banner'ı, notif center
+              // açık, ~5sn) React render SIK SIK suspend olur → Modal paint etmez.
+              // Önceki `!== 'background'` mantığım emit fire'ladı ama UI görünür
+              // değildi → meshSosFullScreenEmitted=true → OS notif fallback skip
+              // → kullanıcı hiçbir şey görmedi. SOSAlertListener pattern'i ile
+              // consistent ol: SADECE 'active'de emit; 'inactive' + 'background'
+              // ikisi de fallback'e düşsün (OS notif her durumda fire eder).
+              if (AppState.currentState === 'active') {
                 DeviceEventEmitter.emit('SOS_FULLSCREEN_ALERT', {
                   signalId: messageId,
                   senderDeviceId: senderId,
