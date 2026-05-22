@@ -32,6 +32,7 @@ import { cryptoService } from './CryptoService';
 import { validateMessage, sanitizeMessage } from '../utils/messageSanitizer';
 import { LRUSet } from '../utils/LRUCache';
 import { Mutex, Debouncer, Throttle } from '../utils/Mutex';
+import { secureMessageId } from '../utils/secureId';
 import { DirectStorage } from '../utils/storage';
 import { useMeshStore, type MeshMessage } from './mesh/MeshStore';
 import { AppState, AppStateStatus } from 'react-native';
@@ -623,15 +624,18 @@ class HybridMessageService {
 
   /**
    * M4: Generate cryptographically secure message ID
+   *
+   * H5/H6 (Math.random hardening): if cryptoService isn't ready, fall back
+   * to secureId() which uses CSPRNG (getRandomBytes). The previous
+   * Math.random-based fallback had ~32-bit period and could collide under
+   * load.
    */
   private async generateId(): Promise<string> {
     try {
       return cryptoService.generateUUID();
     } catch {
-      // Fallback if crypto not ready
-      const timestamp = Date.now().toString(36);
-      const randomPart = Math.random().toString(36).substring(2, 9);
-      return `${timestamp}-${randomPart}`;
+      // CSPRNG fallback — secureMessageId reads from getRandomBytes.
+      return secureMessageId();
     }
   }
 
@@ -931,6 +935,28 @@ class HybridMessageService {
     }
 
     return aliases.size > 0 ? Array.from(aliases) : undefined;
+  }
+
+  private buildStorageRecipientUids(
+    recipientId?: string,
+    recipientAliases?: string[],
+  ): string | undefined {
+    const ownerUid = identityService.getUid?.();
+    const recipientUids = new Set<string>();
+    const tryAdd = (value?: string | null) => {
+      const trimmed = typeof value === 'string' ? value.trim() : '';
+      if (!trimmed || trimmed === ownerUid || trimmed === 'broadcast') return;
+      if (isLikelyFirebaseUid(trimmed)) {
+        recipientUids.add(trimmed);
+      }
+    };
+
+    tryAdd(recipientId);
+    if (Array.isArray(recipientAliases)) {
+      recipientAliases.forEach((alias) => tryAdd(alias));
+    }
+
+    return recipientUids.size > 0 ? Array.from(recipientUids).join(',') : undefined;
   }
 
   private isDirectedRecipient(recipientId?: string): boolean {
@@ -1630,10 +1656,13 @@ class HybridMessageService {
           }
         }
 
+        const recipientUids = this.buildStorageRecipientUids(resolvedRecipientId, recipientAliases);
         const uploadResult = await firebaseStorageService.uploadFileFromUri(storagePath, uploadUri, {
           contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
           customMetadata: {
             userId: storageOwnerId,
+            uploaderUid: storageOwnerId,
+            ...(recipientUids ? { recipientUids } : {}),
           },
         });
         if (uploadResult) {
@@ -2055,9 +2084,14 @@ class HybridMessageService {
                 }
               }
               const storagePath = `chat/${storageOwnerId}/${Date.now()}.${extension}`;
+              const recipientUids = this.buildStorageRecipientUids(message.recipientId, message.recipientAliases);
               const uploadResult = await firebaseStorageService.uploadFileFromUri(storagePath, uploadUri, {
                 contentType: message.mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
-                customMetadata: { userId: storageOwnerId },
+                customMetadata: {
+                  userId: storageOwnerId,
+                  uploaderUid: storageOwnerId,
+                  ...(recipientUids ? { recipientUids } : {}),
+                },
               });
               if (uploadResult) {
                 message.mediaUrl = uploadResult;

@@ -13,6 +13,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { eliteStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
+import { secureId } from '../../utils/secureId';
 
 const logger = createLogger('SOSStateManager');
 
@@ -34,7 +35,10 @@ export type SOSStatus = 'idle' | 'countdown' | 'broadcasting' | 'acknowledged' |
 // 'unconfirmed' = sent but no ACK received within timeout window.
 // Distinguishes "fire-and-forget sent" from "rescue team actually acknowledged".
 // Critical for life-safety transparency: user must know if SOS truly reached someone.
-export type ChannelStatus = 'idle' | 'pending' | 'sending' | 'sent' | 'unconfirmed' | 'failed' | 'acked';
+// F3: 'queued' = packet accepted by transport but no recipient yet (mesh with 0
+// peers, or cloud while offline). Distinct from 'failed' so the UI can show
+// "yardım çağrısı bekleniyor" rather than misleading "yardım gönderilemedi".
+export type ChannelStatus = 'idle' | 'pending' | 'sending' | 'sent' | 'unconfirmed' | 'failed' | 'acked' | 'queued';
 
 export interface SOSLocation {
     latitude: number;
@@ -176,7 +180,9 @@ const createEmptySignal = (
     message: string,
     isSilent: boolean = false
 ): SOSSignal => ({
-    id: `sos_${Date.now()}_${userId}_${Math.random().toString(36).substring(2, 10)}`,
+    // H5/H6: CSPRNG-backed ID prevents collisions when fall-detection fires
+    // multiple SOS triggers within the same millisecond across devices.
+    id: `sos_${Date.now()}_${userId}_${secureId(8)}`,
     userId,
     timestamp: Date.now(),
     location: null,
@@ -280,7 +286,14 @@ export const useSOSStore = create<SOSState>()(
             // Decrement Countdown — FIX 18: Use absolute timestamp for background-safe accuracy
             // P0-4: derive from countdownTotalSeconds snapshot (5s manual / 30s auto)
             decrementCountdown: () => {
-                const { countdownStartedAt, countdownTotalSeconds } = get();
+                const { countdownStartedAt, countdownTotalSeconds, isCountingDown } = get();
+                // KRİTİK (görev #26): isCountingDown guard — savunma derinliği.
+                // Geri sayım iptal/aktivasyon ile durdurulduktan sonra hâlâ çalışan
+                // bir interval bu fonksiyonu çağırırsa countdownSeconds'i sıfıra
+                // çekip durdurulmuş bir geri sayımı yanlışça canlandırmasın.
+                if (!isCountingDown) {
+                    return get().countdownSeconds;
+                }
                 const total = typeof countdownTotalSeconds === 'number' && countdownTotalSeconds > 0
                     ? countdownTotalSeconds
                     : DEFAULT_COUNTDOWN;
@@ -465,6 +478,19 @@ export const useSOSStore = create<SOSState>()(
                     });
 
                     logger.info('🛑 SOS stopped');
+                } else {
+                    // KRİTİK (görev #26): currentSignal null ise zombie state.
+                    // Erken return isActive'i takılı true bırakıyordu — UI sonsuza
+                    // dek aktif SOS gösteriyor, yeni SOS tetiklenemiyor. currentSignal
+                    // olmasa bile isActive/isCountingDown bayraklarını temizle.
+                    set({
+                        isActive: false,
+                        isCountingDown: false,
+                        countdownSeconds: DEFAULT_COUNTDOWN,
+                        countdownTotalSeconds: DEFAULT_COUNTDOWN,
+                        countdownStartedAt: null,
+                    });
+                    logger.info('🛑 SOS stopped (zombie state cleared — currentSignal was null)');
                 }
             },
 

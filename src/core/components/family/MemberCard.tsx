@@ -178,8 +178,15 @@ export const MemberCard = React.memo(function MemberCard({
     : 'battery-dead' as const;
 
   // görev #23: FadeInDown delay üst sınırı 300ms — uzun listede son kartlar 5s+ beklemesin.
+  // görev #30: entering animasyon nesnesi her render'da `FadeInDown.delay().springify()`
+  // ile yeniden kuruluyordu — useMemo ile index'e bağlı tek sefer üretilir.
+  const enteringAnimation = React.useMemo(
+    () => FadeInDown.delay(Math.min(index * 60, 300)).springify(),
+    [index],
+  );
+
   return (
-    <Animated.View entering={FadeInDown.delay(Math.min(index * 60, 300)).springify()} style={animatedStyle}>
+    <Animated.View entering={enteringAnimation} style={animatedStyle}>
       <Pressable
         onPress={handlePress}
         onLongPress={isApprovalLocked ? undefined : handleLongPress}

@@ -13,7 +13,14 @@
 import NetInfo from '@react-native-community/netinfo';
 import { DirectStorage } from '../utils/storage';
 import { createLogger } from '../utils/logger';
+import { secureId } from '../utils/secureId';
 import { useMeshStore } from './mesh/MeshStore';
+// Önceden yükleme: online→offline geçişinde 1-2sn gecikmeyi önler.
+// IdentityService initialize() sırasında lazy kalıyor (init bağımlılığı),
+// diğerleri circular dependency riski olmadığı doğrulandı.
+import { firebaseDataService } from './FirebaseDataService';
+import { backendEmergencyService } from './BackendEmergencyService';
+import { contactRequestService } from './ContactRequestService';
 
 const logger = createLogger('OfflineSyncService');
 
@@ -105,7 +112,8 @@ class OfflineSyncService {
     }
 
     const item: SyncItem = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      // H5/H6: CSPRNG-backed ID to eliminate same-millisecond collisions at scale.
+      id: `${Date.now()}-${secureId(6)}`,
       type,
       data,
       timestamp: Date.now(),
@@ -210,36 +218,31 @@ class OfflineSyncService {
     }
   }
 
-  // ... [Keep existing syncItem implementation but robustify] ...
   private async syncItem(item: SyncItem): Promise<void> {
-    // V3: Resolve UID for all operations
+    // IdentityService init-time bağımlılığı olduğu için lazy import zorunlu.
+    // Diğer servisler modül seviyesinde önceden yüklenmiş.
     const { identityService } = await import('./IdentityService');
     const uid = identityService.getUid() || useMeshStore.getState().myDeviceId || 'unknown';
 
     switch (item.type) {
       case 'message': {
-        const { firebaseDataService } = await import('./FirebaseDataService');
         await firebaseDataService.saveMessage(uid, item.data);
         break;
       }
       case 'location': {
-        const { firebaseDataService } = await import('./FirebaseDataService');
         await firebaseDataService.saveLocationUpdate(uid, item.data);
         break;
       }
       case 'status': {
-        const { firebaseDataService } = await import('./FirebaseDataService');
         await firebaseDataService.saveStatusUpdate(uid, item.data);
         break;
       }
       case 'sos': {
-        const { backendEmergencyService } = await import('./BackendEmergencyService');
         await backendEmergencyService.sendSOSSignal(item.data);
         break;
       }
       case 'save':
       case 'update': {
-        const { firebaseDataService } = await import('./FirebaseDataService');
         const member = item.data?.member;
         if (!member || uid === 'unknown') {
           throw new Error(`Invalid ${item.type} payload for family sync`);
@@ -251,7 +254,6 @@ class OfflineSyncService {
         break;
       }
       case 'delete': {
-        const { firebaseDataService } = await import('./FirebaseDataService');
         const memberId = item.data?.memberId;
         if (!memberId || uid === 'unknown') {
           throw new Error('Invalid delete payload for family sync');
@@ -263,7 +265,6 @@ class OfflineSyncService {
         break;
       }
       case 'contact_request': {
-        const { contactRequestService } = await import('./ContactRequestService');
         const toUserId = typeof item.data?.toUserId === 'string' ? item.data.toUserId : '';
         const toQrId = typeof item.data?.toQrId === 'string' ? item.data.toQrId : toUserId;
         const message = typeof item.data?.message === 'string' ? item.data.message : undefined;

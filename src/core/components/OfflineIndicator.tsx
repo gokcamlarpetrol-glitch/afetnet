@@ -2,6 +2,11 @@
  * OFFLINE INDICATOR - Network Status Banner
  * Shows user when they're offline - BLE mesh is still active
  * CRITICAL for disaster scenarios where network is down
+ *
+ * K3 enhancement: when network is offline AND mesh is ALSO unavailable
+ * (BLE off / permission denied), the banner explicitly tells the user
+ * mesh isn't an option either — so they can act (enable Bluetooth, allow
+ * permission) instead of being stranded thinking mesh has their back.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -18,6 +23,9 @@ export default function OfflineIndicator() {
   const [isOffline, setIsOffline] = useState(false);
   const slideAnim = useState(new Animated.Value(-100))[0];
   const peerCount = useMeshStore(state => state.peers.length);
+  // K3: surface mesh availability so we can downgrade messaging from
+  // "BLE Mesh Aktif" to "Mesh kullanılamıyor" when BLE itself is dead.
+  const meshUnavailableReason = useMeshStore(state => state.meshUnavailableReason);
 
   useEffect(() => {
     // Subscribe to network state
@@ -27,7 +35,7 @@ export default function OfflineIndicator() {
       // Only treat as offline when explicitly `false`, not `null`.
       const offline = state.isConnected === false || state.isInternetReachable === false;
       // Force offline for dev if needed
-      // setIsOffline(true); 
+      // setIsOffline(true);
       setIsOffline(offline);
 
       if (offline) {
@@ -49,10 +57,34 @@ export default function OfflineIndicator() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [slideAnim]);
 
   if (!isOffline) {
     return null;
+  }
+
+  // K3: pick subtitle by combined network + mesh availability.
+  const meshIsAvailable = meshUnavailableReason === null;
+  let subtitleText: string;
+  if (!meshIsAvailable) {
+    // BLE itself is down — most actionable message wins.
+    switch (meshUnavailableReason) {
+      case 'no-permission':
+        subtitleText = 'Mesh ağı kullanılamıyor — Bluetooth izni gerekli (Ayarlar)';
+        break;
+      case 'bluetooth-off':
+        subtitleText = 'Mesh ağı kullanılamıyor — Bluetooth açık mı?';
+        break;
+      case 'unsupported':
+        subtitleText = 'Mesh ağı bu cihazda desteklenmiyor';
+        break;
+      default:
+        subtitleText = 'Mesh ağı kullanılamıyor';
+    }
+  } else if (peerCount > 0) {
+    subtitleText = `BLE Mesh Aktif • ${peerCount} cihaz ile bağlantı kuruldu`;
+  } else {
+    subtitleText = 'BLE Mesh Aktif • Etrafta cihaz aranıyor...';
   }
 
   return (
@@ -69,15 +101,15 @@ export default function OfflineIndicator() {
         <Ionicons name="cloud-offline" size={20} color={colors.text.primary} />
         <View style={styles.textContainer}>
           <Text style={styles.title}>Çevrimdışı Mod</Text>
-          <Text style={styles.subtitle}>
-            {peerCount > 0
-              ? `BLE Mesh Aktif • ${peerCount} cihaz ile bağlantı kuruldu`
-              : 'BLE Mesh Aktif • Etrafta cihaz aranıyor...'}
-          </Text>
+          <Text style={styles.subtitle}>{subtitleText}</Text>
         </View>
         <View style={styles.bleIndicator}>
-          <View style={styles.blePulse} />
-          <Ionicons name="bluetooth" size={16} color={colors.accent.primary} />
+          {meshIsAvailable && <View style={styles.blePulse} />}
+          <Ionicons
+            name={meshIsAvailable ? 'bluetooth' : 'bluetooth-outline'}
+            size={16}
+            color={meshIsAvailable ? colors.accent.primary : colors.text.tertiary}
+          />
         </View>
       </View>
     </Animated.View>

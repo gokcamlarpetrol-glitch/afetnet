@@ -86,7 +86,27 @@ async function syncConversationInboxV3(params: {
                     unreadCount: 0,
                 }, { merge: true });
             }
-            // Idempotent increment via transaction (prevents TOCTOU race on concurrent invocations)
+            // Idempotent increment via transaction (prevents TOCTOU race on
+            // concurrent invocations).
+            //
+            // H8 (linearizability proof, no jest harness available here):
+            //   Firestore transactions use snapshot isolation. If two CF
+            //   instances fire concurrently for the same conversationId:
+            //     - Both read threadRef → both see existingLastAt = T0
+            //     - Both attempt to write — Firestore serializes via OCC; the
+            //       loser retries.
+            //     - On retry, the loser reads the WINNER's write
+            //       (existingLastAt = T_winner). If safeTimestamp <= T_winner,
+            //       the increment is skipped (the "already processed" branch),
+            //       so unreadCount only advances by 1 per logical message.
+            //   This holds even when N parallel CF instances fire — total
+            //   increment for a given message = exactly 1, period.
+            //
+            //   The ONLY failure mode is if the same message has TWO distinct
+            //   safeTimestamp values (e.g. clock skew between CF instances on
+            //   a redeploy). Mitigated upstream: timestamp is set to
+            //   `message.timestamp ?? Date.now()` on first delivery and reused
+            //   on retry — no per-CF generation.
             return db.runTransaction(async (txn) => {
                 const existing = await txn.get(threadRef);
                 const existingLastAt = existing.data()?.lastMessageAt || 0;

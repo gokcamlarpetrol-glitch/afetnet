@@ -607,56 +607,22 @@ class MultiChannelAlertService {
   }
 
   private async setupAndroidChannels() {
-    const Notifications = getNotifications();
-    if (!Notifications || typeof Notifications.setNotificationChannelAsync !== 'function') {
-      return;
+    // görev #27: TEK kaynak hizalama. Eski kod 'critical-alerts' / 'high-priority' /
+    // 'normal-priority' kanallarını yaratıyordu — ama EEW push yolu + backend
+    // resolveAndroidChannelId 'eew_critical' / 'earthquake_alerts' / 'sos_alerts'
+    // id'lerini kullanıyor. İsim alanları eşleşmediği için EEW bildirimi var
+    // olmayan bir kanala düşüp OS varsayılan (düşük) önem seviyesine geriliyordu:
+    // DND-bypass ve alarm sesi YOK. Çözüm: bu yetim kanal kümesini bırak ve
+    // NotificationChannelManager.initializeChannels()'a delege et — orada
+    // 'eew_critical' MAX importance + bypassDnd + alarm audioAttributes ile
+    // (görev #27 useAlarmAudio bayrağı) yaratılır. Böylece push'un gerçekten
+    // kullandığı kanal doğru yapılandırılmış olur ve tek kaynak korunur.
+    try {
+      const { initializeChannels } = await import('./notifications/NotificationChannelManager');
+      await initializeChannels();
+    } catch (error) {
+      logger.error('Android kanal kurulumu (NotificationChannelManager delegasyonu) başarısız:', error);
     }
-
-    // LIFE-SAFETY: Critical alert channel (EEW + SOS) — DND bypass + lock screen public.
-    // Türkçe isim sistem ayarlarında kullanıcıya görünür.
-    await Notifications.setNotificationChannelAsync('critical-alerts', {
-      name: 'Hayat Güvenliği (Deprem + SOS)',
-      description: 'Deprem erken uyarısı ve aile SOS sinyalleri. Sessiz modda bile çalar.',
-      importance: Notifications.AndroidImportance?.MAX || 5,
-      vibrationPattern: [0, 250, 250, 250, 250, 250],
-      lightColor: '#DC2626',
-      // CRITICAL FIX: alert_sound.mp3 dosyasi yok → 'default' OS alarmi kullanilir.
-      // Profesyonel alarm sesi (earthquake_alarm.wav) assets'e eklenince burayi guncellenmeli.
-      sound: 'default',
-      enableVibrate: true,
-      enableLights: true,
-      showBadge: true,
-      bypassDnd: true, // Bypass Do Not Disturb
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC ?? 1,
-      audioAttributes: {
-        usage: Notifications.AndroidAudioUsage?.ALARM ?? 4,
-        contentType: Notifications.AndroidAudioContentType?.SONIFICATION ?? 4,
-      },
-    });
-
-    // High priority channel
-    await Notifications.setNotificationChannelAsync('high-priority', {
-      name: 'Acil Bildirimler',
-      description: 'Aile mesajları, deprem haberleri, önemli güncellemeler.',
-      importance: Notifications.AndroidImportance?.HIGH || 4,
-      vibrationPattern: [0, 200, 200, 200],
-      lightColor: '#F97316',
-      sound: 'default',
-      enableVibrate: true,
-      enableLights: true,
-      showBadge: true,
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC ?? 1,
-    });
-
-    // Normal priority channel
-    await Notifications.setNotificationChannelAsync('normal-priority', {
-      name: 'Genel Bildirimler',
-      description: 'Genel uygulama bildirimleri.',
-      importance: Notifications.AndroidImportance?.DEFAULT || 3,
-      sound: 'default',
-      enableVibrate: true,
-      showBadge: false,
-    });
   }
 
   private async sendPushNotification(_options: AlertOptions, _settings: AlertSettingsSnapshot) {

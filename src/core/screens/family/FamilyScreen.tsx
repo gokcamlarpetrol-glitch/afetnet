@@ -808,6 +808,49 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
     }
   }, [members, showToast]);
 
+  const handleResendInvite = useCallback(async (member: FamilyMember) => {
+    if (!contactRequestService?.sendContactRequest) {
+      Alert.alert('Hata', 'Davet servisi yüklenemedi. Uygulamayı yeniden başlatın.');
+      return;
+    }
+
+    try {
+      const success = await contactRequestService.sendContactRequest(
+        member.uid,
+        member.uid,
+        'Aile daveti',
+      );
+      if (success) {
+        haptics.notificationSuccess?.();
+        showToast(`${member.name} için davet yeniden gönderildi`);
+      } else {
+        Alert.alert('Hata', 'Davet yeniden gönderilemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.');
+      }
+    } catch (error) {
+      logger.error('Failed to resend family invite:', error);
+      Alert.alert('Hata', 'Davet yeniden gönderilirken bir sorun oluştu.');
+    }
+  }, [showToast]);
+
+  const handleCancelInvite = useCallback((member: FamilyMember) => {
+    Alert.alert(
+      'Daveti İptal Et',
+      `${member.name} için bekleyen aile davetini iptal etmek istiyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'İptal Et',
+          style: 'destructive',
+          onPress: () => {
+            handleDeleteMember(member.uid).catch((error) => {
+              logger.error('Failed to cancel family invite:', error);
+            });
+          },
+        },
+      ],
+    );
+  }, [handleDeleteMember]);
+
   // ELITE: Pull-to-refresh — force=true bypasses isInitialized guard
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -855,6 +898,8 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
       }}
       onEdit={handleEditMember}
       onDelete={(memberId: string) => handleDeleteMember(memberId)}
+      onResendInvite={handleResendInvite}
+      onCancelInvite={handleCancelInvite}
       onMessage={(m: FamilyMember) => {
         haptics.impactLight();
         const conversationTargetId = getMemberConversationTargetId(m);
@@ -889,7 +934,7 @@ function FamilyScreenInner({ navigation }: FamilyScreenProps) {
         }
       }}
     />
-  ), [handleEditMember, handleDeleteMember, getMemberConversationTargetId, navigation]);
+  ), [handleEditMember, handleDeleteMember, handleResendInvite, handleCancelInvite, getMemberConversationTargetId, navigation]);
 
   const keyExtractor = useCallback((item: FamilyMember) => item.uid, []);
 

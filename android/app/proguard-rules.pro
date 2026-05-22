@@ -11,4 +11,19 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Add any project specific keep options here:
+# react-native-ble-plx — BLE JNI/reflection erişimi
+-keep class com.polidea.rxandroidble2.** { *; }
+-keep class com.polidea.rxandroidble2.internal.** { *; }
+-keepclassmembers class com.polidea.rxandroidble2.** { *; }
+
+# AfetNet özel BLE Peripheral modülü — Expo native modül reflection
+-keep class expo.modules.afetnetbleperipheral.** { *; }
+-keepclassmembers class expo.modules.afetnetbleperipheral.** { *; }
+
+# Firebase — FCM, Firestore, Auth, Analytics
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-keepclassmembers class com.google.firebase.** { *; }
+-keepclassmembers class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**

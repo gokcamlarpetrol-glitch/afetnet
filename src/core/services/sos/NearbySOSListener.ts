@@ -266,6 +266,18 @@ export function stopNearbySOSListener(): void {
     // IDs will be naturally evicted by the MAX_PROCESSED_IDS cap.
 }
 
+/**
+ * KRİTİK (görev #26): Logout / hesap değişiminde dedup setlerini temizle.
+ * processedBroadcastIds process-global ve stop sırasında bilinçli korunuyor;
+ * bunun çıkış yolunda temizlenmemesi B kullanıcısının bir SOS yayınını,
+ * A kullanıcısı aynı broadcastId'yi işlediği için sessizce düşürmesine yol
+ * açar. SOSAlertListener.clearSOSAlertDedup() ile birebir aynı amaç.
+ */
+export function clearNearbySOSDedup(): void {
+    processedBroadcastIds.clear();
+    alertedBroadcastIds.clear();
+}
+
 function toRad(value: number): number {
     return value * Math.PI / 180;
 }
@@ -434,6 +446,9 @@ async function showSOSCancelledNotification(data: any, signalId: string): Promis
 
         // Use 'system' category (not 'sos') to prevent triggering false SOS full-screen alert
         // for a CANCELLATION notification. Matches SOSAlertListener pattern.
+        // ADV: `as any` is intentional — NotifyDataMap['system'] is loosely typed
+        // for ad-hoc system notifications; tightening would force a tagged-union
+        // refactor across every notify() call site (low value vs effort).
         await notificationCenter.notify('system', {
             subtype: 'generic',
             title: `SOS İptal: ${senderName}`,

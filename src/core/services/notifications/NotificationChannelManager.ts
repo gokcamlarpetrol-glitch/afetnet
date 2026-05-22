@@ -21,6 +21,11 @@ export interface ChannelConfig {
   bypassDnd?: boolean;
   enableLights?: boolean;
   lightColor?: string;
+  // görev #27: Android alarm ses öznitelikleri — kritik EEW/deprem kanalları için.
+  // ALARM usage, sistem "alarm" ses akışında çalar (DND-bypass ile birlikte
+  // sessiz modda bile duyulur). Bunlar atlanırsa OS varsayılan "notification"
+  // ses akışını kullanır → kritik uyarı kısık/sessiz kalabilir.
+  useAlarmAudio?: boolean;
 }
 
 // ELITE: Predefined channels for AfetNet
@@ -35,6 +40,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     bypassDnd: true,
     enableLights: true,
     lightColor: '#FF0000',
+    useAlarmAudio: true, // görev #27: alarm ses akışı — sessiz modda bile duyulur
   },
   EEW_CRITICAL: {
     id: 'eew_critical',
@@ -46,6 +52,7 @@ export const NOTIFICATION_CHANNELS: Record<string, ChannelConfig> = {
     bypassDnd: true,
     enableLights: true,
     lightColor: '#FF0000',
+    useAlarmAudio: true, // görev #27: alarm ses akışı — sessiz modda bile duyulur
   },
   SOS_ALERTS: {
     id: 'sos_alerts',
@@ -135,6 +142,16 @@ export async function initializeChannels(): Promise<boolean> {
     // Create all channels
     const channelPromises = Object.values(NOTIFICATION_CHANNELS).map(async (config) => {
       try {
+        // görev #27: Kritik EEW/deprem kanalları için ALARM ses öznitelikleri.
+        // bypassDnd MAX importance ile birlikte alarm akışı kullanılınca uyarı
+        // sessiz modu da geçer (Japonya J-Alert deseni). useAlarmAudio yoksa
+        // audioAttributes undefined kalır ve OS varsayılan bildirim akışı geçerli.
+        const audioAttributes = config.useAlarmAudio
+          ? {
+              usage: Notifications.AndroidAudioUsage?.ALARM ?? 4,
+              contentType: Notifications.AndroidAudioContentType?.SONIFICATION ?? 4,
+            }
+          : undefined;
         await Notifications.setNotificationChannelAsync(config.id, {
           name: config.name,
           importance: getImportanceLevel(config.importance),
@@ -144,6 +161,7 @@ export async function initializeChannels(): Promise<boolean> {
           bypassDnd: config.bypassDnd,
           enableLights: config.enableLights,
           lightColor: config.lightColor,
+          ...(audioAttributes ? { audioAttributes } : {}),
         });
       } catch (channelError) {
         // ELITE: Individual channel failure is non-critical

@@ -118,30 +118,52 @@ class EEWService {
       // Register only once to avoid duplicate alerts after repeated start() calls.
       if (!this.seismicDetectionUnsubscribe) {
         this.seismicDetectionUnsubscribe = seismicSensorService.onDetection((event: any) => {
-          if (!event.pWaveDetected) {
+          // görev #27: Önceki kod `if (!event.pWaveDetected) return;` ile TÜM
+          // S-WAVE algılamalarını düşürüyordu — EEWService'in zengin dalga-hesabı
+          // (sWaveAlreadyArrived → "DEPREM BAŞLADI") yolu S-dalgasını hiç görmüyordu.
+          // OnDeviceEEWService zaten S-WAVE kabul ediyor. Hizalama: S-WAVE de kabul
+          // edilir ama OnDeviceEEWService'teki gibi DAHA YÜKSEK büyüklük eşiğiyle
+          // (S-dalga = sarsıntı başladı onayı; çıtayı düşürmemek için). Çift uyarı
+          // riski yok — notificationCenter sistemler-arası dedup uygular.
+          const isPWave = !!event.pWaveDetected;
+          const isSWave = !!event.sWaveDetected;
+          if (!isPWave && !isSWave) {
             return;
           }
 
           if (event.confidence < 60) {
             if (__DEV__) {
-              logger.debug(`P-wave detection confidence low: ${event.confidence}% < 60%`);
+              logger.debug(`Seismic detection confidence low: ${event.confidence}% < 60%`);
+            }
+            return;
+          }
+
+          // görev #27: S-WAVE için daha yüksek büyüklük geçidi — yalnızca güçlü
+          // sarsıntı onaylanır (OnDeviceEEWService P-WAVE 4.0 / S-WAVE ~6.0 deseni).
+          const estMag = event.estimatedMagnitude || 4.0;
+          if (isSWave && !isPWave && estMag < 5.0) {
+            if (__DEV__) {
+              logger.debug(`S-wave detection magnitude below S-WAVE gate: M${estMag.toFixed(1)} < 5.0`);
             }
             return;
           }
 
           // Prevent local sensor alert storms from duplicated detections.
+          // görev #27: cooldown hem P- hem S-dalgası için ortak — aynı depremin
+          // P→S geçişinde art arda iki uyarı çıkmasını da engeller.
           const now = Date.now();
           if (now - this.lastPWaveAlertAt < 5000) {
             if (__DEV__) {
-              logger.debug('P-wave alert throttled (5s cooldown)');
+              logger.debug('Seismic EEW alert throttled (5s cooldown)');
             }
             return;
           }
           this.lastPWaveAlertAt = now;
 
+          const waveLabel = isPWave ? 'P-wave' : 'S-wave';
           const timeAdvance = event.timeAdvance || 0;
           logger.info(
-            `🌊⚡ INSTANT EEW: P-wave detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`,
+            `🌊⚡ INSTANT EEW: ${waveLabel} detected! M${event.estimatedMagnitude?.toFixed(1) || '?'}, ${event.confidence}% confidence, ${timeAdvance}s warning`,
           );
 
           // Validate coordinates before processing — (0,0) or missing coords
@@ -151,16 +173,18 @@ class EEWService {
           if (!Number.isFinite(pLat) || !Number.isFinite(pLng) ||
               pLat === 0 || pLng === 0 ||
               pLat < -90 || pLat > 90 || pLng < -180 || pLng > 180) {
-            logger.warn('P-wave EEW skipped: invalid coordinates', { lat: pLat, lng: pLng });
+            logger.warn(`${waveLabel} EEW skipped: invalid coordinates`, { lat: pLat, lng: pLng });
           } else {
+            // görev #27: id/source dalga tipini yansıtır. S-WAVE id'sini P-WAVE
+            // id'siyle aynı tutmak seenEvents/dedup'ta yanlış çakışmaya yol açardı.
             this.processEEWEvent({
-              id: `pwave-${now}`,
+              id: `${isPWave ? 'pwave' : 'swave'}-${now}`,
               latitude: pLat,
               longitude: pLng,
-              magnitude: event.estimatedMagnitude || 4.0,
+              magnitude: estMag,
               depth: event.depth || 10,
               region: event.region || 'Yerel Algılama',
-              source: 'P_WAVE_DETECTION',
+              source: isPWave ? 'P_WAVE_DETECTION' : 'S_WAVE_DETECTION',
               issuedAt: now,
               etaSec: timeAdvance,
               certainty: event.confidence >= 80 ? 'high' : event.confidence >= 60 ? 'medium' : 'low',

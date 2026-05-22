@@ -31,8 +31,22 @@ import { getDeviceId } from '../utils/device';
 import { getFirebaseAuth } from '../../lib/firebase';
 import { isApprovedFamilyMember } from '../utils/familyApproval';
 
-const getSettingsKey = () => {
-    const uid = getFirebaseAuth()?.currentUser?.uid || 'anonymous';
+/**
+ * H9 (anonymous UID hardening): when no user is signed in, return null so
+ * callers fail-closed (sharing OFF) instead of reading/writing a shared
+ * 'anonymous' bucket. The previous fallback meant any logged-out activity
+ * could touch — or worse, leak — the previous owner's opt-in state.
+ *
+ * Behavior contract:
+ *   - signed in:   `@afetnet:health_sharing_enabled:${uid}` (per-UID, isolated)
+ *   - signed out:  null  →  isEnabled stays false, broadcast disabled
+ *
+ * On re-login the per-UID key is restored automatically, so a returning user
+ * sees their own previously-saved opt-in state. New users always start OFF.
+ */
+const getSettingsKey = (): string | null => {
+    const uid = getFirebaseAuth()?.currentUser?.uid;
+    if (!uid) return null;
     return `@afetnet:health_sharing_enabled:${uid}`;
 };
 
@@ -67,8 +81,10 @@ class EmergencyHealthSharingService {
      */
     async initialize(): Promise<void> {
         try {
-            // Load user preference
-            const enabled = DirectStorage.getString(getSettingsKey());
+            // H9: fail-closed — no UID = no sharing. Avoids cross-account leak
+            // through the legacy 'anonymous' bucket.
+            const settingsKey = getSettingsKey();
+            const enabled = settingsKey ? DirectStorage.getString(settingsKey) : null;
             this.isEnabled = enabled === 'true';
 
             // Get device ID
@@ -99,9 +115,16 @@ class EmergencyHealthSharingService {
      * Enable/disable health sharing
      */
     async setEnabled(enabled: boolean): Promise<void> {
+        // H9: if no UID, persist nothing — toggle remains in-memory only and
+        // resets on app restart. We never write to the anonymous bucket.
+        const settingsKey = getSettingsKey();
         this.isEnabled = enabled;
-        DirectStorage.setString(getSettingsKey(), enabled ? 'true' : 'false');
-        logger.info('Health sharing preference updated:', { enabled });
+        if (settingsKey) {
+            DirectStorage.setString(settingsKey, enabled ? 'true' : 'false');
+        } else {
+            logger.warn('Health sharing toggle requested without auth — in-memory only');
+        }
+        logger.info('Health sharing preference updated:', { enabled, persisted: !!settingsKey });
     }
 
     /**
@@ -340,20 +363,22 @@ class EmergencyHealthSharingService {
                 100 // High Q-Score for emergency
             );
 
-            // Prefer per-peer directed transport when available; otherwise
-            // emit once with recipientHint so receivers can self-filter.
+            // SECURITY (KVKK md.6 — özel nitelikli sağlık verisi): Sağlık paketi
+            // YALNIZCA yönlendirilmiş (directed) peer transport ile gönderilir.
+            // broadcastPacket fallback'i KALDIRILDI: broadcastPacket gated/recipientIds
+            // parametrelerini uygulamıyordu, bu yüzden sağlık verisi (kan grubu, alerji,
+            // ilaç) BLE menzilindeki TÜM cihazlara sızıyordu. Directed transport yoksa
+            // fail-closed davranır — hiç gönderme.
             const meshAny = this.meshService as {
                 sendToPeer?: (peerId: string, packet: Buffer) => Promise<void>;
-                broadcastPacket?: (packet: Buffer, opts?: Record<string, unknown>) => Promise<void>;
             };
-            if (typeof meshAny.sendToPeer === 'function') {
-                for (const peerId of authorisedPeerIds) {
-                    try { await meshAny.sendToPeer(peerId, packet); }
-                    catch (e) { if (__DEV__) logger.debug('Health directed-send peer failed', { peerId: peerId.slice(-6), e }); }
-                }
-            } else if (typeof meshAny.broadcastPacket === 'function') {
-                // Fallback: tag intended recipients so non-authorised devices drop the payload.
-                await meshAny.broadcastPacket(packet, { recipientIds: authorisedPeerIds, gated: true });
+            if (typeof meshAny.sendToPeer !== 'function') {
+                logger.warn('Health share: yönlendirilmiş peer transport yok — sağlık verisi gönderilmedi (fail-closed)');
+                return;
+            }
+            for (const peerId of authorisedPeerIds) {
+                try { await meshAny.sendToPeer(peerId, packet); }
+                catch (e) { if (__DEV__) logger.debug('Health directed-send peer failed', { peerId: peerId.slice(-6), e }); }
             }
 
             if (__DEV__) logger.debug('Health SOS packet sent to authorised peers', { count: authorisedPeerIds.length });

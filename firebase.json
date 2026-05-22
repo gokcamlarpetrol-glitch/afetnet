@@ -38,5 +38,17 @@
       "**/.*",
       "**/node_modules/**"
     ]
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "database": {
+      "port": 9000
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
   }
 }

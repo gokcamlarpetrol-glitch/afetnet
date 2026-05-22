@@ -288,26 +288,55 @@ export const tokenCleanup = functions
         }
 
         // V3: Also cleanup old push_tokens (same 90-day threshold)
+        // görev #30: Önceki kod collectionGroup('devices').limit(10000) ile TEK
+        // sorgu yapıp 10.000 belgeyi belleğe alıyordu — sayfalama yok, ölçekte
+        // hem bellek baskısı hem 10.000'de sessiz kesilme. Artık `lastUpdated`
+        // üzerine orderBy + startAfter imleciyle SAYFALI taranır; her sayfa
+        // hemen silinir (bellek-güvenli). collectionGroup tüm `devices`
+        // alt-koleksiyonlarını eşler — push_tokens dışı (fcm_tokens/devices)
+        // belgeler JS tarafında elenir; bunlar zaten yukarıda temizlendi.
         let v3DeletedCount = 0;
         try {
-            const oldV3Tokens = await db
-                .collectionGroup('devices')
-                .where('lastUpdated', '<', ninetyDaysAgo)
-                .limit(10000)
-                .get();
+            const V3_PAGE_SIZE = 1000;
+            const V3_MAX_PAGES = 500; // 500 × 1000 = 500k belge tavanı (kaçak tarama koruması)
+            let v3LastDoc: admin.firestore.QueryDocumentSnapshot | null = null;
+            let v3Pages = 0;
 
-            // Filter to only push_tokens subcollections (not fcm_tokens/devices)
-            const v3Docs = oldV3Tokens.docs.filter(d => {
-                const parentId = d.ref.parent.parent?.parent?.id;
-                return parentId === 'push_tokens';
-            });
+            while (v3Pages < V3_MAX_PAGES) {
+                let pageQuery = db
+                    .collectionGroup('devices')
+                    .where('lastUpdated', '<', ninetyDaysAgo)
+                    .orderBy('lastUpdated', 'asc')
+                    .limit(V3_PAGE_SIZE);
+                if (v3LastDoc) {
+                    pageQuery = pageQuery.startAfter(v3LastDoc);
+                }
+                const pageSnap = await pageQuery.get();
+                if (pageSnap.empty) break;
 
-            for (let i = 0; i < v3Docs.length; i += BATCH_SIZE) {
-                const chunk = v3Docs.slice(i, i + BATCH_SIZE);
-                const v3Batch = db.batch();
-                chunk.forEach(d => v3Batch.delete(d.ref));
-                await v3Batch.commit();
-                v3DeletedCount += chunk.length;
+                // Filter to only push_tokens subcollections (not fcm_tokens/devices)
+                const v3Docs = pageSnap.docs.filter(d => {
+                    const parentId = d.ref.parent.parent?.parent?.id;
+                    return parentId === 'push_tokens';
+                });
+
+                for (let i = 0; i < v3Docs.length; i += BATCH_SIZE) {
+                    const chunk = v3Docs.slice(i, i + BATCH_SIZE);
+                    const v3Batch = db.batch();
+                    chunk.forEach(d => v3Batch.delete(d.ref));
+                    await v3Batch.commit();
+                    v3DeletedCount += chunk.length;
+                }
+
+                v3Pages++;
+                v3LastDoc = pageSnap.docs[pageSnap.docs.length - 1] ?? null;
+                if (pageSnap.docs.length < V3_PAGE_SIZE) break;
+            }
+
+            if (v3Pages >= V3_MAX_PAGES) {
+                functions.logger.warn(
+                    `tokenCleanup: V3 sayfalama tavanı (${V3_MAX_PAGES}) — kalan eski token'lar bir sonraki çalıştırmada temizlenecek.`,
+                );
             }
         } catch (v3Err) {
             functions.logger.warn('V3 push_tokens cleanup error (non-critical):', v3Err);
@@ -812,7 +841,9 @@ export const sendCustomEmail = functions
                 success: true,
             });
 
-            functions.logger.info(`📧 Premium email sent: ${type} to ${email} (uid: ${uid})`);
+            // görev #30: PII (e-posta adresi) CF logundan çıkarıldı — KVKK.
+            // type + uid teşhis için yeterli; e-posta adresi loglanmaz.
+            functions.logger.info(`📧 Premium email sent: type=${type} (uid: ${uid})`);
 
             return { success: true, message: 'E-posta başarıyla gönderildi.' };
         } catch (error) {
@@ -1041,28 +1072,54 @@ export const subscribeToTopics = functions
 
 export const locationHistoryCleanup = functions
     .region(REGION)
+    .runWith({ timeoutSeconds: 300, memory: '256MB' })
     .pubsub.schedule('every day 02:00')
     .timeZone('Europe/Istanbul')
     .onRun(async () => {
         const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
 
-        // Query old location history points across all users
+        // görev #30: Önceki kod tek `.limit(500)` ile günde bir kez 500 nokta
+        // siliyordu — toplam eski-nokta birikimi 500/gün hızından büyürse
+        // backlog asla kapanmaz (KVKK 90 gün saklama ihlali). Artık sorgu+silme
+        // koleksiyon boşalana kadar DÖNGÜYLE çalışır; fonksiyon timeout'u (300s)
+        // ile sınırlı, MAX_BATCHES tavanı kaçak taramaya karşı koruma sağlar.
         const pointsRef = db.collectionGroup('points');
-        const oldPoints = await pointsRef
-            .where('timestamp', '<', ninetyDaysAgo)
-            .limit(500)
-            .get();
+        const PAGE_SIZE = 500;
+        const MAX_BATCHES = 400; // 400 × 500 = 200k nokta/çalıştırma tavanı
+        let totalDeleted = 0;
+        let batchCount = 0;
 
-        if (oldPoints.empty) {
+        while (batchCount < MAX_BATCHES) {
+            // Her sorgu en eski 500 noktayı çeker; silinince bir sonraki sorgu
+            // kalan en eskileri getirir — imleç gerekmez (silinenler düşer).
+            const oldPoints = await pointsRef
+                .where('timestamp', '<', ninetyDaysAgo)
+                .limit(PAGE_SIZE)
+                .get();
+
+            if (oldPoints.empty) break;
+
+            const batch = db.batch();
+            oldPoints.docs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+
+            totalDeleted += oldPoints.size;
+            batchCount++;
+            if (oldPoints.size < PAGE_SIZE) break;
+        }
+
+        if (batchCount >= MAX_BATCHES) {
+            functions.logger.warn(
+                `locationHistoryCleanup: MAX_BATCHES (${MAX_BATCHES}) tavanına ulaşıldı — kalan eski noktalar bir sonraki çalıştırmada silinecek.`,
+            );
+        }
+
+        if (totalDeleted === 0) {
             functions.logger.info('locationHistoryCleanup: No old points found');
             return null;
         }
 
-        const batch = db.batch();
-        oldPoints.docs.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-
-        functions.logger.info(`locationHistoryCleanup: Deleted ${oldPoints.size} old location points`);
+        functions.logger.info(`locationHistoryCleanup: Deleted ${totalDeleted} old location points`);
         return null;
     });
 

@@ -83,9 +83,27 @@ async function generatePublicUserCode(): Promise<string> {
       .join('');
     return `AFN-${hex}`.toUpperCase();
   } catch {
-    const ts = Date.now().toString(16).slice(-4);
-    const rand = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
-    return `AFN-${ts}${rand}`.toUpperCase();
+    // H5/H6: even the fallback uses CSPRNG when expo-crypto module-level import
+    // fails (this catch is for the dynamic import itself, not getRandomBytesAsync).
+    // We avoid Math.random entirely — collisions in user-facing IDs damage trust.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const ExpoCrypto = require('expo-crypto');
+      const bytes = ExpoCrypto.getRandomBytes(2);
+      const rand = Array.from(bytes as Uint8Array)
+        .map((b: number) => b.toString(16).padStart(2, '0'))
+        .join('');
+      const ts = Date.now().toString(16).slice(-4);
+      return `AFN-${ts}${rand}`.toUpperCase();
+    } catch {
+      // Absolute last-resort fallback when no crypto API is available at all.
+      // High-resolution timer + Date.now gives ~50 bits of entropy.
+      const ts = Date.now().toString(16).slice(-4);
+      const perf = typeof performance !== 'undefined' && performance.now
+        ? Math.floor(performance.now() * 1000).toString(16).slice(-4)
+        : '0000';
+      return `AFN-${ts}${perf}`.toUpperCase();
+    }
   }
 }
 

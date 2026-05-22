@@ -1,7 +1,7 @@
 /**
  * MESSAGE SANITIZER - ELITE EDITION
  * Content sanitization for safe message rendering
- * 
+ *
  * Features:
  * - Unicode normalization
  * - Control character removal
@@ -11,14 +11,35 @@
  * - Link detection & validation
  */
 
-// ELITE: Unicode control characters to remove
-const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g;
+// ELITE: Unicode control characters to remove.
+//
+// M4 (multiline preservation): the previous range U+0000..U+001F stripped
+// EVERY C0 control char including \t (U+0009), \n (U+000A), and \r (U+000D).
+// That broke any user-typed multi-line message into a single line.
+// We now exclude \t, \n, \r by splitting the C0 range into three sub-ranges:
+//   U+0000..U+0008  (NUL .. BS)
+//   U+000B..U+000C  (VT, FF)
+//   U+000E..U+001F  (SO .. US)
+// while still scrubbing C1 (U+007F..U+009F), zero-width markers
+// (U+200B..U+200D), and the BOM (U+FEFF). Built via RegExp constructor with
+// escape sequences so the source file contains zero literal control bytes
+// (avoids editor / transpiler corruption).
+const CONTROL_CHARS = new RegExp(
+    '[\\u0000-\\u0008\\u000B-\\u000C\\u000E-\\u001F\\u007F-\\u009F\\u200B-\\u200D\\uFEFF]',
+    'g',
+);
 
 // ELITE: Zero-width characters that can be used for tracking
-const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
+const ZERO_WIDTH_CHARS = new RegExp(
+    '[\\u200B\\u200C\\u200D\\u2060\\uFEFF]',
+    'g',
+);
 
-// ELITE: Dangerous or confusing unicode
-const DANGEROUS_UNICODE = /[\u202A-\u202E\u2066-\u2069]/g; // Bidirectional override chars
+// ELITE: Dangerous or confusing unicode (Bidirectional override chars)
+const DANGEROUS_UNICODE = new RegExp(
+    '[\\u202A-\\u202E\\u2066-\\u2069]',
+    'g',
+);
 
 // ELITE: Max message length
 const MAX_MESSAGE_LENGTH = 10000;
@@ -39,7 +60,7 @@ export function sanitizeMessage(content: string): string {
         // Fallback if normalization fails
     }
 
-    // 2. Remove control characters
+    // 2. Remove control characters (preserves \t \n \r — see CONTROL_CHARS comment)
     sanitized = sanitized.replace(CONTROL_CHARS, '');
 
     // 3. Remove zero-width characters (can be used for tracking)
@@ -127,14 +148,16 @@ export function containsSuspiciousContent(content: string): {
     }
 
     // Check for homograph attacks (mixed scripts)
-    const hasCyrillic = /[\u0400-\u04FF]/.test(content);
+    const cyrillicRange = new RegExp('[\\u0400-\\u04FF]');
+    const hasCyrillic = cyrillicRange.test(content);
     const hasLatin = /[a-zA-Z]/.test(content);
     if (hasCyrillic && hasLatin) {
         reasons.push('Mixed Cyrillic and Latin characters');
     }
 
     // Check for invisible characters
-    const invisibleCount = (content.match(/[\u200B-\u200D\uFEFF\u2060]/g) || []).length;
+    const invisiblePattern = new RegExp('[\\u200B-\\u200D\\uFEFF\\u2060]', 'g');
+    const invisibleCount = (content.match(invisiblePattern) || []).length;
     if (invisibleCount > 5) {
         reasons.push('Excessive invisible characters');
     }

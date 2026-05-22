@@ -1105,9 +1105,23 @@ async function createCrowdsourcedAlert(consensus: PWaveConsensus): Promise<void>
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Send push if confidence is high enough
+    // Send push if confidence is high enough.
+    // görev #30: İki katmanlı tasarım — CONSENSUS_THRESHOLD (3) konsensüsü TESPİT
+    // eder ve eew_events + eew_consensus belgelerini yazar; ancak kullanıcıya push
+    // YALNIZCA daha sıkı eşik (5 cihaz + %85 güven) sağlanınca atılır. 3-4 cihazlık
+    // konsensüste belge yazılıp push atılmaması SESSİZ bir kısmi durumdu — operatör
+    // "belge var ama kimse uyarılmadı" durumunu logdan göremiyordu. Artık push
+    // atlanan dal açıkça loglanır (Cloud Monitoring bu olayı izleyebilir).
     if (consensus.avgConfidence >= 85 && consensus.detectionCount >= 5) {
         await sendEEWPushWithRetry(event);
+    } else {
+        functions.logger.warn('crowdsourced_consensus_no_push', {
+            event_type: 'crowdsourced_consensus_no_push',
+            reason: 'Konsensüs tespit edildi ve belgeler yazıldı, ancak push eşiği (5 cihaz + %85 güven) karşılanmadı',
+            eventId: event.id,
+            detectionCount: consensus.detectionCount,
+            avgConfidence: Math.round(consensus.avgConfidence),
+        });
     }
 }
 
@@ -1333,6 +1347,15 @@ export const eewEmergencyTrigger = functions
             return;
         }
 
+        // görev #30: Method kontrolü API-key doğrulamasından ÖNCE yapılır. Önceki
+        // sırada yanlış-anahtarlı GET → 403, doğru-anahtarlı GET → 405 dönüyordu;
+        // bu fark bir oracle (saldırgan anahtar geçerliliğini method değiştirerek
+        // ölçebilirdi). Method önce reddedilince GET her durumda 405 döner.
+        if (req.method !== 'POST') {
+            res.status(405).json({ error: 'POST only' });
+            return;
+        }
+
         // Verify API key - ELITE SECURITY: No fallback, environment variable REQUIRED
         const apiKey = req.headers['x-api-key'];
         const validKey = process.env.EEW_API_KEY;
@@ -1354,20 +1377,19 @@ export const eewEmergencyTrigger = functions
             return;
         }
 
-        if (req.method !== 'POST') {
-            res.status(405).json({ error: 'POST only' });
-            return;
-        }
-
         try {
-            // Force immediate fetch from all sources
-            const [afadEvents, kandilliEvents, usgsEvents] = await Promise.all([
+            // görev #30: Force immediate fetch from ALL FOUR sources (EMSC dahil).
+            // Önceki kod EMSC'yi atlıyordu — hızlı monitör 4 kaynağı da kullanır,
+            // emergency trigger ise yalnızca 3 kaynak sorgulayıp EMSC-only bir
+            // olayı (örn. Türkiye sınırındaki bir deprem) tamamen kaçırabilirdi.
+            const [afadEvents, kandilliEvents, usgsEvents, emscEvents] = await Promise.all([
                 fetchAFADEvents(),
                 fetchKandilliEvents(),
                 fetchUSGSEvents(),
+                fetchEMSCEvents(),
             ]);
 
-            const allEvents = [...afadEvents, ...kandilliEvents, ...usgsEvents];
+            const allEvents = [...afadEvents, ...kandilliEvents, ...usgsEvents, ...emscEvents];
             let sentCount = 0;
 
             for (const event of allEvents) {
@@ -1415,6 +1437,7 @@ export const eewEmergencyTrigger = functions
                     afad: afadEvents.length,
                     kandilli: kandilliEvents.length,
                     usgs: usgsEvents.length,
+                    emsc: emscEvents.length,
                 }
             });
         } catch (error) {
@@ -1458,10 +1481,17 @@ export const onPWaveDetection = functions
                 .filter(d => Math.abs(d.longitude - detection.longitude) <= 1);
 
             // SECURITY FIX: Deduplicate by userId to prevent Sybil attacks
-            // Each unique user can only contribute one detection to consensus
+            // Each unique user can only contribute one detection to consensus.
+            // görev #30: deviceId fallback KALDIRILDI. userId yoksa `|| d.deviceId`
+            // ile cihaz-başına anahtara düşmek Sybil korumasını bozuyordu — tek
+            // saldırgan birden çok deviceId üretip konsensüsü şişirebilirdi.
+            // userId yoksa tespit konsensüse hiç dahil edilmez (doğrulanmamış kimlik).
             const uniqueUserDetections = new Map<string, typeof detections[0]>();
             for (const d of detections) {
-                const userId = d.userId || d.deviceId;
+                const userId = typeof d.userId === 'string' && d.userId.length > 0
+                    ? d.userId
+                    : null;
+                if (!userId) continue; // userId yok → konsensüs dışı
                 if (!uniqueUserDetections.has(userId)) {
                     uniqueUserDetections.set(userId, d);
                 }

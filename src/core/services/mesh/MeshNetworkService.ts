@@ -450,6 +450,13 @@ class MeshNetworkService {
     // M1: Clear all timers
     this.clearAllTimers();
 
+    // görev #28 (madde 4): store-forward teslimat throttle haritasını temizle.
+    // Eskiden yalnızca destroy()'da temizleniyordu; stop/start döngüsünde bayat
+    // peerId damgaları kalıyor ve yeniden start sonrası ilk re-discovery'de
+    // teslimat kontrolü gereksiz yere 10s atlanabiliyordu. peerId'ler stop ile
+    // anlamsızlaştığından stop()'ta sıfırlamak doğru.
+    this.lastDeliveryCheckAt.clear();
+
     // Stop BLE
     await this.stopRealBLE();
     this.stopSimulation();
@@ -1537,18 +1544,91 @@ class MeshNetworkService {
     if (this.normalQueue.length > MAX_QUEUE_SIZE) this.normalQueue.splice(0, this.normalQueue.length - MAX_QUEUE_SIZE);
     if (this.highQueue.length > MAX_QUEUE_SIZE) this.highQueue.splice(0, this.highQueue.length - MAX_QUEUE_SIZE);
     // CRITICAL QUEUE: Protect original SOS messages (the initial distress call is most important).
-    // Instead of dropping oldest (splice from 0), drop the NEWEST entries first — the original
-    // SOS at the front of the queue is the one that MUST be delivered. Higher cap (1000) because
-    // SOS messages are life-critical and should rarely be trimmed.
+    // The original SOS at the FRONT of the queue must be delivered → keep oldest.
+    // görev #28 (madde 2): Eski kod cap aşılınca splice(1000) ile EN YENİ kayıtları
+    // düşürüyordu. SOS_BEACON paketlerinde en yeni olan en güncel konum/pil bilgisini
+    // taşır — en yeniyi atmak istenen politikayı tersine çevirir. Çözüm: cap'ten ÖNCE
+    // SOS_BEACON paketlerini signalId'ye göre coalesce et (her signalId için yalnız
+    // en yeni beacon kalır); böylece bayat beacon'lar atılır, ilk SOS ve güncel
+    // beacon'lar korunur. Şifreli ({_enc}) beacon'lar signalId okunamadığı için
+    // coalesce edilmez (mevcut davranış). Coalesce sonrası hâlâ cap aşılıyorsa
+    // baştan değil — sondaki (en yeni) tekrarlar atılır; ilk SOS pozisyon 0'da kalır.
     const CRITICAL_MAX_QUEUE_SIZE = 1000;
     if (this.criticalQueue.length > CRITICAL_MAX_QUEUE_SIZE) {
-      // Keep the first CRITICAL_MAX_QUEUE_SIZE entries (oldest = most important)
-      // Drop from the end (newest duplicates/beacons)
-      this.criticalQueue.splice(CRITICAL_MAX_QUEUE_SIZE);
+      this.coalesceSosBeacons();
+      if (this.criticalQueue.length > CRITICAL_MAX_QUEUE_SIZE) {
+        this.criticalQueue.splice(CRITICAL_MAX_QUEUE_SIZE);
+      }
     }
 
     // Save queues after processing
     await this.saveQueues();
+  }
+
+  /**
+   * görev #28 (madde 2): criticalQueue cap'i aşıldığında, kör splice ile en yeni
+   * beacon'ları atmadan ÖNCE çağrılır. SOS_BEACON paketlerini signalId'ye göre
+   * coalesce eder — her signalId için yalnız en yeni (en güncel konum/pil)
+   * beacon kalır, bayat tekrarlar atılır. Orijinal SOS / SOS_CANCEL gibi beacon
+   * olmayan paketler ile şifreli ({_enc}) beacon'lar (signalId okunamadığı için)
+   * korunur. Sıra korunduğu için ilk SOS pozisyon 0'da kalır.
+   */
+  private coalesceSosBeacons(): void {
+    // Tek geçişte her paketin signalId'sini çıkar (beacon değil/şifreli → null).
+    const signalIds: (string | null)[] = this.criticalQueue.map((pkt) =>
+      this.extractBeaconSignalId(pkt),
+    );
+    // Her signalId için en yeni enqueuedAt damgasını bul.
+    const newestBySignalId = new Map<string, number>();
+    this.criticalQueue.forEach((pkt, i) => {
+      const signalId = signalIds[i] ?? null;
+      if (signalId === null) return;
+      const prev = newestBySignalId.get(signalId);
+      if (prev === undefined || pkt.enqueuedAt > prev) {
+        newestBySignalId.set(signalId, pkt.enqueuedAt);
+      }
+    });
+    if (newestBySignalId.size === 0) return; // coalesce edilecek beacon yok
+
+    // Beacon olmayanları + her signalId'nin en yeni beacon'ını tut.
+    const keptSignalIds = new Set<string>();
+    const before = this.criticalQueue.length;
+    this.criticalQueue = this.criticalQueue.filter((pkt, i) => {
+      const signalId = signalIds[i] ?? null;
+      if (signalId === null) return true; // beacon değil ya da şifreli → koru
+      if (
+        pkt.enqueuedAt === newestBySignalId.get(signalId) &&
+        !keptSignalIds.has(signalId)
+      ) {
+        keptSignalIds.add(signalId);
+        return true; // bu signalId'nin en yeni beacon'ı
+      }
+      return false; // bayat tekrar → at
+    });
+    const dropped = before - this.criticalQueue.length;
+    if (dropped > 0) {
+      logger.debug(`coalesceSosBeacons: ${dropped} bayat SOS_BEACON atıldı`);
+    }
+  }
+
+  /**
+   * Bir kuyruk paketinin düz-metin SOS_BEACON'ı olup olmadığını belirler ve
+   * signalId'sini döndürür. Beacon değilse, şifreliyse ({_enc}) veya parse
+   * edilemiyorsa null döner — bu paketler coalesce edilmeden korunur.
+   */
+  private extractBeaconSignalId(pkt: PendingMeshPacket): string | null {
+    try {
+      const json = Buffer.from(pkt.payloadBase64, 'base64').toString('utf8');
+      const parsed: unknown = JSON.parse(json);
+      if (typeof parsed !== 'object' || parsed === null) return null;
+      const obj = parsed as Record<string, unknown>;
+      if ('_enc' in obj) return null; // şifreli → signalId okunamaz
+      if (obj['type'] !== 'SOS_BEACON') return null;
+      const signalId = obj['signalId'];
+      return typeof signalId === 'string' && signalId.length > 0 ? signalId : null;
+    } catch {
+      return null; // parse edilemeyen → coalesce etme, koru
+    }
   }
 
   // ===========================================================================
@@ -1901,6 +1981,14 @@ class MeshNetworkService {
         }
       }
 
+      // görev #28 (madde 5): Strateji 1 (writeToCharacteristic) GERÇEK bir teslimat
+      // sinyali döndürür (GATT write tamamlandı = boolean). Strateji 2'nin
+      // notifyGATTClients çağrısı ise fire-and-forget — native köprü void döndürür,
+      // teslimat sinyali yok. ACK gerektiren tipler (TEXT/SOS/MEDIA_END/FAMILY_SEARCH)
+      // için "gerçek" tamamlanma sinyali ACK round-trip'idir.
+      const strategy1Succeeded = sentToAny;
+      const ackRequired = MeshProtocol.requiresACK(packet.type);
+
       // === STRATEGY 2: Notify connected GATT clients via server notification ===
       // Send to inbound GATT clients (devices that connected to OUR GATT server).
       // These clients may NOT be in our outbound connectedPeers list — they connected
@@ -1909,10 +1997,22 @@ class MeshNetworkService {
       // have established mutual outbound GATT connections.
       const gattClientCount = highPerformanceBle.getGATTServerClientCount();
       if (gattClientCount > 0) {
+        // görev #28 (madde 5): Strateji 2 TEK BAŞINA — ACK gerektiren tipler için —
+        // sentToAny=true yapmamalı. notifyCharacteristic teslimat onayı vermez;
+        // eskiden gattClientCount>0 olduğu için körlemesine başarı sayılıyordu.
+        // Bu, paketi kuyruktan kalıcı silerdi (broadcastPacket true → shift) ve
+        // hiçbir ACK gelmediğinde — getMessagesNeedingRetry'ı çağıran bir döngü
+        // OLMADIĞINDAN — mesaj sessizce kaybolurdu (kaybolan SOS!). Düzeltme:
+        // bildirim yine gönderilir (inbound-only client'lara ulaşım için), ancak
+        // ACK gerektiren tipte Strateji 1 de başarısızsa sentToAny=true yapılmaz —
+        // paket 5s deferred-retry ile onaylanabilir bir kanal (Strateji 1 / reklam)
+        // çalışana dek kuyrukta kalır. ACK gerektirmeyen tipler (STATUS/LOCATION/PING)
+        // eski davranışı korur — onlar için onay beklenmez.
+        const strategy2MayConfirm = !ackRequired || strategy1Succeeded;
         if (serialized.length <= MAX_CHUNK_SIZE) {
           // Small payload — fits in a single GATT notification
           highPerformanceBle.notifyGATTClients(charUUID, serialized);
-          sentToAny = true;
+          if (strategy2MayConfirm) sentToAny = true;
         } else {
           // CRITICAL FIX: Large payloads were previously SKIPPED for Strategy 2,
           // meaning inbound-only GATT clients NEVER received chat messages.
@@ -1925,8 +2025,8 @@ class MeshNetworkService {
             for (const chunkPkt of chunkPackets) {
               highPerformanceBle.notifyGATTClients(charUUID, chunkPkt);
             }
-            sentToAny = true;
-            logger.debug(`Strategy 2: sent ${chunkPackets.length} chunks to ${gattClientCount} GATT clients`);
+            if (strategy2MayConfirm) sentToAny = true;
+            logger.debug(`Strategy 2: sent ${chunkPackets.length} chunks to ${gattClientCount} GATT clients (confirm=${strategy2MayConfirm})`);
           }
         }
       }
@@ -2369,10 +2469,38 @@ class MeshNetworkService {
     }
   };
 
+  /**
+   * görev #28 (madde 1): Dedup anahtarı için orijinal UUID'yi tercih et.
+   * transportMsgId `sourceId:messageId` biçiminde ve her iki parça da 32-bit
+   * djb2 hash — iki ayrı gerçek UUID hash-collision yaparsa, ikinci paket
+   * (ayrı bir SOS) sessizce "duplicate" diye düşürülür. Payload düz-metin
+   * zarf ise (`{ "id": "<uuid>", ... }`) zarftaki gerçek UUID string'i çıkar;
+   * dedup'ı `sourceId:<uuid>` üzerinde yap. Şifreli ({_enc}) payload'larda zarf
+   * okunamadığı için 32-bit transport hash'ine geri düşülür (mevcut davranış).
+   */
+  private extractEnvelopeId(payload: Buffer): string | null {
+    try {
+      const parsed = JSON.parse(payload.toString('utf8'));
+      if (parsed && typeof parsed === 'object') {
+        const rawId: unknown = (parsed as { id?: unknown }).id;
+        if (typeof rawId === 'string' && rawId.trim().length > 0) {
+          return rawId.trim();
+        }
+      }
+    } catch {
+      // Düz-metin / şifreli payload — zarf id yok
+    }
+    return null;
+  }
+
   private async processIncomingPacket(packet: MeshPacket, rssi: number): Promise<void> {
     // Deduplication - checkAndAdd returns true if ID was NEW (added), false if duplicate
     // Skip if duplicate (checkAndAdd returns false when ID already existed)
-    const transportMsgId = `${packet.header.sourceId}:${packet.header.messageId}`;
+    // görev #28 (madde 1): 32-bit messageId hash yerine — varsa — zarftaki
+    // orijinal UUID string'i kullan. Bu, hash-collision eden iki farklı SOS'un
+    // birbirini "duplicate" diye sessizce düşürmesini engeller.
+    const envelopeId = this.extractEnvelopeId(packet.payload);
+    const transportMsgId = `${packet.header.sourceId}:${envelopeId ?? packet.header.messageId}`;
     if (!this.seenMessageIds.checkAndAdd(transportMsgId)) {
       // This is correct! If checkAndAdd returns false, it was already seen
       return;
@@ -2420,6 +2548,12 @@ class MeshNetworkService {
       const rawPayloadStr = packet.payload.toString('utf8');
       let decryptedContent: string = rawPayloadStr;
       let incomingIsEncrypted = false; // true only if we successfully decrypted an encrypted payload
+      // görev #28 (madde 6): Payload bir {_enc} zarfı olup bu hop'ta ÇÖZÜLEMEDİYSE
+      // true olur. Ara relay düğümü şifre çözemez (paylaşılan anahtar yok / hedef
+      // değil) — bu durumda ciphertext'i "şifre çözülemedi metni" gibi sohbete
+      // RENDER ETMEMELİDİR. Bayrak true ise aşağıda render bastırılır, paket yalnız
+      // relay edilir.
+      let undecryptableEnc = false;
 
       try {
         const maybeParsed = JSON.parse(rawPayloadStr);
@@ -2437,9 +2571,8 @@ class MeshNetworkService {
               logger.debug('Message decrypted (broadcast)');
             } else {
               logger.warn('Broadcast decryption failed, treating as opaque payload');
-              // Cannot recover — the original plaintext is not available
-              // Still set decryptedContent to rawPayloadStr so the envelope parsing
-              // below treats it as an unparseable payload rather than crashing
+              // görev #28 (madde 6): Çözülemeyen şifreli payload — sohbete render etme.
+              undecryptableEnc = true;
             }
           } else if (maybeParsed._enc === ENC_PEER && maybeParsed.ep && typeof maybeParsed.ep === 'object') {
             // Peer-to-peer encryption: requires shared secret from key exchange
@@ -2454,6 +2587,9 @@ class MeshNetworkService {
               logger.debug(`Message decrypted (peer-to-peer) from ${epSenderId.slice(0, 8)}`);
             } else {
               logger.warn('Peer decryption failed (no shared secret or tampered), treating as opaque payload');
+              // görev #28 (madde 6): Ara hop hedef değil — ciphertext'i render etme,
+              // yalnız relay et.
+              undecryptableEnc = true;
             }
           } else {
             // Unknown encryption version — treat as plaintext (forward compatibility)
@@ -2463,6 +2599,18 @@ class MeshNetworkService {
         // else: no _enc marker — plaintext message (backward compatibility or sender's _unencrypted flag)
       } catch {
         // JSON parse failed — payload is raw plaintext (legacy), use as-is
+      }
+
+      // görev #28 (madde 6): Çözülemeyen şifreli payload bir ara relay hop'undadır
+      // (hedef düğüm olsaydık şifreyi çözebilirdik). Ciphertext'i sohbete RENDER
+      // ETME — yalnızca TTL varsa relay et ve dön. Eskiden ciphertext JSON'u
+      // envelope-parse'tan geçip `content` olarak sohbete düşüyordu ("şifre çözülemedi"
+      // metni gibi görünen anlamsız şifreli metin).
+      if (undecryptableEnc) {
+        if (packet.header.ttl > 0) {
+          this.relayPacket(packet).catch(e => logger.warn('Encrypted relay failed:', e));
+        }
+        return;
       }
 
       const rawContent = sanitizeMessage(decryptedContent);

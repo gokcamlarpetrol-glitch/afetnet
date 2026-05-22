@@ -9,6 +9,31 @@ Manuel smoke testleri. `npm run preflight` geçmeden bu checklist'e geçme.
 - [ ] `npm test` → tüm testler yeşil
 - [ ] `npm run preflight` → exit 0 (versiyon senkron + flag check)
 
+## Firestore Indexes (deploy gate)
+
+M7: indexes.json'da TÜM composite indeksler var olmalı. Deploy öncesi:
+
+```bash
+# Indeksleri review et
+cat firestore.indexes.json | jq '.indexes[] | .collectionGroup'
+
+# Deploy (yeni indeks varsa kullanıcılar için bekleme süresi olur)
+firebase deploy --only firestore:indexes --project afetnet
+
+# Status check
+gcloud firestore indexes composite list --project=afetnet --filter='state!=READY'
+```
+
+Yeni bir CF eklerken `.where()` chain'i 2+ alan kullanıyorsa MUTLAKA bir composite indeks ekle. Eksik indeks `FAILED_PRECONDITION` hatasıyla CF'yi crash ettirir.
+
+Mevcut kritik indeksler (deploy edilmiş olmalı):
+- `eew_pwave_detections` (timestamp + latitude) — `nearbyDetections` query'si için (eew.ts:1321)
+- `messages` (conversationId + timestamp) — conversation listele
+- `messages` (type + senderUid + timestamp) — typing/special message filter
+- `eew_broadcasts` (isActive + broadcastAt) — aktif EEW listele
+- `email_logs` (uid + timestamp) — kullanıcı aktivite logu
+- `feedback` (uid + createdAt), (type + createdAt) — admin panel
+
 ## Cihaz smoke testleri (iOS — gerçek cihaz)
 
 ### Onboarding
@@ -83,15 +108,24 @@ Aynı senaryolar Android cihazda tekrarlanır. Özellikle:
 - [ ] Screenshot setinde "Sesli Komutlar" görünmüyor (P0-5)
 - [ ] Description metninde "voice command" claim'i yok
 - [ ] Critical Alerts capability requested form gönderilmiş (Apple Developer)
-- [ ] What's New (1.6.2): hangi P0 fix'lerin kapsanı
+- [ ] What's New (1.6.3): hangi P0 fix'lerin kapsandığı yazıldı
 
 ## Tag + commit
 
-- [ ] `git tag v1.6.2`
+- [ ] `git tag v1.6.3`
 - [ ] `git push origin main --tags`
-- [ ] EAS build başlat: `npm run ios:release`
-- [ ] TestFlight upload otomatik olur (eas submit -p ios)
+- [ ] EAS build (iOS): `eas build -p ios --profile production`
+- [ ] EAS build (Android): `eas build -p android --profile production`
+- [ ] TestFlight upload: `eas submit -p ios --profile production`
+- [ ] Play Console internal: `eas submit -p android --profile production`
 - [ ] Cihaza yeni binary indir, smoke checklist'i baştan çalıştır
+
+## Staged rollout
+
+- [ ] iOS: App Store Connect → sürümü "Phased Release for Automatic Updates" ile yayınla (%1 → %100, 7 gün)
+- [ ] Android: Play Console → Production track'e %10 ile başla, kademeli artır
+- [ ] Her aşamada crash-free oranı > %99.5 olmadan sonraki aşamaya geçme
+- [ ] Bozulma görülürse: iOS phased release'i duraklat / Android "halt rollout"
 
 ---
 

@@ -23,6 +23,7 @@
 import { createLogger } from '../utils/logger';
 import { useEEWHistoryStore, EEWHistoryEvent } from '../stores/eewHistoryStore';
 import { formatTurkeyApiDateTime, parseAFADDate } from '../utils/timeUtils';
+import { secureId } from '../utils/secureId';
 
 const logger = createLogger('MultiSourceEEWService');
 
@@ -367,7 +368,8 @@ class MultiSourceEEWService {
                     const originTime = originRaw ? parseAFADDate(String(originRaw)) : NaN;
 
                     events.push({
-                        id: `kandilli-${item.earthquake_id || `${Date.now()}-${Math.random().toString(36).substr(2, 14)}`}`,
+                        // H5/H6: CSPRNG-backed fallback ID when Kandilli omits earthquake_id.
+                        id: `kandilli-${item.earthquake_id || `${Date.now()}-${secureId(12)}`}`,
                         source: 'KANDILLI',
                         latitude: parseFloat(item.lat || '0'),
                         longitude: parseFloat(item.lng || item.lon || '0'),

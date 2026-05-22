@@ -19,7 +19,10 @@ let GlassButton: any = ({ title, onPress, ...rest }: any) => {
 try { GlassButton = require('../../components/buttons/GlassButton').default; } catch { /* fallback */ }
 
 let useFamilyStore: any = () => ({ members: [] });
-try { const mod = require('../../stores/familyStore'); useFamilyStore = mod.useFamilyStore; } catch (e: any) { console.error('[FamilyStatusSection] CRITICAL: familyStore import failed:', e?.message); }
+try { const mod = require('../../stores/familyStore'); useFamilyStore = mod.useFamilyStore; } catch (e: any) {
+  // M1-M3: import-time error stays loud (must reach Sentry) — only stripped from dev console.
+  if (__DEV__) console.error('[FamilyStatusSection] CRITICAL: familyStore import failed:', e?.message);
+}
 
 let useMeshStore: any = () => ({});
 try { useMeshStore = require('../../services/mesh/MeshStore').useMeshStore; } catch { /* fallback */ }
@@ -54,7 +57,13 @@ try { DirectStorageRef = require('../../utils/storage').DirectStorage; } catch {
 let haptics: any = { impactLight: () => { }, impactMedium: () => { }, notificationSuccess: () => { }, notificationError: () => { } };
 try { haptics = require('../../utils/haptics'); } catch { /* fallback */ }
 
-let createLogger: any = (name: string) => ({ info: console.log, error: console.error, warn: console.warn, debug: console.log });
+// M1-M3: production-safe stub — only errors leak through, dev sees full logs.
+let createLogger: any = (_name: string) => ({
+  info: (...a: unknown[]) => { if (__DEV__) console.log(...a); },
+  error: (...a: unknown[]) => { console.error(...a); },
+  warn: (...a: unknown[]) => { if (__DEV__) console.warn(...a); },
+  debug: (...a: unknown[]) => { if (__DEV__) console.log(...a); },
+});
 try { createLogger = require('../../utils/logger').createLogger; } catch { /* fallback */ }
 
 let styles: any = {};

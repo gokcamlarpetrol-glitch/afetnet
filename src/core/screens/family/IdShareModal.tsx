@@ -11,7 +11,10 @@ import {
 } from 'react-native';
 
 let identityService: any = { getUid: () => null, getAfetNetId: () => null, getPublicUserCode: () => null };
-try { identityService = require('../../services/IdentityService').identityService; } catch (e: any) { console.error('[IdShareModal] CRITICAL: IdentityService import failed:', e?.message); }
+try { identityService = require('../../services/IdentityService').identityService; } catch (e: any) {
+  // M1-M3: critical import failure stays visible — error already reaches Sentry via the global handler.
+  if (__DEV__) console.error('[IdShareModal] CRITICAL: IdentityService import failed:', e?.message);
+}
 
 let getDeviceIdFromLib: any = async () => 'unknown';
 try { getDeviceIdFromLib = require('../../utils/device').getDeviceId; } catch { /* fallback */ }
@@ -31,7 +34,14 @@ try { SMS = require('expo-sms'); } catch { /* fallback */ }
 let haptics: any = { impactLight: () => { }, impactMedium: () => { }, notificationSuccess: () => { }, notificationError: () => { }, notificationWarning: () => { } };
 try { haptics = require('../../utils/haptics'); } catch { /* fallback */ }
 
-let createLogger: any = (name: string) => ({ info: console.log, error: console.error, warn: console.warn, debug: console.log });
+// M1-M3: stub logger only emits in dev to keep production stdout silent
+// (real logger routes to Crashlytics breadcrumbs).
+let createLogger: any = (_name: string) => ({
+  info: (...a: unknown[]) => { if (__DEV__) console.log(...a); },
+  error: (...a: unknown[]) => { console.error(...a); }, // errors always
+  warn: (...a: unknown[]) => { if (__DEV__) console.warn(...a); },
+  debug: (...a: unknown[]) => { if (__DEV__) console.log(...a); },
+});
 try { createLogger = require('../../utils/logger').createLogger; } catch { /* fallback */ }
 
 let styles: any = {};

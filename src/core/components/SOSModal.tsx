@@ -66,6 +66,7 @@ export default function SOSModal({
     currentSignal,
     isCountingDown,
     countdownSeconds,
+    countdownTotalSeconds,
     isActive,
   } = useSOSStore();
 
@@ -113,7 +114,27 @@ export default function SOSModal({
         // Re-read state after potential cancel (cancelSOS sets isActive=false synchronously in store)
         const freshState = useSOSStore.getState();
         if (!freshState.isActive) {
-          unifiedSOSController.triggerSOS(reason, message);
+          // F1: await triggerSOS so broadcast failures surface to UI instead of
+          // being silently swallowed. Channel status (failed/sent) is rendered in
+          // the active-SOS screen below, but trigger-time exceptions (auth missing,
+          // location permission revoked, controller not initialized) would
+          // otherwise stay hidden in the catch handler.
+          try {
+            await unifiedSOSController.triggerSOS(reason, message);
+          } catch (triggerErr) {
+            if (__DEV__) console.error('SOSModal triggerSOS failed:', triggerErr);
+            // Surface a clear, Turkish, user-facing error. Crisis UX: tell the user
+            // to fall back to 112 — never let a silent failure leave them thinking
+            // help was dispatched.
+            try {
+              const { Alert } = require('react-native');
+              Alert.alert(
+                'SOS Gönderilemedi',
+                'Yardım çağrısı başlatılamadı. Lütfen hemen 112\'yi arayın ve uygulamayı kapatıp yeniden açın.',
+                [{ text: 'Tamam' }],
+              );
+            } catch { /* fallback already logged */ }
+          }
         }
       })().catch(e => { if (__DEV__) console.warn('SOSModal trigger error:', e); });
     } else if (!visible) {
@@ -211,6 +232,11 @@ export default function SOSModal({
   }, []);
 
   // Countdown haptic feedback
+  // KRİTİK (görev #26): Haptik ipuçlarını geri sayım toplamına göre ölçekle.
+  // Önceki kod 3/2/1 saniyelerine sabitti; 30 sn'lik otomatik tetik geri
+  // sayımında ilk 27 saniye sessiz kalıyordu — kullanıcı SOS'un yaklaştığını
+  // hissetmiyordu. Son 3 saniye her zaman tırmanan ipucu verir; daha uzun
+  // geri sayımlarda her 5. saniyede de hafif bir uyarı çalar.
   useEffect(() => {
     if (isCountingDown && countdownSeconds > 0) {
       if (countdownSeconds === 3) {
@@ -220,9 +246,19 @@ export default function SOSModal({
       } else if (countdownSeconds === 1) {
         haptics.notificationWarning();
         Vibration.vibrate([0, 200, 100, 200]);
+      } else {
+        // Uzun geri sayım (ör. 30 sn otomatik tetik): son 3 sn dışında
+        // her 5. saniyede hafif bir nabız ver — DEFAULT 5 sn'lik manuel
+        // geri sayımda bu dal tetiklenmez (4. saniye 5'e bölünmez).
+        const total = typeof countdownTotalSeconds === 'number' && countdownTotalSeconds > 0
+          ? countdownTotalSeconds
+          : 5;
+        if (total > 5 && countdownSeconds % 5 === 0) {
+          haptics.impactLight();
+        }
       }
     }
-  }, [isCountingDown, countdownSeconds]);
+  }, [isCountingDown, countdownSeconds, countdownTotalSeconds]);
 
   // ============================================================================
   // HANDLERS
@@ -259,6 +295,9 @@ export default function SOSModal({
       case 'sending':
       case 'pending':
         return 'ellipse';
+      case 'queued':
+        // F3: distinct icon — packet waiting in transport queue, not failed
+        return 'hourglass';
       case 'failed':
         return 'close-circle';
       default:
@@ -275,6 +314,9 @@ export default function SOSModal({
         return '#FFC107';
       case 'pending':
         return '#9E9E9E';
+      case 'queued':
+        // F3: amber — visually distinct from "failed" (red)
+        return '#FF9800';
       case 'failed':
         return '#F44336';
       default:
@@ -391,6 +433,10 @@ export default function SOSModal({
                 <TouchableOpacity
                   style={[styles.silentToggle, currentSignal?.isSilent && styles.silentToggleActive]}
                   onPress={() => useSOSStore.getState().setSilentMode(!currentSignal?.isSilent)}
+                  accessibilityRole="switch"
+                  accessibilityLabel="Sessiz mod"
+                  accessibilityState={{ checked: !!currentSignal?.isSilent }}
+                  accessibilityHint="Sessiz modda alarm sesi çıkmaz, yalnızca yardım sinyali gönderilir."
                 >
                   <Ionicons name={currentSignal?.isSilent ? 'volume-mute' : 'volume-high'} size={20} color={currentSignal?.isSilent ? '#000' : '#fff'} />
                   <Text style={[styles.silentToggleText, currentSignal?.isSilent && styles.silentToggleTextActive]}>
@@ -413,6 +459,32 @@ export default function SOSModal({
                     <Text style={styles.survivalBadgeText}>SURVIVAL MODU AKTİF</Text>
                   </View>
                 )}
+
+                {/* WP-3.2: SOS dürüstlük banner'ı — bu SOS'un 112'nin yerini
+                    tutmadığını net söyler. Hiçbir kanaldan ulaşılamıyorsa kritik
+                    kırmızı uyarıya döner; kullanıcı "yardım gönderildi" yanılgısına
+                    düşüp 112'yi aramayı atlamamalı. */}
+                {(() => {
+                  const reached = Object.values(currentSignal.channels).some(
+                    (s) => s === 'sent' || s === 'acked',
+                  );
+                  const meshPeers = currentSignal.device.meshPeers ?? 0;
+                  const noOneReached = !reached && meshPeers === 0;
+                  return (
+                    <View style={[styles.honestyBanner, noOneReached && styles.honestyBannerCritical]}>
+                      <Ionicons
+                        name={noOneReached ? 'warning' : 'information-circle'}
+                        size={18}
+                        color={noOneReached ? '#fff' : '#fde68a'}
+                      />
+                      <Text style={[styles.honestyBannerText, noOneReached && styles.honestyBannerTextCritical]}>
+                        {noOneReached
+                          ? 'Hiçbir kanaldan ulaşılamıyor. HEMEN 112’yi arayın.'
+                          : 'Bu SOS uygulamadaki kişilere ve yakındaki cihazlara iletilir; 112’nin yerini tutmaz — resmi yardım için 112’yi de arayın.'}
+                      </Text>
+                    </View>
+                  );
+                })()}
 
                 {/* P0-9: Top life-safety instruction (Çök-Kapan-Tutun) */}
                 <Text style={[styles.activeTitle, isSurvivalMode && { color: '#fbbf24', fontSize: 28 }]}>
@@ -523,7 +595,13 @@ export default function SOSModal({
                       <StatusItem
                         icon="battery-half"
                         label="Pil"
-                        value={`${currentSignal.device.batteryLevel}%`}
+                        // KRİTİK (görev #26): getBatteryLevel "bilinmiyor" için -1
+                        // döndürebilir; "Pil -1%" göstermek yerine "Bilinmiyor" yaz.
+                        value={
+                          currentSignal.device.batteryLevel < 0
+                            ? 'Bilinmiyor'
+                            : `${currentSignal.device.batteryLevel}%`
+                        }
                       />
                       <StatusItem
                         icon={currentSignal.device.networkStatus === 'offline' ? 'cloud-offline' : 'wifi'}
@@ -562,6 +640,8 @@ function ChannelItem({
         return 'checkmark-circle';
       case 'sending':
         return 'sync';
+      case 'queued':
+        return 'hourglass';
       case 'failed':
         return 'close-circle';
       default:
@@ -576,6 +656,8 @@ function ChannelItem({
         return '#4CAF50';
       case 'sending':
         return '#FFC107';
+      case 'queued':
+        return '#FF9800';
       case 'failed':
         return '#F44336';
       default:
@@ -862,6 +944,33 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     marginBottom: 16,
+  },
+  honestyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.5)',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    width: '100%',
+  },
+  honestyBannerCritical: {
+    backgroundColor: '#dc2626',
+    borderColor: '#fff',
+  },
+  honestyBannerText: {
+    flex: 1,
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  honestyBannerTextCritical: {
+    color: '#fff',
   },
   survivalBadgeText: {
     color: '#fbbf24',

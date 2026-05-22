@@ -24,6 +24,7 @@ import {
     ScrollView,
     ActivityIndicator,
     Dimensions,
+    DeviceEventEmitter,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -92,12 +93,16 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [isPlayingAudio, setIsPlayingAudio] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    // G4: Multi-responder coordination — count rescuers who already pressed
+    // "Yola Çıktım" so this rescuer knows whether more help is needed.
+    const [respondersCount, setRespondersCount] = useState<number>(0);
     const mapRef = useRef<MapView | null>(null);
     const soundRef = useRef<AudioPlayer | null>(null);
     const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
     const firestoreUnsubRef = useRef<(() => void) | null>(null);
     const audioUnsubRef = useRef<Array<() => void>>([]);
     const audioListenerSubRef = useRef<{ remove: () => void } | null>(null);
+    const respondersUnsubRef = useRef<(() => void) | null>(null);
 
     // Pulse animation for SOS marker
     const pulseScale = useSharedValue(1);
@@ -112,6 +117,78 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
         );
         return () => cancelAnimation(pulseScale);
     }, [pulseScale]);
+
+    // G4: Subscribe to sos_broadcasts/{signalId}/acks to count concurrent
+    // responders. Lets this rescuer see whether more help is already on the way
+    // (avoids over-mobilization for a single SOS).
+    useEffect(() => {
+        if (!signalId) return undefined;
+        let cancelled = false;
+        const start = async () => {
+            try {
+                const { getFirestoreInstanceAsync } = await import('../../services/firebase/FirebaseInstanceManager');
+                const db = await getFirestoreInstanceAsync();
+                if (!db || cancelled) return;
+                const { collection, onSnapshot } = await import('firebase/firestore');
+                const acksRef = collection(db, 'sos_broadcasts', signalId, 'acks');
+                const unsub = onSnapshot(
+                    acksRef,
+                    (snap) => {
+                        if (cancelled) return;
+                        setRespondersCount(snap.size);
+                    },
+                    (err) => { logger.debug('Responders ACK listener error (non-critical):', err); },
+                );
+                respondersUnsubRef.current = unsub;
+            } catch (err) {
+                logger.debug('Responders listener init failed:', err);
+            }
+        };
+        void start();
+        return () => {
+            cancelled = true;
+            if (respondersUnsubRef.current) {
+                try { respondersUnsubRef.current(); } catch { /* best-effort */ }
+                respondersUnsubRef.current = null;
+            }
+        };
+    }, [signalId]);
+
+    // G1: Listen for SOS cancellation while rescuer is on this screen.
+    // NearbySOSListener emits SOS_FULLSCREEN_CANCEL when the original SOS is
+    // cancelled (sender rescued or stopped). Without this, the rescuer stays
+    // stuck on the rescue screen unaware that the call is over.
+    useEffect(() => {
+        if (!signalId) return undefined;
+        const subscription = DeviceEventEmitter.addListener('SOS_FULLSCREEN_CANCEL', (payload: { signalId?: string }) => {
+            // Only react if the cancelled signal is the one we are responding to.
+            if (payload?.signalId && payload.signalId !== signalId) return;
+            logger.info('SOSHelpScreen: SOS cancelled by sender — informing rescuer and closing screen');
+            try {
+                Alert.alert(
+                    'Yardım Çağrısı İptal Edildi',
+                    `${senderName} artık iyi olduğunu bildirdi veya yardım çağrısını iptal etti. Geri dönüş yapabilirsiniz.`,
+                    [{
+                        text: 'Tamam',
+                        onPress: () => {
+                            try {
+                                if (navigation.canGoBack()) {
+                                    navigation.goBack();
+                                }
+                            } catch {
+                                // Best-effort — navigation may already be gone
+                            }
+                        },
+                    }],
+                    { cancelable: false },
+                );
+            } catch {
+                // If Alert.alert fails for any reason, still try to leave the screen
+                try { navigation.goBack(); } catch { /* ignore */ }
+            }
+        });
+        return () => subscription.remove();
+    }, [signalId, senderName, navigation]);
     const pulseStyle = useAnimatedStyle(() => ({
         transform: [{ scale: pulseScale.value }],
         opacity: 2 - pulseScale.value, // fades as it grows
@@ -367,7 +444,11 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                 try { audioListenerSubRef.current.remove(); } catch { /* */ }
             }
             audioListenerSubRef.current = player.addListener('playbackStatusUpdate', (status: any) => {
-                if (status?.didJustFinish || status?.isBuffering === false && status?.positionMillis >= status?.durationMillis) {
+                // KRİTİK (görev #26): Yalnızca didJustFinish'e güven. Önceki
+                // `isBuffering===false && positionMillis>=durationMillis` koşulu
+                // durationMillis 0/undefined olduğunda (henüz yüklenmemiş ses)
+                // çalmanın hemen başında "bitti" sayıp oynatmayı durduruyordu.
+                if (status?.didJustFinish) {
                     setIsPlayingAudio(false);
                     if (audioListenerSubRef.current) {
                         try { audioListenerSubRef.current.remove(); } catch { /* */ }
@@ -531,10 +612,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                     <Ionicons name="alert-circle" size={28} color="#fbbf24" />
                     <View style={styles.alertTextContainer}>
                         <Text style={styles.alertTitle}>
-                            {trapped ? 'Enkaz Alt\u0131nda!' : 'Acil Yard\u0131m \u00C7a\u011Fr\u0131s\u0131'}
+                            {trapped ? 'Enkaz Altında!' : 'Acil Yardım Çağrısı'}
                         </Text>
                         <Text style={styles.alertSubtitle}>
-                            {senderName} yard\u0131m bekliyor
+                            {senderName} yardım bekliyor
                         </Text>
                     </View>
                 </Animated.View>
@@ -668,12 +749,25 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
                     <View style={styles.statusRow}>
                         {battery != null && (
                             <View style={styles.statusItem}>
+                                {/* KRİTİK (görev #26): SOS göndericisinin pil seviyesi
+                                    "bilinmiyor" için -1 gelebilir; "%-1" göstermek
+                                    yerine "Pil: Bilinmiyor" yaz ve nötr ikon kullan. */}
                                 <Ionicons
-                                    name={battery < 20 ? 'battery-dead' : battery < 50 ? 'battery-half' : 'battery-full'}
+                                    name={
+                                        battery < 0
+                                            ? 'battery-half'
+                                            : battery < 20
+                                                ? 'battery-dead'
+                                                : battery < 50
+                                                    ? 'battery-half'
+                                                    : 'battery-full'
+                                    }
                                     size={16}
-                                    color={battery < 20 ? '#ef4444' : '#22c55e'}
+                                    color={battery >= 0 && battery < 20 ? '#ef4444' : battery < 0 ? '#94a3b8' : '#22c55e'}
                                 />
-                                <Text style={styles.statusText}>%{battery}</Text>
+                                <Text style={styles.statusText}>
+                                    {battery < 0 ? 'Pil: Bilinmiyor' : `%${battery}`}
+                                </Text>
                             </View>
                         )}
                         {senderLocation && (
@@ -749,6 +843,24 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
 
                 {/* Action Buttons */}
                 <Animated.View entering={FadeInUp.delay(500)} style={styles.actionsCard}>
+                    {/* G4: Multi-responder banner — show count of other rescuers
+                        already heading to this SOS so this user can decide
+                        whether more help is needed or step back. */}
+                    {respondersCount > (ackSent ? 1 : 0) && (
+                        <View
+                            style={styles.respondersBanner}
+                            accessibilityRole="text"
+                            accessibilityLabel={`${respondersCount} kişi yardıma gidiyor`}
+                        >
+                            <Ionicons name="people" size={18} color="#7dd3fc" />
+                            <Text style={styles.respondersBannerText}>
+                                {ackSent
+                                    ? `Siz dahil ${respondersCount} kişi yardıma gidiyor`
+                                    : `Şu an ${respondersCount} kişi yardıma gidiyor`}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Send ACK */}
                     <Pressable
                         style={({ pressed }) => [
@@ -1022,6 +1134,28 @@ const styles = StyleSheet.create({
     },
     actionsCard: {
         gap: spacing.sm,
+    },
+    respondersBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        // M1: SOSHelpScreen background is the dark red-to-navy SOS gradient.
+        // A translucent light-blue panel + dark navy text failed WCAG AA (<3:1
+        // contrast). Switching to an opaque sky panel with white text reaches
+        // ~10:1 — readable on any background variant.
+        backgroundColor: '#0c4a6e',
+        borderColor: '#0ea5e9',
+        borderWidth: 1,
+        borderRadius: borderRadius.md,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        marginBottom: spacing.xs,
+    },
+    respondersBannerText: {
+        ...typography.bodySmall,
+        color: '#f0f9ff', // near-white for max contrast on #0c4a6e (~12:1)
+        fontWeight: '600',
+        flex: 1,
     },
     actionButton: {
         flexDirection: 'row',

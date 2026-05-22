@@ -86,12 +86,6 @@ export type MainStackParamList = {
     Security: undefined;
     EEWSettings: undefined;
     RescueTeam: undefined;
-    VoiceCall: {
-        recipientUid: string;
-        recipientName: string;
-        callId?: string;
-        isIncoming?: boolean;
-    };
 };
 
 // Onboarding Stack Navigator Param List

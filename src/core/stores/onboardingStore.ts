@@ -55,7 +55,10 @@ const ensureOnboardingGuard = () => {
     return;
   }
   onboardingGuardInstalled = true;
-  useOnboardingStore.subscribe((state) => {
+  useOnboardingStore.subscribe((state, prevState) => {
+    // Yalnızca completed gerçekten değiştiyse değerlendir — gereksiz
+    // tetiklenmeyi ve guard'ın setState'i ile beslenen döngü riskini önler.
+    if (state.completed === prevState.completed) return;
     if (!state.completed) {
       console.warn('[OnboardingStore] completed was set to false despite persistent completed=true — restoring immediately');
       useOnboardingStore.setState({ completed: true });

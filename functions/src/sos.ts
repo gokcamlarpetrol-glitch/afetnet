@@ -94,10 +94,14 @@ export const onSOSAlert = functions
             return null;
         }
 
+        // görev #30: PII (serbest-metin alert.message / alert.reason) CF logundan
+        // çıkarıldı — KVKK. Yalnızca yapısal alanlar loglanır; mesaj/sebep içeriği
+        // yerine "var/yok" işareti yeterli teşhis bilgisi sağlar.
         functions.logger.warn(`🚨 SOS Alert received for device ${targetDeviceId}:`, {
             sender: alert.senderDeviceId,
-            message: alert.message,
-            reason: alert.reason,
+            signalId: alert.signalId || context.params.alertId,
+            hasMessage: typeof alert.message === 'string' && alert.message.length > 0,
+            trapped: alert.trapped === true,
         });
 
         try {
@@ -513,13 +517,15 @@ export const onSOSBroadcast = functions
         // Use validated location flag: hasLocation from client AND valid coordinate values
         const effectiveHasLocation = hasLocation && hasValidCoords;
 
+        // görev #30: PII (serbest-metin broadcast.message) CF logundan çıkarıldı —
+        // KVKK. Konum varlığı/yok işareti ve yapısal alanlar teşhis için yeterli;
+        // ham koordinat ve mesaj içeriği loglanmaz.
         functions.logger.warn('🚨 GLOBAL SOS BROADCAST received:', {
             broadcastId: snap.id,
             sender: senderDeviceId,
             hasLocation: effectiveHasLocation,
-            location: effectiveHasLocation ? `${sosLat}, ${sosLon}` : 'NO LOCATION',
-            message: broadcast.message,
-            trapped: broadcast.trapped,
+            hasMessage: typeof broadcast.message === 'string' && broadcast.message.length > 0,
+            trapped: broadcast.trapped === true,
         });
 
         const startTime = Date.now();

@@ -1,6 +1,6 @@
 {
   "name": "afetnet",
-  "version": "1.6.1",
+  "version": "1.6.3",
   "description": "AfetNet - Emergency Communication App",
   "main": "index.ts",
   "packageManager": "npm@10.7.0",
@@ -14,7 +14,6 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "react-native-webrtc",
           "afetnet-ble-peripheral"
         ],
         "listUnknownPackages": false
@@ -149,7 +148,6 @@
     "react-native-url-polyfill": "^3.0.0",
     "react-native-watch-connectivity": "^1.1.0",
     "react-native-web": "^0.21.0",
-    "react-native-webrtc": "^124.0.7",
     "react-native-webview": "13.15.0",
     "react-native-worklets": "0.5.1",
     "stream-browserify": "^3.0.0",

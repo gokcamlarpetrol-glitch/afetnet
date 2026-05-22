@@ -16,6 +16,7 @@ import { onAuthStateChanged, type Unsubscribe as AuthUnsubscribe } from 'firebas
 import { getFirebaseAuth } from '../../lib/firebase';
 import { createLogger } from '../utils/logger';
 import { validateMessage, sanitizeMessage } from '../utils/messageSanitizer';
+import { secureMessageId } from '../utils/secureId';
 import { isLikelyFirebaseUid } from '../utils/messaging/identityUtils';
 import meshNetworkService from './mesh/MeshNetworkService';
 import { MeshMessageType } from './mesh/MeshProtocol';
@@ -470,8 +471,8 @@ class GroupChatService {
         // Always include creator
         const allParticipants = Array.from(new Set([myUid, ...normalizedMemberUids]));
 
-        // Generate a stable group ID
-        const groupId = `grp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        // Generate a stable group ID (CSPRNG — H5/H6 hardening)
+        const groupId = secureMessageId('grp');
 
         let myDeviceId = memberDeviceIds[myUid] || '';
         if (!myDeviceId) {
@@ -657,9 +658,10 @@ class GroupChatService {
         }
 
         // CRITICAL FIX: Use higher entropy ID to prevent collisions when two
-        // messages are sent in the same millisecond (Date.now() + 6-char random was too weak).
+        // messages are sent in the same millisecond. H5/H6 hardening:
+        // secureMessageId() uses CSPRNG instead of Math.random (collision-free at scale).
         const message: GroupMessage = {
-            id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}_${Math.random().toString(36).slice(2, 6)}`,
+            id: secureMessageId('msg'),
             from: uid,
             senderUid: uid,
             fromName: displayName,
@@ -832,7 +834,7 @@ class GroupChatService {
         if (!user) return;
 
         const sysMsg: GroupMessage = {
-            id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: secureMessageId('sys'),
             from: user.uid,
             senderUid: user.uid,
             fromName: 'Sistem',

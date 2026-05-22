@@ -25,6 +25,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from '../../components/SafeLinearGradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMeshStore, MeshMessage } from '../../services/mesh/MeshStore';
+// görev #30: useShallow — meshMessages alt-küme seçicisinin yüzeysel (shallow)
+// eşitlikle karşılaştırılmasını sağlar; ilgisiz konuşmalardaki mesh mesajı
+// değişiklikleri bu ekranı yeniden render ETMEZ.
+import { useShallow } from 'zustand/react/shallow';
 import { hybridMessageService } from '../../services/HybridMessageService';
 import { meshNetworkService } from '../../services/mesh/MeshNetworkService';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -236,7 +240,10 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
   }).current;
 
   // ELITE V2: DUAL-SOURCE READ — merge MeshStore (rich media) + messageStore (Firebase inbox)
-  const meshMessages = useMeshStore(state => state.messages);
+  // görev #30: meshMessages seçici aşağıya taşındı — artık tüm MeshStore.messages
+  // dizisine (2000 cap) abone olmak yerine yalnızca bu konuşmaya ait alt küme
+  // seçilir (useShallow + konuşma-bazlı filtre). Tanım, filtre girdileri
+  // (peerIdCandidates / blockedAliasSet) hazır olduktan SONRA gelmelidir.
   const familyMembers = useFamilyStore((state) => state.members);
   const blockedUsers = useSettingsStore((state) => state.blockedUsers);
   // ELITE FIX: Robust missing userId recovery from conversationId (push notification fallback)
@@ -253,7 +260,20 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     return uid;
   }, [userId, paramConversationId]);
 
-  const allStoreMessages = useMessageStore(state => state.messages);
+  // JANK FIX (WP-5.10): Aktif konuşma ID'sine göre mesajları slice'la.
+  // Eski pattern → useMessageStore(state => state.messages) tüm store'a abone olur
+  // → herhangi bir yeni mesajda (başka konuşmalar dahil) tüm ekran re-render eder.
+  // Yeni pattern → conversationIndex'ten sadece aktif konuşma mesajlarını seç;
+  // diğer konuşmalardaki değişiklikler bu selector'ı tetiklemez.
+  const allStoreMessages = useMessageStore((state) => {
+    // Aktif konuşma ID'si yoksa fallback: tüm mesajlar (mount öncesi kısa süre)
+    const target = activeConversationId
+      ?? (validUserId ? validUserId : null);
+    if (!target) return state.messages;
+    const indexed = state.conversationIndex.get(target);
+    // Bulunamazsa (henüz indeks yok) messages üzerinden filtrele — yine de güvenli
+    return indexed ?? state.messages;
+  });
 
   // CRITICAL FIX: Ensure identity is captured after async load.
   // Uses escalating retries to handle cold-start race conditions where identity
@@ -435,6 +455,43 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
     if (!normalized || blockedAliasSet.size === 0) return false;
     return blockedAliasSet.has(normalized);
   }, [blockedAliasSet]);
+
+  // görev #30: meshMessages — konuşma-bazlı alt küme seçicisi.
+  // SORUN: `useMeshStore(s => s.messages)` tüm 2000-cap diziye abone olur →
+  // başka konuşmalarda gelen HERHANGİ bir mesh mesajı bu ekranı re-render eder,
+  // ardından ağır `messages` useMemo merge'i yeniden koşar.
+  // ÇÖZÜM: selector içinde bu konuşmaya ait alt küme filtrelenir; useShallow
+  // ile çıktı yüzeysel karşılaştırılır — alt küme değişmediyse re-render olmaz.
+  // Filtre girdileri (selfIds/peerIdCandidates/blockedAliasSet) render sırasında
+  // değişebildiğinden ref üzerinden okunur; girdi değişince component zaten
+  // re-render olur ve selector tazelenir.
+  const peerIdCandidatesRef = useRef(peerIdCandidates);
+  peerIdCandidatesRef.current = peerIdCandidates;
+  const blockedAliasSetRef = useRef(blockedAliasSet);
+  blockedAliasSetRef.current = blockedAliasSet;
+
+  const meshMessages = useMeshStore(useShallow((state) => {
+    const peers = peerIdCandidatesRef.current;
+    const self = selfIdsRef.current;
+    const blocked = blockedAliasSetRef.current;
+    // Kimlik henüz çözülmediyse boş küme — component re-render olunca tazelenir.
+    if (peers.size === 0 && self.size === 0) return [] as MeshMessage[];
+    return state.messages.filter((msg) => {
+      if (isSystemPayloadMessage(msg)) return false;
+      // isBlockedIdentity'nin ref-tabanlı eşdeğeri (normalize + blocked set kontrolü).
+      const fromNorm = normalizeIdentityValue(msg.senderId);
+      const toNorm = normalizeIdentityValue(msg.to);
+      if ((fromNorm && blocked.has(fromNorm)) || (toNorm && blocked.has(toNorm))) {
+        return false;
+      }
+      const fromMe = self.has(msg.senderId);
+      const toPeer = !!msg.to && peers.has(msg.to);
+      if (fromMe && toPeer) return true;
+      const fromPeer = peers.has(msg.senderId);
+      const toMe = !!msg.to && self.has(msg.to);
+      return fromPeer && toMe;
+    });
+  }));
 
   const storeMessages = useMemo(() => {
     // Don't bail early if activeConversationId is available.

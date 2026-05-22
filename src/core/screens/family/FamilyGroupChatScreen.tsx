@@ -278,6 +278,22 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
     };
   }, [isSelfFamilyMember, members, myDeviceId]);
 
+  const buildGroupStorageRecipientUids = useCallback((groupId: string, ownerUid: string): string | undefined => {
+    const recipientUids = new Set<string>();
+    const addUid = (value?: string | null) => {
+      const uid = typeof value === 'string' ? value.trim() : '';
+      if (!uid || uid === ownerUid || !isLikelyFirebaseUid(uid)) return;
+      recipientUids.add(uid);
+    };
+
+    groupChatService.getGroup(groupId)?.participants?.forEach(addUid);
+    const participantModel = buildParticipantModel();
+    participantModel?.memberUids.forEach(addUid);
+    members.forEach((member) => addUid(resolveFamilyMemberUid(member)));
+
+    return recipientUids.size > 0 ? Array.from(recipientUids).join(',') : undefined;
+  }, [buildParticipantModel, members]);
+
   const selectBestFamilyGroup = useCallback((
     groups: GroupConversation[],
     requiredParticipants: Set<string>,
@@ -1085,11 +1101,14 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
               });
               const { Buffer } = await import('buffer');
               const bytes = Uint8Array.from(Buffer.from(base64Data, 'base64'));
+              const recipientUids = buildGroupStorageRecipientUids(activeGroupId, ownerUid);
 
               uploadedMediaUrl = await firebaseStorageService.uploadFile(storagePath, bytes, {
                 contentType: mediaType === 'image' ? 'image/jpeg' : 'audio/mp4',
                 customMetadata: {
                   userId: ownerUid,
+                  uploaderUid: ownerUid,
+                  ...(recipientUids ? { recipientUids } : {}),
                   groupId: activeGroupId,
                 },
               }) ?? undefined;
@@ -1214,7 +1233,7 @@ export default function FamilyGroupChatScreen({ navigation, route }: FamilyGroup
       logger.error(`Error sending group ${mediaType}:`, error);
       Alert.alert('Hata', 'Medya gönderilemedi.');
     }
-  }, [appendLocalGroupMessage, ensureActiveGroupId, myDeviceId]);
+  }, [appendLocalGroupMessage, buildGroupStorageRecipientUids, ensureActiveGroupId, myDeviceId]);
 
   const handleCameraCapture = useCallback(async () => {
     try {

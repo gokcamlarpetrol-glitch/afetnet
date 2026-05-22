@@ -23,6 +23,7 @@ import { identityService } from './IdentityService';
 import { firebaseStorageService } from './FirebaseStorageService';
 import { Buffer } from 'buffer';
 import { Platform } from 'react-native';
+import { isLikelyFirebaseUid } from '../utils/messaging/identityUtils';
 
 const logger = createLogger('VoiceMessageService');
 
@@ -590,6 +591,9 @@ class VoiceMessageService {
 
       // Convert base64 to Blob for upload
       const bytes = Uint8Array.from(Buffer.from(message.base64Data, 'base64'));
+      const recipientUid = isLikelyFirebaseUid(message.to) && message.to !== userId
+        ? message.to
+        : '';
 
       const downloadUrl = await firebaseStorageService.uploadFile(
         storagePath,
@@ -598,6 +602,8 @@ class VoiceMessageService {
           contentType: 'audio/mp4',
           customMetadata: {
             userId,
+            uploaderUid: userId,
+            ...(recipientUid ? { recipientUids: recipientUid } : {}),
             duration: message.durationMs.toString(),
             timestamp: message.timestamp.toString(),
             from: message.from,

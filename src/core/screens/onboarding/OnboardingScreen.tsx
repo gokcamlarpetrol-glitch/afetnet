@@ -4,26 +4,23 @@ import PagerView from 'react-native-pager-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
-import { Camera } from 'expo-camera';
 import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { setOnboardingCompleted } from '../../utils/onboardingStorage';
+import { DirectStorage } from '../../utils/storage';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('OnboardingScreen');
 
 // ELITE: Premium onboarding images for each slide (High-Quality PNG)
+// Only assets used by SLIDE_DATA below — 5 unused assets were removed after
+// the 9→4 slide simplification (sprint 1B).
 const IMAGE_ASSETS = {
   seismic: require('../../../../assets/images/onboarding/seismic.jpg'),
   location: require('../../../../assets/images/onboarding/location.jpg'),
-  verification: require('../../../../assets/images/onboarding/verification.jpg'),
-  aiAssistant: require('../../../../assets/images/onboarding/ai_assistant_brain.png'),
   meshNetwork: require('../../../../assets/images/onboarding/mesh_network.jpg'),
   familySafety: require('../../../../assets/images/onboarding/family_safety.jpg'),
-  sos: require('../../../../assets/images/onboarding/sos.jpg'),
-  toolkit: require('../../../../assets/images/onboarding/toolkit.jpg'),
-  settingsControl: require('../../../../assets/images/onboarding/settings_control.jpg'),
 };
 
 // SPRINT 1B: 9 slayt → 4 slayt sadeleştirme.
@@ -83,11 +80,54 @@ export const OnboardingScreen = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const navigation = useNavigation<any>();
 
+  // WP-4.1: COPPA yaş kapısı — onboarding tamamlanmadan 13+ beyanı zorunludur.
+  // Bir kez onaylanınca tekrar sorulmaz (DirectStorage'da timestamp+sürüm ile kaydedilir).
+  const confirmAgeGate = async (): Promise<boolean> => {
+    try {
+      if (DirectStorage.getString('afetnet_age_gate_v1')) return true;
+    } catch { /* okuma hatası — onayı tekrar sor */ }
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Yaş Onayı',
+        'AfetNet\'i kullanmak için 13 yaşında veya daha büyük olmalısınız.\n\n13 yaşında veya daha büyük müsünüz?',
+        [
+          {
+            text: 'Hayır',
+            style: 'cancel',
+            onPress: () => {
+              Alert.alert(
+                'Yaş Sınırı',
+                'AfetNet 13 yaş ve üzeri kullanıcılar içindir. Lütfen bir ebeveyniniz veya bir yetişkinle birlikte kullanın.',
+              );
+              resolve(false);
+            },
+          },
+          {
+            text: 'Evet, 13 veya üzeri',
+            onPress: () => {
+              try {
+                DirectStorage.setString('afetnet_age_gate_v1', JSON.stringify({
+                  confirmedAt: Date.now(),
+                  version: '1.6.3',
+                }));
+              } catch { /* kalıcılaştırma best-effort */ }
+              resolve(true);
+            },
+          },
+        ],
+        { cancelable: false },
+      );
+    });
+  };
+
   const handleNext = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const nextPage = currentPage + 1;
     // ELITE: Complete onboarding - CoreApp will switch to MainNavigator
     if (nextPage >= TOTAL_SLIDES) {
+      // WP-4.1: COPPA — yaş onayı verilmeden onboarding tamamlanamaz.
+      const ageConfirmed = await confirmAgeGate();
+      if (!ageConfirmed) return;
       await setOnboardingCompleted();
       return;
     }
@@ -99,6 +139,21 @@ export const OnboardingScreen = () => {
     setCurrentPage(page);
     Haptics.selectionAsync();
   };
+
+  // K7: iOS edge-swipe (interactive pop gesture) can bypass permission slides
+  // entirely on stack navigators. Disable it for the whole onboarding flow so
+  // the user must engage with each permission decision (Apple 5.1.1 parity
+  // with Android BackHandler block below).
+  useEffect(() => {
+    if (Platform.OS === 'ios') {
+      navigation.setOptions({ gestureEnabled: false });
+      // Restore on unmount in case the screen is reused elsewhere
+      return () => {
+        navigation.setOptions({ gestureEnabled: true });
+      };
+    }
+    return undefined;
+  }, [navigation]);
 
   // Apple 5.1.1 / Android: Block hardware back button on permission slides.
   // User must interact with the permission dialog — back button cannot bypass it.
@@ -158,15 +213,6 @@ export const OnboardingScreen = () => {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           Alert.alert('Teşekkürler', 'Konum servisleri aktif.');
-        }
-      } else if (type === 'camera') {
-        // Request camera permission (QR scanning, chat photos, reports, flashlight)
-        const cam = await Camera.requestCameraPermissionsAsync();
-
-        if (cam.status === 'granted') {
-          Alert.alert('Teşekkürler', 'Kamera izni aktif.');
-        } else {
-          Alert.alert('Bilgi', 'Kamera izni verilmedi. Ayarlardan değiştirebilirsiniz.');
         }
       } else if (type === 'bluetooth') {
         // Android only: BLE runtime permissions (iOS triggers at first use, handled as info slide)
@@ -265,6 +311,9 @@ export const OnboardingScreen = () => {
                       style={styles.button}
                       onPress={() => handlePermissionRequest(slide.action)}
                       activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel={slide.buttonText}
+                      accessibilityHint={`${slide.title.replace(/\n/g, ' ')} için sistem izin penceresi açılır`}
                     >
                       <View style={styles.buttonGradient}>
                         <Text style={styles.buttonText}>{slide.buttonText}</Text>
@@ -281,6 +330,9 @@ export const OnboardingScreen = () => {
                         onPress={() => navigation.navigate('TermsOfService')}
                         style={styles.tosLink}
                         activeOpacity={0.7}
+                        accessibilityRole="link"
+                        accessibilityLabel="Kullanım Koşulları, Bölüm 12"
+                        accessibilityHint="Konum verisinin nasıl kullanıldığını açıklayan koşullar sayfasına gider"
                       >
                         <Text style={styles.tosText}>
                           Konumunuzun nasıl kullanıldığını öğrenmek için{' '}
@@ -296,6 +348,8 @@ export const OnboardingScreen = () => {
                       style={styles.button}
                       onPress={handleNext}
                       activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel={slide.buttonText}
                     >
                       <View style={styles.secondaryButtonInner}>
                         <Text style={styles.secondaryButtonText}>{slide.buttonText}</Text>

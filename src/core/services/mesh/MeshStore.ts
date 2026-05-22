@@ -46,6 +46,12 @@ const MAX_MESSAGES = 2000;
 const MAX_SEEN_IDS = 5000;
 const MAX_OUTGOING_QUEUE = 500;
 const MAX_FAILED_QUEUE = 200;
+// görev #28 (madde 4): peers dizisi için boyut sınırı. Eskiden yalnızca cleanup
+// timer (PEER_STALE_TIMEOUT/2 aralıkla) budama yapıyordu — yoğun ortamda iki tick
+// arası yüzlerce yeni peer eklenip dizi sınırsız büyüyebiliyordu. addPeer artık
+// sınır aşılınca en eski lastSeen'li peer'ı tahliye eder. 256 makul üst sınır:
+// gerçek BLE mesh'te aynı anda görünür peer sayısı bunun çok altındadır.
+const MAX_PEERS = 256;
 
 export interface MeshNode {
   id: string;
@@ -238,8 +244,16 @@ export const useMeshStore = create<MeshState>()(
       addPeer: (peer) => set((state) => {
         const exists = state.peers.some((p) => p.id === peer.id);
         if (exists) return state; // No change
+        const nextPeers = [...state.peers, peer];
+        // görev #28 (madde 4): MAX_PEERS sınırını uygula — sınır aşılınca en eski
+        // lastSeen'e sahip peer'ları tahliye et. Sınırsız büyümeyi cleanup timer'ına
+        // bırakmak yetersiz; addPeer her eklemede kendi kapağını uygular.
+        if (nextPeers.length > MAX_PEERS) {
+          nextPeers.sort((a, b) => b.lastSeen - a.lastSeen); // en yeni → en eski
+          nextPeers.length = MAX_PEERS; // en eski lastSeen'li fazlalığı at
+        }
         return {
-          peers: [...state.peers, peer],
+          peers: nextPeers,
           stats: { ...state.stats, totalPeers: state.stats.totalPeers + 1 },
         };
       }),

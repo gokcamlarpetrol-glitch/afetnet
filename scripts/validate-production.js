@@ -297,9 +297,9 @@ checkContains(
   "DERHAL 112'yi arayın",
   'Terms screen clearly directs users to call 112 for official emergency response',
 );
-checkContains(
+checkRegex(
   'src/core/components/compliance/EULAModal.tsx',
-  'dogrudan entegre degildir',
+  /do(?:ğ|g)rudan\s+entegre\s+de(?:ğ|g)ildir/i,
   'EULA states no direct integration with official emergency dispatch',
 );
 checkContains(

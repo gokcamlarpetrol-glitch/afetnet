@@ -23,7 +23,6 @@
  * - messaging.ts — Message push notifications (legacy + V3), contact requests
  * - sos.ts      — SOS alert push (legacy + V3), global SOS broadcast
  * - family.ts   — Family status update push (legacy + V3)
- * - voice.ts    — Voice call push notifications
  * - admin.ts    — Analytics, token cleanup, email, OpenAI proxy, FCM registration
  *
  * @version 2.0.0
@@ -64,7 +63,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.auditFirestore = exports.onSeismicReportCreated = exports.subscribeToTopics = exports.registerFCMToken = exports.openAIChatProxy = exports.sendCustomEmail = exports.cleanupSeismicReports = exports.locationHistoryCleanup = exports.tokenCleanup = exports.dailyAnalytics = exports.sendCallNotification = exports.onIncomingVoiceCall = exports.onFamilyStatusUpdateV3 = exports.onFamilyStatusUpdate = exports.onSOSBroadcastUpdated = exports.onSOSBroadcast = exports.onSOSAlertV3 = exports.onSOSAlert = exports.onContactRequest = exports.onNewConversationMessageV3 = exports.onNewMessage = exports.eewWebhook = exports.broadcastEEW = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
+exports.exportUserData = exports.auditFirestore = exports.onSeismicReportCreated = exports.subscribeToTopics = exports.registerFCMToken = exports.openAIChatProxy = exports.sendCustomEmail = exports.cleanupSeismicReports = exports.locationHistoryCleanup = exports.tokenCleanup = exports.dailyAnalytics = exports.onFamilyStatusUpdateV3 = exports.onFamilyStatusUpdate = exports.onSOSBroadcastUpdated = exports.onSOSBroadcast = exports.onSOSAlertV3 = exports.onSOSAlert = exports.onContactRequest = exports.onNewConversationMessageV3 = exports.onNewMessage = exports.eewWebhook = exports.broadcastEEW = exports.onPWaveDetection = exports.eewEmergencyTrigger = exports.eewMonitorBackup = exports.eewMonitorFast = void 0;
 // Initialize Firebase Admin (must happen before any module import that uses it)
 const admin = __importStar(require("firebase-admin"));
 if (admin.apps.length === 0) {
@@ -113,13 +112,6 @@ Object.defineProperty(exports, "onFamilyStatusUpdate", { enumerable: true, get: 
 var family_2 = require("./family");
 Object.defineProperty(exports, "onFamilyStatusUpdateV3", { enumerable: true, get: function () { return family_2.onFamilyStatusUpdateV3; } });
 // ============================================================
-// VOICE MODULE — Voice Call Push
-// ============================================================
-var voice_1 = require("./voice");
-Object.defineProperty(exports, "onIncomingVoiceCall", { enumerable: true, get: function () { return voice_1.onIncomingVoiceCall; } });
-var voice_2 = require("./voice");
-Object.defineProperty(exports, "sendCallNotification", { enumerable: true, get: function () { return voice_2.sendCallNotification; } });
-// ============================================================
 // ADMIN MODULE — Analytics, Cleanup, Email, OpenAI, FCM Reg
 // ============================================================
 var admin_1 = require("./admin");
@@ -142,4 +134,9 @@ var admin_9 = require("./admin");
 Object.defineProperty(exports, "onSeismicReportCreated", { enumerable: true, get: function () { return admin_9.onSeismicReportCreated; } });
 var audit_1 = require("./audit");
 Object.defineProperty(exports, "auditFirestore", { enumerable: true, get: function () { return audit_1.auditFirestore; } });
+// ============================================================
+// PRIVACY MODULE — GDPR/KVKK veri ihraç
+// ============================================================
+var privacy_1 = require("./privacy");
+Object.defineProperty(exports, "exportUserData", { enumerable: true, get: function () { return privacy_1.exportUserData; } });
 //# sourceMappingURL=index.js.map

@@ -79,7 +79,14 @@ describe('SOSChannelRouter channel behavior', () => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
     mockMeshPeers = [{ id: 'peer-1' }];
-    mockMeshIsRunning.mockReturnValue(false);
+    // K3: After start(), production code asserts getIsRunning()=true before
+    // broadcasting. Mocks must simulate the successful start transition: first
+    // call returns false (pre-start), subsequent calls return true.
+    let getIsRunningCallCount = 0;
+    mockMeshIsRunning.mockImplementation(() => {
+      getIsRunningCallCount++;
+      return getIsRunningCallCount > 1; // first false (pre-start), then true
+    });
     mockMeshStart.mockResolvedValue(undefined);
     mockMeshBroadcast.mockResolvedValue(undefined);
   });
@@ -124,7 +131,7 @@ describe('SOSChannelRouter channel behavior', () => {
     expect(updateStatus).toHaveBeenLastCalledWith('mesh', 'sent');
   });
 
-  it('does not mark mesh as sent when no peer is visible after queueing', async () => {
+  it('marks mesh as queued (not failed) when no peer is visible after queueing', async () => {
     mockMeshPeers = [];
     const updateStatus = jest.fn();
     jest
@@ -134,12 +141,15 @@ describe('SOSChannelRouter channel behavior', () => {
       .spyOn(sosChannelRouter as any, 'getVisibleMeshPeerCount')
       .mockResolvedValue(0);
 
+    // F3: 0-peer state now sets 'queued' status (distinct from 'failed') so the
+    // UI can show "yardım çağrısı bekleniyor" instead of misleading "gönderilemedi".
+    // Still throws to trigger retry scheduler.
     await expect((sosChannelRouter as any).broadcastViaMesh(signal, updateStatus))
       .rejects
-      .toThrow(/no visible peers/i);
+      .toThrow(/queued|waiting/i);
 
     expect(mockMeshBroadcast).toHaveBeenCalledTimes(1);
     expect(updateStatus).toHaveBeenNthCalledWith(1, 'mesh', 'sending');
-    expect(updateStatus).toHaveBeenLastCalledWith('mesh', 'failed');
+    expect(updateStatus).toHaveBeenLastCalledWith('mesh', 'queued');
   });
 });

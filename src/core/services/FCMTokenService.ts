@@ -378,11 +378,25 @@ class FCMTokenService {
                 // installationId unavailable — CF will fall back to tokenHash
             }
 
+            // H7: Honest payload — omit GPS fields when location permission
+            // was denied or capture timed out. Previously we always sent the
+            // `latitude`/`longitude` keys with `undefined` values, which is
+            // dishonest on the wire (the keys arrive at CF as missing rather
+            // than null, but the schema validators couldn't distinguish
+            // "denied" from "available but not yet captured"). Conditional
+            // spread + explicit number-only includes prevents that ambiguity.
+            const hasLocation =
+                typeof location?.latitude === 'number'
+                && typeof location?.longitude === 'number'
+                && Number.isFinite(location.latitude)
+                && Number.isFinite(location.longitude);
             await registerFCM({
                 token: this.token,
                 platform: Platform.OS,
-                latitude: location?.latitude,
-                longitude: location?.longitude,
+                ...(hasLocation && location ? {
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                } : {}),
                 ...(cfInstallationId ? { installationId: cfInstallationId } : {}),
             });
 

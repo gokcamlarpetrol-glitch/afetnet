@@ -97,8 +97,8 @@ android {
         applicationId 'com.gokhancamci.afetnetapp'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 33
-        versionName "1.6.1"
+        versionCode 36
+        versionName "1.6.3"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

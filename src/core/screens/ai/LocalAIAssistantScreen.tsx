@@ -112,6 +112,7 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   const isSendingRef = useRef(false);
   const [isOnlineMode, setIsOnlineMode] = useState(true);
   const flatListRef = useRef<FlatList>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Apple Guideline 5.1.2(i): Prompt for AI data sharing consent before first OpenAI interaction
   const promptAiConsent = useCallback((): Promise<boolean> => {
@@ -141,6 +142,14 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
   // ELITE: Check actual network connectivity
   useEffect(() => {
     checkConnectivity();
+  }, []);
+
+  // SSE bağlantısını ekran kapanınca iptal et — açık fetch ve unmounted
+  // component'e setState yazımı kaynaklı bellek sızıntısını önler.
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, []);
 
   const checkConnectivity = async () => {
@@ -222,10 +231,14 @@ export default function LocalAIAssistantScreen({ navigation }: { navigation: Loc
         }]);
         setIsTyping(false); // streaming bubble replaces the typing indicator
 
+        // SSE çağrısını iptal edilebilir kıl — kullanıcı yanıt gelmeden ekrandan
+        // çıkarsa unmount cleanup bu controller'ı abort eder.
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
         response = await aiAssistantCoordinator.chat(text, history, (_delta, accumulated) => {
           receivedAnyChunk = true;
           setMessages(prev => prev.map(m => (m.id === streamingId ? { ...m, text: accumulated } : m)));
-        });
+        }, controller.signal);
 
         // Finalize the streaming bubble with full metadata so suggested actions etc. render.
         // Fallback to response.answer when no chunks arrived (offline route or sync path).

@@ -22,7 +22,6 @@
  * - messaging.ts — Message push notifications (legacy + V3), contact requests
  * - sos.ts      — SOS alert push (legacy + V3), global SOS broadcast
  * - family.ts   — Family status update push (legacy + V3)
- * - voice.ts    — Voice call push notifications
  * - admin.ts    — Analytics, token cleanup, email, OpenAI proxy, FCM registration
  *
  * @version 2.0.0
@@ -68,12 +67,6 @@ export { onFamilyStatusUpdate } from './family';
 export { onFamilyStatusUpdateV3 } from './family';
 
 // ============================================================
-// VOICE MODULE — Voice Call Push
-// ============================================================
-export { onIncomingVoiceCall } from './voice';
-export { sendCallNotification } from './voice';
-
-// ============================================================
 // ADMIN MODULE — Analytics, Cleanup, Email, OpenAI, FCM Reg
 // ============================================================
 export { dailyAnalytics } from './admin';
@@ -86,3 +79,8 @@ export { registerFCMToken } from './admin';
 export { subscribeToTopics } from './admin';
 export { onSeismicReportCreated } from './admin';
 export { auditFirestore } from './audit';
+
+// ============================================================
+// PRIVACY MODULE — GDPR/KVKK veri ihraç
+// ============================================================
+export { exportUserData } from './privacy';

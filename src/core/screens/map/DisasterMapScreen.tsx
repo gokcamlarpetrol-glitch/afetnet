@@ -40,6 +40,7 @@ import Animated, {
 import { styles, PREMIUM_COLORS } from './DisasterMapScreen.styles';
 import { useEarthquakeStore } from '../../stores/earthquakeStore';
 import { useFamilyStore, FamilyMember } from '../../stores/familyStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useSOSStore } from '../../services/sos';
 import { createLogger } from '../../utils/logger';
 import { formatLastSeen } from '../../utils/dateUtils';
@@ -406,11 +407,13 @@ export default function DisasterMapScreen({ navigation, route }: DisasterMapScre
   const targetLatitude = sosLatitude ?? familyLatitude;
   const targetLongitude = sosLongitude ?? familyLongitude;
   const shouldFocusRouteLocation = Boolean((focusOnSOS || focusOnFamily) && targetLatitude !== null && targetLongitude !== null);
+  const locationEnabled = useSettingsStore((state) => state.locationEnabled);
 
   // FIX #2: Live location tracking (replaces one-shot getCurrentPositionAsync)
   const { location: userLocation } = useLiveLocation({
     distanceInterval: 10,
     timeInterval: 5000,
+    enabled: locationEnabled,
   });
 
   // State

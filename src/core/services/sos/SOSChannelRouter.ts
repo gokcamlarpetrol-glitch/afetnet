@@ -1141,9 +1141,13 @@ class SOSChannelRouter {
             const { useFamilyStore } = await import('../../stores/familyStore');
             let members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
 
-            // If members empty (cold-start recovery), wait briefly for hydration
+            // If members empty (cold-start recovery), wait briefly for hydration.
+            // KRİTİK (görev #26): 3 sn'lik blok aktivasyon hot path'inde — diğer
+            // bekleme noktalarıyla (mesh/Firestore retry) iç içe geldiğinde 8 sn
+            // yayın timeout'unu aşabiliyordu. 800 ms cold-start hidrasyonu için
+            // yeterli; allSettled içindeki diğer kanalları artık geciktirmez.
             if (members.length === 0) {
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                await new Promise(resolve => setTimeout(resolve, 800));
                 members = useFamilyStore.getState().members.filter(isApprovedFamilyMember);
             }
 

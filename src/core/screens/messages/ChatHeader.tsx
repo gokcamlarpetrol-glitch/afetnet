@@ -1,6 +1,6 @@
 /**
  * CHAT HEADER - Extracted from ConversationScreen
- * Header section with user info, call button, back navigation, and options menu.
+ * Header section with user info, back navigation, and options menu.
  * Includes real report/block functionality (Apple Guideline 1.2 compliance).
  */
 
@@ -46,18 +46,6 @@ function ChatHeaderInner({
   conversationId,
 }: ChatHeaderProps) {
   const [reportModalVisible, setReportModalVisible] = useState(false);
-
-  const handleCallPress = useCallback(() => {
-    if (!activeRecipientId) {
-      Alert.alert('Hata', 'Arama yapılacak kişi bulunamadı.');
-      return;
-    }
-    haptics.impactMedium();
-    navigation.navigate('VoiceCall', {
-      recipientUid: activeRecipientId,
-      recipientName: conversationTitle,
-    });
-  }, [activeRecipientId, conversationTitle, navigation]);
 
   const handleOptionsPress = useCallback(() => {
     Alert.alert(
@@ -140,20 +128,14 @@ function ChatHeaderInner({
             </View>
           </View>
 
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable style={styles.callBtn} onPress={handleCallPress} accessibilityRole="button" accessibilityLabel="Sesli arama">
-              <Ionicons name="call" size={20} color="#334155" />
-            </Pressable>
-
-            <Pressable
-              style={[styles.callBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}
-              onPress={handleOptionsPress}
-              accessibilityRole="button"
-              accessibilityLabel="Seçenekler"
-            >
-              <Ionicons name="ellipsis-vertical" size={20} color="#ef4444" />
-            </Pressable>
-          </View>
+          <Pressable
+            style={[styles.callBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}
+            onPress={handleOptionsPress}
+            accessibilityRole="button"
+            accessibilityLabel="Seçenekler"
+          >
+            <Ionicons name="ellipsis-vertical" size={20} color="#ef4444" />
+          </Pressable>
         </View>
       </BlurView>
 

@@ -106,7 +106,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "afetnet",
   scheme: "afetnet",
   owner: "gokhancamci1",
-  version: "1.6.1",
+  version: "1.6.3",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -170,13 +170,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     // ELITE: Google Sign-In Plugin
     "@react-native-google-signin/google-signin",
-    // NOTE: react-native-webrtc doesn't have an Expo config plugin
-    // VoiceCallService uses graceful fallback if native module unavailable
+    // görev #31: react-native-webrtc / VoiceCallService notu kaldırıldı — sesli arama özelliği v1.6.3'te kaldırıldı.
     // AfetNet BLE Peripheral: autolinked via expo-module.config.json (no config plugin needed)
   ],
   ios: {
     ...config.ios,
-    buildNumber: "4",
+    buildNumber: "36",
     bundleIdentifier: "com.gokhancamci.afetnetapp",
     supportsTablet: true,
     // APPLE REJECTION FIX: requireFullScreen must be true because the app:
@@ -194,7 +193,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSLocationAlwaysAndWhenInUseUsageDescription: "AfetNet, aile üyelerinizle gerçek zamanlı konum paylaşımı ve arka planda deprem erken uyarısı için sürekli konum erişimi gerektirir.",
       NSBluetoothAlwaysUsageDescription: "AfetNet, internet olmadan mesh ağı ile mesaj göndermek, SOS yardım çağrısı yaymak ve yakındaki kullanıcıları keşfetmek için Bluetooth kullanır.",
       NSBluetoothPeripheralUsageDescription: "AfetNet, mesh ağında yakındaki cihazlara mesaj ve SOS sinyali iletmek için Bluetooth çevre birimi olarak çalışır.",
-      NSMicrophoneUsageDescription: "AfetNet, sohbette sesli mesaj göndermek, sesli arama yapmak ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.",
+      // görev #31: "sesli arama yapmak" ibaresi kaldırıldı — sesli arama özelliği v1.6.3'te kaldırıldı (Apple Review 5.1.1 izin metnini birebir okur). Sesli MESAJ hâlâ var, mikrofon izni gerekçesi geçerli kalır.
+      NSMicrophoneUsageDescription: "AfetNet, sohbette sesli mesaj göndermek ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.",
       NSCameraUsageDescription: "AfetNet kameranızı sohbette paylaşmak için fotoğraf çekmek, aile üyesi eklerken QR kod taramak ve afet raporuna fotoğraf eklemek için kullanır. Örneğin, deprem sonrası hasar fotoğrafı çekip siz paylaşmayı seçtiğinizde rapor olarak gönderebilirsiniz.",
       NSMotionUsageDescription: "AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek, düşme/çarpışma tespiti yapmak ve kullanıcı aktivitesini değerlendirmek için hareket sensörlerini kullanır.",
       NSPhotoLibraryUsageDescription: "AfetNet, sohbette ve afet raporlarında paylaşmak üzere fotoğraf kütüphanenizden görsel seçmek için erişir.",
@@ -214,7 +214,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         "bluetooth-peripheral",
       ],
       ITSAppUsesNonExemptEncryption: false,
-      // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant)
+      // CRITICAL: ATS — only allow specific HTTP exceptions (Apple Review compliant).
+      //
+      // M6 (ATS documentation): NSAllowsLocalNetworking=true is REQUIRED for
+      // BLE-discovered peer service queries (mDNS-style local-link traffic the
+      // OS routes through `local.` networks during peer enumeration). The flag
+      // does NOT permit:
+      //   - Inbound listeners (we run none — BLE peers communicate via GATT)
+      //   - Arbitrary cleartext connections to internet hosts
+      //   - HTTP exceptions outside the local link
+      //
+      // Apple Review note (if asked): all internet-bound traffic still
+      // requires TLS 1.2+ via NSAllowsArbitraryLoads=false above. The local
+      // exception is necessary for offline disaster-relief mesh and exists
+      // solely to satisfy iOS' local-link policy when peer service UUIDs
+      // resolve during BLE central scanning.
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: false,
         NSAllowsLocalNetworking: true,
@@ -244,7 +258,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: "com.gokhancamci.afetnetapp",
-    versionCode: 34,
+    versionCode: 36,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon-foreground.png",
       backgroundImage: "./assets/adaptive-icon-background.png",

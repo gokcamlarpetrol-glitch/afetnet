@@ -386,6 +386,23 @@ export default function NotificationSettingsScreen({ navigation }: NotificationS
               value={notificationsEnabled}
               onValueChange={(value) => {
                 haptics.impactLight();
+                // K10: Disabling all notifications also silences earthquake early
+                // warnings. Make this trade-off explicit before toggling off.
+                if (!value) {
+                  Alert.alert(
+                    'Bildirimleri Kapat',
+                    'Tüm bildirimleri kapatırsanız deprem erken uyarıları, SOS yardım çağrıları ve aile bildirimleri de durur. Hayat-kritik uyarılar dahil tüm bildirimler engellenir.\n\nDevam etmek istediğinize emin misiniz?',
+                    [
+                      { text: 'Vazgeç', style: 'cancel' },
+                      {
+                        text: 'Evet, Kapat',
+                        style: 'destructive',
+                        onPress: () => setNotifications(false),
+                      },
+                    ],
+                  );
+                  return;
+                }
                 setNotifications(value);
               }}
               trackColor={{ false: colors.background.tertiary, true: colors.brand.primary }}

@@ -75,6 +75,13 @@ export default function SOSFullScreenAlert() {
     const lastAlertIdRef = useRef<string | null>(null);
     const lastAlertTimeRef = useRef<number>(0);
 
+    // G3: Queue concurrent SOS alerts so the first one isn't silently overwritten
+    // when a second SOS arrives. Without the queue, a swap-style replace would
+    // lose the first SOS before the user could act on it. Bounded to prevent
+    // unbounded memory in dense-network scenarios (e.g. large family + nearby).
+    const pendingAlertsRef = useRef<SOSFullScreenAlertData[]>([]);
+    const MAX_PENDING_ALERTS = 5;
+
     // CRITICAL FIX: Use a ref to track current alertData for the cancel listener.
     // The cancel listener's useEffect has [] dependency (registered once on mount)
     // so it cannot read the latest alertData from the closure. Without this ref,
@@ -128,6 +135,22 @@ export default function SOSFullScreenAlert() {
                 }
                 lastAlertIdRef.current = alertKey;
                 lastAlertTimeRef.current = now;
+
+                // G3: If a SOS alert is already displayed, queue this one instead of
+                // overwriting (which would lose the first SOS before the user can act).
+                // The current alert's dismiss flow will pop the next from the queue.
+                const current = alertDataRef.current;
+                if (current) {
+                    const currentKey = current.signalId || `${current.senderName}_${current.message}`;
+                    if (currentKey !== alertKey) {
+                        if (pendingAlertsRef.current.length < MAX_PENDING_ALERTS) {
+                            pendingAlertsRef.current.push(data);
+                        }
+                        // Still buzz to alert the user that another SOS arrived
+                        try { haptics.impactHeavy(); } catch { /* best-effort */ }
+                        return;
+                    }
+                }
 
                 // Update ref SYNCHRONOUSLY before setState (for cancel listener)
                 alertDataRef.current = data;
@@ -212,6 +235,25 @@ export default function SOSFullScreenAlert() {
         import('../services/WhistleService').then(({ whistleService: ws }) => {
             ws.stop();
         }).catch(e => { if (__DEV__) console.debug('SOS whistle stop on dismiss failed:', e); });
+
+        // G3: Pop next queued SOS alert (if any). Brief delay so the current
+        // alert's exit animation completes before the next pops in.
+        const next = pendingAlertsRef.current.shift();
+        if (next && isMountedRef.current) {
+            setTimeout(() => {
+                if (!isMountedRef.current) return;
+                // M2: Refresh dedup keys for the popped alert so it gets its
+                // own 30s dedup window and so any UI that reads elapsed-time
+                // computes from "now" rather than the first alert's arrival time.
+                const popKey = next.signalId || `${next.senderName}_${next.message}`;
+                lastAlertIdRef.current = popKey;
+                lastAlertTimeRef.current = Date.now();
+                alertDataRef.current = next;
+                setAlertData(next);
+                setVisible(true);
+                try { haptics.impactHeavy(); } catch { /* best-effort */ }
+            }, 600);
+        }
     }, []);
 
     const handleDismiss = useCallback(() => {

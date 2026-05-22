@@ -48,7 +48,7 @@ const MAIN_ONLY_SCREENS = new Set([
     'FlashlightWhistle', 'PsychologicalSupport', 'MyQR',
     'OfflineMapSettings', 'AdvancedSettings', 'About',
     'PrivacyPolicy', 'TermsOfService', 'Security',
-    'UserReports', 'VolunteerModule', 'CreateGroup', 'VoiceCall', 'RiskScore',
+    'UserReports', 'VolunteerModule', 'CreateGroup', 'RiskScore',
 ]);
 
 /**

@@ -27,15 +27,19 @@ import { getFirebaseAuth } from '../../lib/firebase';
 
 const logger = createLogger('CryptoService');
 
-// Storage keys — user-scoped to prevent cross-account key sharing
-// Uses cached UID from init time to prevent "default" fallback during auth restore
+// Storage keys — user-scoped to prevent cross-account key sharing.
+// görev #29 ITEM 4: fail-closed — returns null when no UID is available.
+// The '|| default' fallback is removed: during an auth-restore race it would
+// scope keys to 'afetnet_crypto_*_default', allowing user B on the same device
+// to load user A's private keys. All callers skip key ops when the key is null.
 let _cryptoServiceInitUid = '';
-const getUidSuffix = () => _cryptoServiceInitUid || getFirebaseAuth()?.currentUser?.uid || 'default';
-const getPrivateKeyStorage = () => `afetnet_crypto_private_key_${getUidSuffix()}`;
-const getPublicKeyStorage = () => `afetnet_crypto_public_key_${getUidSuffix()}`;
-const getSignPrivateKeyStorage = () => `afetnet_crypto_sign_private_key_${getUidSuffix()}`;
-const getSignPublicKeyStorage = () => `afetnet_crypto_sign_public_key_${getUidSuffix()}`;
-const getKnownKeysStorage = () => `@afetnet:crypto_known_keys_v2:${getUidSuffix()}`;
+const getUidSuffix = (): string | null =>
+    _cryptoServiceInitUid || getFirebaseAuth()?.currentUser?.uid || null;
+const getPrivateKeyStorage = (): string | null => { const u = getUidSuffix(); return u ? `afetnet_crypto_private_key_${u}` : null; };
+const getPublicKeyStorage = (): string | null => { const u = getUidSuffix(); return u ? `afetnet_crypto_public_key_${u}` : null; };
+const getSignPrivateKeyStorage = (): string | null => { const u = getUidSuffix(); return u ? `afetnet_crypto_sign_private_key_${u}` : null; };
+const getSignPublicKeyStorage = (): string | null => { const u = getUidSuffix(); return u ? `afetnet_crypto_sign_public_key_${u}` : null; };
+const getKnownKeysStorage = (): string | null => { const u = getUidSuffix(); return u ? `@afetnet:crypto_known_keys_v2:${u}` : null; };
 
 // ELITE: Key pair interface (for encryption)
 export interface EncryptionKeyPair {
@@ -114,8 +118,11 @@ class CryptoService {
             logger.info(`Secure storage: ${this.useSecureStorage ? 'enabled' : 'fallback to AsyncStorage'}`);
 
             // 2. Load or generate encryption key pair
-            const storedEncKey = await this.loadSecurely(getPrivateKeyStorage());
-            const storedEncPubKey = await this.loadSecurely(getPublicKeyStorage());
+            // görev #29 ITEM 4: null-guard — skip load if UID not yet available
+            const _encPrivKey = getPrivateKeyStorage();
+            const _encPubKey = getPublicKeyStorage();
+            const storedEncKey = _encPrivKey ? await this.loadSecurely(_encPrivKey) : null;
+            const storedEncPubKey = _encPubKey ? await this.loadSecurely(_encPubKey) : null;
 
             if (storedEncKey && storedEncPubKey) {
                 this.encryptionKeyPair = {
@@ -130,8 +137,11 @@ class CryptoService {
             }
 
             // 3. Load or generate signing key pair
-            const storedSignKey = await this.loadSecurely(getSignPrivateKeyStorage());
-            const storedSignPubKey = await this.loadSecurely(getSignPublicKeyStorage());
+            // görev #29 ITEM 4: null-guard — skip load if UID not yet available
+            const _signPrivKey = getSignPrivateKeyStorage();
+            const _signPubKey = getSignPublicKeyStorage();
+            const storedSignKey = _signPrivKey ? await this.loadSecurely(_signPrivKey) : null;
+            const storedSignPubKey = _signPubKey ? await this.loadSecurely(_signPubKey) : null;
 
             if (storedSignKey && storedSignPubKey) {
                 this.signingKeyPair = {
@@ -172,9 +182,12 @@ class CryptoService {
             createdAt: Date.now(),
         };
 
-        // Store securely
-        await this.storeSecurely(getPrivateKeyStorage(), this.encryptionKeyPair.privateKey);
-        await this.storeSecurely(getPublicKeyStorage(), this.encryptionKeyPair.publicKey);
+        // Store securely — private key sensitive (SecureStore zorunlu)
+        // görev #29 ITEM 4: null-guard — skip persist if no UID available
+        const _storePriv = getPrivateKeyStorage();
+        const _storePub = getPublicKeyStorage();
+        if (_storePriv) await this.storeSecurely(_storePriv, this.encryptionKeyPair.privateKey, true);
+        if (_storePub) await this.storeSecurely(_storePub, this.encryptionKeyPair.publicKey);
 
         return this.encryptionKeyPair;
     }
@@ -192,9 +205,12 @@ class CryptoService {
             createdAt: Date.now(),
         };
 
-        // Store securely
-        await this.storeSecurely(getSignPrivateKeyStorage(), this.signingKeyPair.privateKey);
-        await this.storeSecurely(getSignPublicKeyStorage(), this.signingKeyPair.publicKey);
+        // Store securely — signing private key sensitive (SecureStore zorunlu)
+        // görev #29 ITEM 4: null-guard — skip persist if no UID available
+        const _storeSignPriv = getSignPrivateKeyStorage();
+        const _storeSignPub = getSignPublicKeyStorage();
+        if (_storeSignPriv) await this.storeSecurely(_storeSignPriv, this.signingKeyPair.privateKey, true);
+        if (_storeSignPub) await this.storeSecurely(_storeSignPub, this.signingKeyPair.publicKey);
 
         return this.signingKeyPair;
     }
@@ -374,12 +390,21 @@ class CryptoService {
     }
 
     /**
-     * Generate a cryptographically secure UUID
+     * Generate a cryptographically secure UUID (RFC4122 v4).
+     *
+     * H5/H6 hardening: previously the variant nibble (`[8,9,a,b]`) was selected
+     * with Math.random — that leaked entropy in exactly the bits callers later
+     * treat as a high-uniqueness fingerprint. Now we apply the RFC bitmask
+     * directly to the CSPRNG bytes per RFC4122 §4.4:
+     *   - byte 6: high-nibble = 0100 (version 4)
+     *   - byte 8: high-bits  = 10xx  (variant 10)
      */
     generateUUID(): string {
         const bytes = ExpoCrypto.getRandomBytes(16);
+        bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+        bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
         const hex = Buffer.from(bytes).toString('hex');
-        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(12, 15)}-${['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)]}${hex.slice(15, 18)}-${hex.slice(18, 30)}`;
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
     }
 
     /**
@@ -422,12 +447,20 @@ class CryptoService {
     // ==================== PRIVATE HELPERS ====================
 
     /**
-     * Store data securely (SecureStore or encrypted MMKV fallback)
+     * Store data securely. Hassas veri (private key) yalnızca SecureStore
+     * (Keychain/Keystore) ile saklanır; SecureStore yoksa düz depoya yazmak
+     * yerine hata fırlatır — E2EE devre dışı kalır ama anahtar açığa çıkmaz.
+     * Hassas olmayan veri (public key) SecureStore yoksa DirectStorage'a düşebilir.
      */
-    private async storeSecurely(key: string, value: string): Promise<void> {
+    private async storeSecurely(key: string, value: string, sensitive = false): Promise<void> {
         try {
             if (this.useSecureStorage) {
                 await SecureStore.setItemAsync(key, value);
+            } else if (sensitive) {
+                // SECURITY (P0): Güvenli depolama yoksa private key ASLA düz MMKV'ye
+                // yazılmaz — cihaz ele geçirilse şifreli mesajların anahtarı sızardı.
+                logger.error(`Secure storage unavailable — '${key}' düz metin olarak yazılmadı (E2EE devre dışı)`);
+                throw new Error('SECURE_STORAGE_UNAVAILABLE');
             } else {
                 DirectStorage.setString(key, value);
             }
@@ -458,8 +491,11 @@ class CryptoService {
      */
     private async saveKnownPublicKeys(): Promise<void> {
         try {
+            // görev #29 ITEM 4: null-guard — skip persist if no UID
+            const _knownKey = getKnownKeysStorage();
+            if (!_knownKey) { logger.warn('saveKnownPublicKeys: no UID — skipping persist'); return; }
             const data = JSON.stringify(Array.from(this.knownPublicKeys.entries()));
-            DirectStorage.setString(getKnownKeysStorage(), data);
+            DirectStorage.setString(_knownKey, data);
         } catch (error) {
             logger.error('Failed to save known public keys:', error);
         }
@@ -470,7 +506,10 @@ class CryptoService {
      */
     private async loadKnownPublicKeys(): Promise<void> {
         try {
-            const data = DirectStorage.getString(getKnownKeysStorage()) ?? null;
+            // görev #29 ITEM 4: null-guard — skip if no UID
+            const _knownKey2 = getKnownKeysStorage();
+            if (!_knownKey2) { logger.warn('loadKnownPublicKeys: no UID — skipping load'); return; }
+            const data = DirectStorage.getString(_knownKey2) ?? null;
             if (data) {
                 const entries = JSON.parse(data) as [string, KnownPublicKey][];
                 this.knownPublicKeys = new Map(entries);
@@ -489,13 +528,14 @@ class CryptoService {
         this.signingKeyPair = null;
         this.knownPublicKeys.clear();
 
+        // görev #29 ITEM 4: filter nulls — key-getters return null when no UID
         const keysToRemove = [
             getPrivateKeyStorage(),
             getPublicKeyStorage(),
             getSignPrivateKeyStorage(),
             getSignPublicKeyStorage(),
             getKnownKeysStorage(),
-        ];
+        ].filter((k): k is string => k !== null);
 
         for (const key of keysToRemove) {
             try {

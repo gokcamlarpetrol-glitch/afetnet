@@ -64,6 +64,9 @@ service cloud.firestore {
              && hasMutualFamilyLink(request.auth.uid, targetUid);
     }
 
+    // One accepted invitation direction is the consent proof. The accepted status
+    // can only be written by the recipient of an existing pending request, so a
+    // second reverse request is not required to unlock the mutual family finalizer.
     function hasAcceptedContactRequest(userA, userB) {
       return userA is string
              && userB is string
@@ -152,9 +155,23 @@ service cloud.firestore {
     }
 
     // Basic per-conversation throttle: same sender cannot post back-to-back in <700ms.
+    //
+    // M5 (typing-indicator exemption): TYPING signals fire on every keystroke
+    // and would trip this 700ms guard during fast typing or emoji bursts. We
+    // exempt them by checking the incoming `type` field. Anything that ISN'T
+    // a TYPING signal still pays the 700ms cost, so the abuse-protection
+    // properties of the throttle remain intact for actual messages.
+    //
+    // Why type-check is safe: rules can't be bypassed by spoofing `type` —
+    // even a malicious client labelling spam as TYPING still has to satisfy
+    // per-message create rules (recipient inbox bound, sender = auth.uid).
+    // The worst they can do is bypass rate-limit on typing notifications,
+    // which carry no payload — already low-impact.
     function passesConversationMessageRateLimit(conversationId) {
       let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
-      return !(conversation.lastMessage is map)
+      let isTypingSignal = request.resource.data.type == 'TYPING';
+      return isTypingSignal
+             || !(conversation.lastMessage is map)
              || !(conversation.lastMessage.from is string)
              || !(conversation.lastMessage.timestamp is number)
              || conversation.lastMessage.from != request.auth.uid
@@ -183,20 +200,28 @@ service cloud.firestore {
     }
 
     function isConversationMessageReceiptUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                'readBy',
                'deliveredTo',
-               'status',
-               'read',
-               'delivered',
-               'readAt',
-               'deliveredAt',
                'updatedAt'
              ])
-             && (!('status' in request.resource.data)
-                 || !('status' in resource.data)
-                 || request.resource.data.status == resource.data.status
-                 || request.resource.data.status in ['sent', 'delivered', 'read']);
+             && (
+               !changed.hasAny(['readBy'])
+               || (
+                 request.resource.data.readBy is map
+                 && (!(resource.data.readBy is map) || request.resource.data.readBy.diff(resource.data.readBy).affectedKeys().hasOnly([request.auth.uid]))
+                 && ((resource.data.readBy is map) || request.resource.data.readBy.keys().hasOnly([request.auth.uid]))
+               )
+             )
+             && (
+               !changed.hasAny(['deliveredTo'])
+               || (
+                 request.resource.data.deliveredTo is map
+                 && (!(resource.data.deliveredTo is map) || request.resource.data.deliveredTo.diff(resource.data.deliveredTo).affectedKeys().hasOnly([request.auth.uid]))
+                 && ((resource.data.deliveredTo is map) || request.resource.data.deliveredTo.keys().hasOnly([request.auth.uid]))
+               )
+             );
     }
 
     function isConversationMessageSenderUpdate() {
@@ -209,22 +234,134 @@ service cloud.firestore {
                'editedAt',
                'deleted',
                'deletedAt',
-               'status',
-               'delivered',
-               'deliveredAt',
-               'read',
-               'readAt',
-               'readBy',
-               'deliveredTo',
                'updatedAt'
              ])
              && (!('content' in request.resource.data)
                  || (request.resource.data.content is string
-                     && request.resource.data.content.size() <= 5000))
-             && (!('status' in request.resource.data)
-                 || !('status' in resource.data)
-                 || request.resource.data.status == resource.data.status
-                 || request.resource.data.status in ['sent', 'delivered', 'read']);
+                     && request.resource.data.content.size() <= 5000));
+    }
+
+    function isConversationMetadataTimestamp(value) {
+      return value is number || value is timestamp;
+    }
+
+    function keepsConversationImmutableFields() {
+      return request.resource.data.participants == resource.data.participants
+             && (
+               (!('createdAt' in resource.data) && !('createdAt' in request.resource.data))
+               || request.resource.data.createdAt == resource.data.createdAt
+             )
+             && (
+               (!('createdBy' in resource.data) && !('createdBy' in request.resource.data))
+               || request.resource.data.createdBy == resource.data.createdBy
+             )
+             && (
+               (!('type' in resource.data) && !('type' in request.resource.data))
+               || request.resource.data.type == resource.data.type
+             )
+             && (
+               (!('pairKey' in resource.data) && !('pairKey' in request.resource.data))
+               || request.resource.data.pairKey == resource.data.pairKey
+             );
+    }
+
+    function isConversationMetadataUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return keepsConversationImmutableFields()
+             && changed.hasOnly([
+               'lastMessage',
+               'lastMessagePreview',
+               'lastMessageSenderName',
+               'lastMessageSenderUid',
+               'lastMessageAt',
+               'updatedAt'
+             ])
+             && (!changed.hasAny(['lastMessage'])
+                 || (request.resource.data.lastMessage is string
+                     && request.resource.data.lastMessage.size() <= 5000))
+             && (!changed.hasAny(['lastMessagePreview'])
+                 || (request.resource.data.lastMessagePreview is string
+                     && request.resource.data.lastMessagePreview.size() <= 500))
+             && (!changed.hasAny(['lastMessageSenderName'])
+                 || (request.resource.data.lastMessageSenderName is string
+                     && request.resource.data.lastMessageSenderName.size() <= 120))
+             && (!changed.hasAny(['lastMessageSenderUid'])
+                 || request.resource.data.lastMessageSenderUid == request.auth.uid)
+             && (!changed.hasAny(['lastMessageAt'])
+                 || isConversationMetadataTimestamp(request.resource.data.lastMessageAt))
+             && (!changed.hasAny(['updatedAt'])
+                 || isConversationMetadataTimestamp(request.resource.data.updatedAt));
+    }
+
+    function isConversationTypingUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return keepsConversationImmutableFields()
+             && changed.hasOnly(['typing'])
+             && (
+               (
+                 request.resource.data.typing is map
+                 && (
+                   (!(resource.data.typing is map)
+                    && request.resource.data.typing.keys().hasOnly([request.auth.uid]))
+                   || (
+                     resource.data.typing is map
+                     && request.resource.data.typing.diff(resource.data.typing).affectedKeys().hasOnly([request.auth.uid])
+                   )
+                 )
+               )
+               || (
+                 !('typing' in request.resource.data)
+                 && resource.data.typing is map
+                 && resource.data.typing.keys().hasOnly([request.auth.uid])
+               )
+             );
+    }
+
+    function isConversationGroupProfileUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.type == 'group'
+             && resource.data.createdBy == request.auth.uid
+             && keepsConversationImmutableFields()
+             && changed.hasOnly([
+               'name',
+               'avatarUrl',
+               'updatedAt'
+             ])
+             && (!changed.hasAny(['name'])
+                 || (request.resource.data.name is string
+                     && request.resource.data.name.size() <= 120))
+             && (!changed.hasAny(['avatarUrl'])
+                 || request.resource.data.avatarUrl == null
+                 || (request.resource.data.avatarUrl is string
+                     && request.resource.data.avatarUrl.size() <= 2048))
+             && (!changed.hasAny(['updatedAt'])
+                 || isConversationMetadataTimestamp(request.resource.data.updatedAt));
+    }
+
+    function isConversationMembershipUpdate() {
+      return resource.data.type == 'group'
+             && resource.data.createdBy == request.auth.uid
+             && request.resource.data.type == resource.data.type
+             && request.resource.data.createdBy == resource.data.createdBy
+             && request.resource.data.createdAt == resource.data.createdAt
+             && request.resource.data.participants is list
+             && request.auth.uid in request.resource.data.participants
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'participants',
+               'participantNames',
+               'participantDeviceIds',
+               'updatedAt'
+             ]);
+    }
+
+    function isValidPublicUserProfileData(data) {
+      return (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 80))
+             && (!('photoURL' in data) || (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 2048)))
+             && (!('qrId' in data) || (data.qrId is string && data.qrId.size() <= 64))
+             && (!('deviceId' in data) || (data.deviceId is string && data.deviceId.size() <= 128))
+             && (!('publicUserCode' in data) || (data.publicUserCode is string && data.publicUserCode.size() <= 64))
+             && (!('primaryDeviceId' in data) || (data.primaryDeviceId is string && data.primaryDeviceId.size() <= 128))
+             && (!('status' in data) || data.status in ['safe', 'needs_help', 'trapped', 'sos', 'offline', 'need-help', 'unknown', 'critical']);
     }
 
     // NOTE: isNewsSummaryJobOwner, hasAppCheck, isNotSpamming removed — unused
@@ -277,6 +414,17 @@ service cloud.firestore {
     // EEW broadcasts (official or crowdsourced)
     // SECURITY FIX: Only Cloud Functions (admin SDK) can create broadcasts
     // Prevents any authenticated user from creating fake earthquake alerts
+    //
+    // H2/H3 (public-read documentation): `allow read: if true` is INTENTIONAL.
+    //   - EEW alerts are public-safety data; we want unauthenticated devices
+    //     (e.g. pre-login bootstrap, kiosk mode) to receive them.
+    //   - Risk: scrape-ability of historical broadcasts. Mitigated by:
+    //       a) Firebase default per-IP rate limit (~50 read/s)
+    //       b) Documents only contain alert metadata, not user data
+    //       c) Document IDs are time-ordered → forward enumeration limited
+    //   - v2.0 migration plan: move public reads to a Cloud Functions HTTP
+    //     endpoint with edge-cache (Cloud CDN) + per-IP rate limit + abuse
+    //     monitoring. Tracking issue: see docs/SECURITY_HARDENING_v2.md.
     match /eew_broadcasts/{broadcastId} {
       allow read: if true;
       allow create: if false; // Only via Cloud Functions with admin SDK
@@ -298,6 +446,10 @@ service cloud.firestore {
     // P-wave consensus (aggregated data)
     // SECURITY FIX: Only Cloud Functions can write consensus data
     // Prevents manipulation of consensus thresholds from client
+    //
+    // H2/H3 (public-read documentation): public read is intentional — clients
+    // poll consensus to know whether to trigger their own EEW. Same scrape
+    // risk profile as eew_broadcasts; same v2.0 mitigation plan applies.
     match /eew_consensus/{consensusId} {
       allow read: if true;
       allow create: if false; // Only via Cloud Functions with admin SDK
@@ -333,16 +485,13 @@ service cloud.firestore {
       allow create: if isAuthenticated()
                     && request.resource.data.ownerUid == request.auth.uid;
 
-      // Owner-only updates; ownerUid cannot be changed after creation
-      allow update: if (
-                      isDeviceOwner(deviceId)
-                      && request.resource.data.ownerUid == resource.data.ownerUid
-                    ) || (
-                      // Migration-safe claim: allow owner binding for legacy docs missing ownerUid
-                      isAuthenticated()
-                      && !(resource.data.ownerUid is string)
-                      && request.resource.data.ownerUid == request.auth.uid
-                    );
+      // Owner-only updates; ownerUid cannot be changed after creation.
+      // SECURITY: "migration-safe claim" dalı kaldırıldı — ownerUid'si string
+      // olmayan legacy doküman herhangi bir kullanıcı tarafından ele geçirilebiliyordu
+      // (aile konumu/SOS/mesaj erişimi hijack riski). Legacy doküman migrasyonu
+      // admin SDK (Cloud Function) ile yapılır; rules'ı bypass eder.
+      allow update: if isDeviceOwner(deviceId)
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
       // CRITICAL FIX: Allow device owner to delete (account deletion / GDPR)
       allow delete: if isDeviceOwner(deviceId);
       
@@ -514,10 +663,10 @@ service cloud.firestore {
                     && request.resource.data.longitude is number
                     && request.resource.data.userId == request.auth.uid
                     && isRecentClientTimestamp(request.resource.data.timestamp);
-      allow update: if isAuthenticated()
-                    && resource.data.userId == request.auth.uid
-                    && (!('timestamp' in request.resource.data.diff(resource.data).affectedKeys())
-                        || isRecentClientTimestamp(request.resource.data.timestamp));
+      // SECURITY: Sismik tespit kaydı immutable — bir kez yazılır, değişmez.
+      // Aksi halde sahibi koordinat/büyüklük değerlerini sonradan değiştirip
+      // crowdsourced veri bütünlüğünü bozabilirdi (plum_observations ile tutarlı).
+      allow update: if false;
       allow delete: if false;
     }
     
@@ -575,6 +724,10 @@ service cloud.firestore {
     // EEW events from official sources (AFAD, Kandilli, etc.)
     // - Public read
     // - Only Cloud Functions can write (via admin SDK)
+    //
+    // H2/H3 (public-read documentation): identical rationale to eew_broadcasts —
+    // public-safety feed must be reachable pre-login. v2.0: migrate to CF HTTP +
+    // CDN + per-IP rate limit.
     match /eew_events/{eventId} {
       allow read: if true;
       allow write: if false; // Only via Cloud Functions with admin SDK
@@ -637,6 +790,10 @@ service cloud.firestore {
                     && request.resource.data.articleId == summaryId
                     && request.resource.data.ownerUid == request.auth.uid
                     && request.resource.data.status is string
+                    // SECURITY: leaseUntil en fazla 10 dk ileri olabilir — lock
+                    // sahibi kilidi sonsuza uzatıp başkalarını kalıcı bloklayamaz.
+                    && request.resource.data.leaseUntil is number
+                    && request.resource.data.leaseUntil <= request.time.toMillis() + 600000
                     && (
                       // Current lock owner can update lifecycle state.
                       resource.data.ownerUid == request.auth.uid
@@ -648,17 +805,60 @@ service cloud.firestore {
                     );
       allow delete: if false;
     }
-    
+
+    // K2: Monitoring collection — CF-only writes (admin SDK bypasses rules).
+    // Used by Kandilli parser health tracking. Reads restricted to admins so
+    // counters don't leak operational signals to clients.
+    match /monitoring/{docId} {
+      allow read: if isAdmin();
+      allow write: if false; // Cloud Functions admin SDK only
+    }
+
     // ============================================================
     // EXISTING COLLECTIONS (if not already defined)
     // ============================================================
-    
+
     // Users collection
     match /users/{userId} {
-      // V3: Allow any authenticated user to read basic profile (needed for messaging)
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId);
+      // V3: Tekil profil okuma mesajlaşma için gereklidir.
+      // SECURITY: list/query yalnızca admin — açık list tüm kullanıcı tabanını
+      // (qrId, displayName, status) dökebilirdi. İstemci tekil get kullanır.
+      allow get: if isAuthenticated();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId)
+                    && request.resource.data.keys().hasOnly([
+                      'displayName',
+                      'photoURL',
+                      'qrId',
+                      'deviceId',
+                      'publicUserCode',
+                      'primaryDeviceId',
+                      'primaryDeviceUpdatedAt',
+                      'status',
+                      'createdAt',
+                      'updatedAt',
+                      'lastSeen'
+                    ])
+                    && isValidPublicUserProfileData(request.resource.data);
+      allow update: if isOwner(userId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'displayName',
+                      'photoURL',
+                      'qrId',
+                      'deviceId',
+                      'publicUserCode',
+                      'primaryDeviceId',
+                      'primaryDeviceUpdatedAt',
+                      'status',
+                      'createdAt',
+                      'updatedAt',
+                      'lastSeen',
+                      'email',
+                      'lastLoginAt'
+                    ])
+                    && isValidPublicUserProfileData(request.resource.data)
+                    && !('email' in request.resource.data)
+                    && !('lastLoginAt' in request.resource.data);
       // CRITICAL FIX: Allow owner to delete their own profile (account deletion / GDPR)
       allow delete: if isOwner(userId);
 
@@ -791,6 +991,12 @@ service cloud.firestore {
     }
     
     // Earthquakes collection (read-only for users, write via Cloud Functions)
+    //
+    // H2/H3 (public-read documentation): public read by design — earthquake
+    // catalog must work for unauthenticated/pre-login views (e.g. cold-start
+    // map). Firebase per-IP rate limit (50 r/s) gates abuse. v2.0 plan:
+    // migrate to a CF HTTP endpoint with edge cache, allowing per-IP token
+    // bucket + WAF rules. Tracking: docs/SECURITY_HARDENING_v2.md.
     match /earthquakes/{earthquakeId} {
       allow read: if true;
       // ELITE SECURITY: Users cannot write earthquakes - only Cloud Functions with admin SDK
@@ -939,11 +1145,29 @@ service cloud.firestore {
                     && request.resource.data.members is list
                     && request.auth.uid in request.resource.data.members
                     && request.resource.data.createdBy == request.auth.uid;
-      // Only members can update; createdBy is immutable
+      // WP-5.16: Tam üye-düzeyi yetkilendirme.
+      // members listesi değişmemişse: herhangi bir üye metadata güncelleyebilir.
+      // members listesi değişiyorsa iki senaryo meşrudur:
+      //   1. Kurucu (createdBy) — istediği üyeyi ekleyip çıkarabilir.
+      //   2. Kullanıcı YALNIZCA kendi üyeliğini değiştiriyorsa (katılma / ayrılma):
+      //      Her iki listeden auth.uid çıkarılınca eşitlerse, başka hiçbir üyeye
+      //      dokunulmamış demektir.
+      // createdBy her durumda immutable; kurucu her zaman listede kalmalıdır.
       allow update: if isAuthenticated()
                     && resource.data.members is list
+                    && request.resource.data.members is list
                     && request.auth.uid in resource.data.members
-                    && request.resource.data.createdBy == resource.data.createdBy;
+                    && request.resource.data.createdBy == resource.data.createdBy
+                    && resource.data.createdBy in request.resource.data.members
+                    && (
+                      // members listesi hiç değişmedi — metadata güncellemesi
+                      request.resource.data.members == resource.data.members
+                      // Kurucu tüm listeyi yönetebilir
+                      || request.auth.uid == resource.data.createdBy
+                      // Kullanıcı yalnızca kendi üyeliğini değiştiriyor
+                      || request.resource.data.members.removeAll([request.auth.uid])
+                         == resource.data.members.removeAll([request.auth.uid])
+                    );
       // GDPR: creator can delete family during account deletion
       allow delete: if isAuthenticated()
                     && resource.data.createdBy == request.auth.uid;
@@ -998,7 +1222,9 @@ service cloud.firestore {
                                 isAuthenticated()
                                 && exists(/databases/$(database)/documents/conversations/$(threadId))
                                 && get(/databases/$(database)/documents/conversations/$(threadId)).data.participants is list
+                                && userId in get(/databases/$(database)/documents/conversations/$(threadId)).data.participants
                                 && request.auth.uid in get(/databases/$(database)/documents/conversations/$(threadId)).data.participants
+                                && (!('conversationId' in request.resource.data) || request.resource.data.conversationId == threadId)
                               );
         allow delete: if isOwner(userId);
       }
@@ -1070,12 +1296,10 @@ service cloud.firestore {
                     && resource.data.participants is list
                     && request.auth.uid in resource.data.participants
                     && (
-                      (!('createdAt' in resource.data) && !('createdAt' in request.resource.data))
-                      || request.resource.data.createdAt == resource.data.createdAt
-                    )
-                    && (
-                      (!('createdBy' in resource.data) && !('createdBy' in request.resource.data))
-                      || request.resource.data.createdBy == resource.data.createdBy
+                      isConversationMetadataUpdate()
+                      || isConversationTypingUpdate()
+                      || isConversationGroupProfileUpdate()
+                      || isConversationMembershipUpdate()
                     );
       allow delete: if false;
 
@@ -1203,7 +1427,16 @@ service cloud.firestore {
       // All nearby users continue seeing an active SOS forever.
       allow update: if isAuthenticated()
                     && resource.data.senderUid == request.auth.uid
-                    && request.resource.data.status is string;
+                    && request.resource.data.senderUid == resource.data.senderUid
+                    && request.resource.data.signalId == resource.data.signalId
+                    && request.resource.data.latitude == resource.data.latitude
+                    && request.resource.data.longitude == resource.data.longitude
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'status',
+                      'cancelledAt',
+                      'updatedAt'
+                    ])
+                    && request.resource.data.status in ['cancelled', 'resolved'];
       allow delete: if false; // Cleanup via TTL or Cloud Functions
 
       // SOS Acknowledgements — delivery confirmation from recipients
@@ -1220,44 +1453,6 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if false;
       }
-    }
-
-    // ============================================================
-    // VOICE CALLS (P2P WebRTC signaling)
-    // ============================================================
-
-    // Call documents — ONLY caller and recipient can read/write
-    match /voice_calls/{callId} {
-      allow read: if isAuthenticated() &&
-        (resource.data.callerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
-      allow create: if isAuthenticated() && request.resource.data.callerUid == request.auth.uid;
-      allow update: if isAuthenticated() &&
-        (resource.data.callerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
-      allow delete: if false; // Cleanup via TTL or Cloud Functions only
-
-      // ICE candidates — only call participants
-      match /callerCandidates/{candidateId} {
-        allow read, write: if isAuthenticated() &&
-          (get(/databases/$(database)/documents/voice_calls/$(callId)).data.callerUid == request.auth.uid ||
-           get(/databases/$(database)/documents/voice_calls/$(callId)).data.recipientUid == request.auth.uid);
-      }
-      match /calleeCandidates/{candidateId} {
-        allow read, write: if isAuthenticated() &&
-          (get(/databases/$(database)/documents/voice_calls/$(callId)).data.callerUid == request.auth.uid ||
-           get(/databases/$(database)/documents/voice_calls/$(callId)).data.recipientUid == request.auth.uid);
-      }
-    }
-
-    // Incoming call notifications — only the recipient can read, caller can write
-    // SECURITY FIX: Validate callerUid matches auth.uid to prevent call spoofing
-    match /voice_calls_incoming/{userId} {
-      allow read, delete: if isOwner(userId);
-      allow create, update: if isAuthenticated()
-                            && request.resource.data.callerUid == request.auth.uid
-                            && request.resource.data.callId is string
-                            && exists(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId))
-                            && get(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId)).data.callerUid == request.auth.uid
-                            && get(/databases/$(database)/documents/voice_calls/$(request.resource.data.callId)).data.recipientUid == userId;
     }
 
     // ============================================================

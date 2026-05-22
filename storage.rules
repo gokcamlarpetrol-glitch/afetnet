@@ -27,11 +27,19 @@ service firebase.storage {
     }
     
     // Elite Security: Emergency SOS media.
-    // In-app responders are authenticated; public unauthenticated reads would expose
-    // emergency photos/audio if a download path leaks. The first path segment is the
-    // uploader Firebase Auth UID, matching account-deletion cleanup paths.
+    // Emergency photos/audio are sensitive. Readers must be the owner/uploader or
+    // explicitly listed by the uploader/backend as mutual family or responders in
+    // comma-separated metadata fields.
     match /sos/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource.metadata != null && resource.metadata.ownerUid == request.auth.uid) ||
+        (resource.metadata != null && resource.metadata.uploaderUid == request.auth.uid) ||
+        (resource.metadata != null && resource.metadata.recipientUids != null &&
+         resource.metadata.recipientUids.matches('(^|,)' + request.auth.uid + '(,|$)')) ||
+        (resource.metadata != null && resource.metadata.responderUids != null &&
+         resource.metadata.responderUids.matches('(^|,)' + request.auth.uid + '(,|$)'))
+      );
       allow write: if isAuthenticated() &&
                       request.auth.uid == userId &&
                       request.resource.metadata.ownerUid == request.auth.uid &&
@@ -106,6 +114,13 @@ service firebase.storage {
     // P0-10: Same uploader-or-recipient gating as chat/, plus the upload must
     // tag the groupId in metadata so a future per-group rule can be applied
     // without re-uploading.
+    //
+    // K12 SCALE NOTE: recipientUids is a comma-separated metadata string. Firebase
+    // Storage metadata cap is ~8KB. Each UID (~28 chars) costs ~30 bytes including
+    // delimiter — that gives a safe ceiling of ~250 recipients per file. For
+    // mega-groups (500+) this rule should migrate to firestore.exists() lookups
+    // against the conversations/{groupId}/participants subcollection. Cost
+    // implication: +1 Firestore read per download. Tracked for v2.0.
     match /group-chat/{groupId}/{userId}/{allPaths=**} {
       allow read: if isAuthenticated() && (
         request.auth.uid == userId ||

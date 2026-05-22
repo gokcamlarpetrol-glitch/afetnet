@@ -1404,6 +1404,13 @@ export async function shutdownApp() {
     clearSOSAlertDedup();
   } catch { /* already stopped */ }
 
+  // KRİTİK (görev #26): NearbySOSListener dedup'ını da temizle — aynı çapraz-hesap
+  // dedup sızıntısı (B kullanıcısının SOS'u A'nın işlediği ID yüzünden düşer).
+  try {
+    const { clearNearbySOSDedup } = await import('./services/sos/NearbySOSListener');
+    clearNearbySOSDedup();
+  } catch { /* already stopped */ }
+
   // Reset user status store to prevent cross-account SOS/status leak
   try {
     const { useUserStatusStore } = await import('./stores/userStatusStore');

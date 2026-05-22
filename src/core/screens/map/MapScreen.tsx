@@ -20,6 +20,7 @@ import { createLogger } from '../../utils/logger';
 
 // STORES & STATE
 import { useMapStore, MapStyle } from '../../stores/mapStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { offlineMapService, MapLocation } from '../../services/OfflineMapService';
 import { useRescueStore, TrappedUser } from '../../stores/rescueStore';
 import { useMeshStore } from '../../services/mesh/MeshStore';
@@ -100,6 +101,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
     realTimeTracking,
     familyTrackingInterval,
   } = useMapStore();
+  const locationEnabled = useSettingsStore((state) => state.locationEnabled);
 
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
@@ -121,6 +123,7 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
   const { location: liveLocation, locationData } = useLiveLocation({
     distanceInterval: 10,
     timeInterval: 5000,
+    enabled: locationEnabled,
   });
 
   // Sync live location to state
@@ -129,6 +132,12 @@ export default function MapScreen({ navigation, route }: MapScreenProps) {
       setUserLocation(liveLocation);
     }
   }, [liveLocation]);
+
+  useEffect(() => {
+    if (!locationEnabled) {
+      setUserLocation(null);
+    }
+  }, [locationEnabled]);
 
   // Region Refs to prevent infinite loops
   const currentRegionRef = useRef<any>(null);

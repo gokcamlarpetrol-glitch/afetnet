@@ -200,20 +200,18 @@ class CrowdsourcedSeismicNetworkService {
             return false;
         }
 
-        // CRITICAL FIX: Skip RTDB write when no authenticated user.
-        // Without Firebase Auth, the RTDB rules reject the write (auth.uid !== userId).
-        // Previously this generated a fake userId that was always rejected, wasting
-        // bandwidth and flooding error logs. The seismic data is still useful locally
-        // for on-device cluster detection.
+        // FIX: userId, initialize() sırasında auth henüz hazır değilse boş kalıyordu.
+        // Her reportDetection çağrısında auth'u yeniden kontrol et — onAuthStateChanged
+        // olmadan initialize() erken çalışabilir ve userId = '' olarak sabitlenebilir.
+        // Bu kopuk halkayı kapatır: algılama gerçekleşir, userId boş, RTDB yazılmaz.
+        const currentUser = getFirebaseAuth()?.currentUser;
+        if (currentUser) {
+            this.userId = currentUser.uid;
+        }
+
         if (!this.userId) {
-            // Re-check auth in case it became available since initialize()
-            const currentUser = getFirebaseAuth()?.currentUser;
-            if (currentUser) {
-                this.userId = currentUser.uid;
-            } else {
-                logger.warn('Skipping seismic report submission: no authenticated user (RTDB rules would reject)');
-                return false;
-            }
+            logger.warn('Sismik rapor gönderilemiyor: oturum açık değil (RTDB kuralları reddeder)');
+            return false;
         }
 
         // Ensure we have location

@@ -22,12 +22,22 @@ const logger = createLogger('SOSBeaconService');
 // CONFIGURATION
 // ============================================================================
 
+// F4: Battery tiers for active-SOS beacon cadence.
+//
+// LIFE-SAFETY TRADE-OFF: at critical battery, the previous 60s interval gave
+// rescuers a location refresh once per minute. For trapped-victim scenarios
+// (where every passing minute changes the rescue calculus — the victim may
+// move, drift, or stop responding) 60s is too slow. We tighten critical to
+// 30s. The marginal extra battery cost is acceptable because:
+//   • The phone is already broadcasting actively (SOS active state)
+//   • Screen is off in most trapped scenarios
+//   • Rescue happens within minutes-to-hours, not days
 const BEACON_CONFIG = {
     // Interval tiers (milliseconds)
     HIGH_BATTERY_INTERVAL: 5000,      // 5 seconds (battery > 50%)
     MEDIUM_BATTERY_INTERVAL: 15000,   // 15 seconds (battery 20-50%)
     LOW_BATTERY_INTERVAL: 30000,      // 30 seconds (battery < 20%)
-    CRITICAL_BATTERY_INTERVAL: 60000, // 60 seconds (battery < 10%)
+    CRITICAL_BATTERY_INTERVAL: 30000, // 30 seconds (battery < 10%) — was 60s
 
     // Location update intervals
     LOCATION_UPDATE_INTERVAL: 10000,  // 10 seconds

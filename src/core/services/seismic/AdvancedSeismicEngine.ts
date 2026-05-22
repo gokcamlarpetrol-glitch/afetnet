@@ -228,13 +228,16 @@ class AdvancedSeismicEngine {
     }
 
     // Classification using polarization + frequency + onset sharpness
-    if (rectilinearity > 0.7 && accel < P_WAVE_MAX_G && isSeismicFreq && isSharpOnset) {
+    // KRITIK FIX: rectilinearity eşiği 0.70→0.60 (MyShake mobil standartı ~0.65).
+    // Cihaz katı zemine sabit değil; el titremes, masa yüzeyi vb. rectilinearity'yi
+    // düşürür. 0.70 eşiği gerçek deprem P-dalgalarını sürekli S-WAVE'e düşürüyordu.
+    if (rectilinearity > 0.60 && accel < P_WAVE_MAX_G && isSeismicFreq && isSharpOnset) {
       // High rectilinearity + sharp onset + seismic freq + low amplitude = P-wave
       type = 'P-WAVE';
       confidence = 80 + Math.round(rectilinearity * 15); // 80-95 based on rectilinearity
       if (ratio > 5.0) confidence += 5; // Boost for strong STA/LTA
-    } else if (accel < P_WAVE_MAX_G && isSeismicFreq && isSharpOnset && rectilinearity > 0.65) {
-      // Moderate rectilinearity with other P-wave indicators (aligned with USGS standard ~0.75)
+    } else if (accel < P_WAVE_MAX_G && isSeismicFreq && isSharpOnset && rectilinearity > 0.50) {
+      // Moderate rectilinearity with other P-wave indicators (0.65→0.50: mobil cihaz toleransı)
       type = 'P-WAVE';
       confidence = 75 + Math.round(rectilinearity * 10);
       if (ratio > 5.0) confidence += 5;

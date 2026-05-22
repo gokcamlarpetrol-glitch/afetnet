@@ -397,6 +397,11 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
         let maxAccel = 0;
         let sampleCount = 0;
         let resolved = false;
+        // F6: Track all samples to differentiate earthquake (spike + decay)
+        // from sustained activity (walking, running, vehicle). Real earthquakes
+        // produce a clear peak that decays; activity produces sustained high
+        // mean acceleration with low variance from the peak.
+        const samples: number[] = [];
         const startTime = Date.now();
 
         // Quick 2-second sampling
@@ -404,6 +409,7 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
             if (resolved) return;
             const mag = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
             const accel = Math.abs(mag - 1.0);
+            samples.push(accel);
 
             if (accel > maxAccel) {
                 maxAccel = accel;
@@ -414,6 +420,24 @@ async function performQuickSeismicCheck(): Promise<BackgroundDetection | null> {
             if (Date.now() - startTime > 2000) {
                 resolved = true;
                 subscription.remove();
+
+                // F6: Sustained-acceleration filter (activity rejection).
+                // Real earthquake: peak / mean > 2 (clear spike + lower baseline).
+                // Activity (walking ~0.1g, running ~0.25g, vehicle ~0.15g): peak / mean ≈ 1.3-1.7
+                //   (sustained high, no decay back to baseline within 2s window).
+                // We reject if peak < 2× mean AND mean > 0.08g (clearly active state).
+                // This protects against the "user running with phone in pocket" false alarm
+                // that previously produced country-wide nuisance alerts via CF consensus.
+                if (samples.length >= 20) {
+                    const mean = samples.reduce((acc, v) => acc + v, 0) / samples.length;
+                    if (mean > 0.08 && maxAccel < mean * 2) {
+                        // Looks like sustained activity, not an earthquake spike.
+                        // Drop the detection — caller will see null and skip alert.
+                        resolve(null);
+                        return;
+                    }
+                }
+
                 resolve({
                     timestamp: startTime,
                     peakAcceleration: maxAccel,

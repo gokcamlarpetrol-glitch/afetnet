@@ -14,7 +14,12 @@ import { onDeviceEEWService } from './seismic/OnDeviceEEWService';
 
 const logger = createLogger('SeismicSensorService');
 const LOCATION_TASK_NAME = 'SEISMIC_LOCATION_HEARTBEAT';
-const SEISMIC_BACKGROUND_HEARTBEAT_ENABLED = process.env.EXPO_PUBLIC_SEISMIC_BACKGROUND_HEARTBEAT === 'true';
+// FIX: Önceden 'true' string karşılaştırması gerektiriyordu — production'da
+// bu env var set edilmediği için heartbeat hiç çalışmıyordu.
+// Hayati güvenlik özelliği opt-in flag arkasında olmamalı; varsayılan true yapıldı.
+// İzin yoksa Location.startLocationUpdatesAsync zaten güvenli şekilde atlanır.
+const SEISMIC_BACKGROUND_HEARTBEAT_ENABLED =
+    process.env.EXPO_PUBLIC_SEISMIC_BACKGROUND_HEARTBEAT !== 'false';
 
 // ELITE: Proper type for TaskManager location data
 interface LocationTaskData {

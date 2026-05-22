@@ -1229,33 +1229,12 @@ export async function markMessageAsDelivered(
     }
 
     const data = msgSnap.data() || {};
-    const currentStatus = data.status;
     const deliveredTo = data.deliveredTo && typeof data.deliveredTo === 'object'
       ? data.deliveredTo as Record<string, unknown>
       : null;
-    // FIX: Never regress read→delivered. If status is already 'read',
-    // only proceed to add this user to deliveredTo (don't overwrite status).
-    if (currentStatus === 'read') {
-      // Status is already read — only add deliveredTo entry if missing
-      if (!receiptUid || !!deliveredTo?.[receiptUid]) return true;
-      // Add deliveredTo entry without changing status
-      if (receiptUid) {
-        await updateDoc(msgRef, { [`deliveredTo.${receiptUid}`]: serverTimestamp() });
-      }
-      return true;
-    }
-    if (
-      currentStatus === 'delivered'
-      && (!receiptUid || !!deliveredTo?.[receiptUid])
-    ) {
-      return true; // Already delivered with this user's receipt
-    }
+    if (!receiptUid || !!deliveredTo?.[receiptUid]) return true;
 
-    const payload: Record<string, unknown> = {
-      status: 'delivered',
-      delivered: true,
-      deliveredAt: serverTimestamp(),
-    };
+    const payload: Record<string, unknown> = {};
     if (receiptUid) {
       payload[`deliveredTo.${receiptUid}`] = serverTimestamp();
     }
@@ -1271,7 +1250,7 @@ export async function markMessageAsDelivered(
 
 /**
  * Mark a message as read.
- * Updates the message doc: status='read', read=true
+ * Updates only the caller-owned receipt map entries.
  */
 export async function markMessageAsRead(
   conversationId: string,
@@ -1283,19 +1262,7 @@ export async function markMessageAsRead(
     const msgRef = doc(db, 'conversations', conversationId, 'messages', messageId);
     const receiptUid = getCurrentReceiptUid();
 
-    // FIX: For group conversations, only update per-user readBy/deliveredTo fields.
-    // Setting global `status: 'read'` in groups means ALL users see 'read' even if
-    // they haven't opened the message yet. For DMs, global status is fine (2 participants).
-    const isGroup = conversationId.startsWith('grp_');
     const payload: Record<string, unknown> = {};
-
-    if (!isGroup) {
-      // DM: safe to set global status
-      payload.status = 'read';
-      payload.read = true;
-      payload.delivered = true;
-      payload.readAt = serverTimestamp();
-    }
 
     if (receiptUid) {
       payload[`readBy.${receiptUid}`] = serverTimestamp();

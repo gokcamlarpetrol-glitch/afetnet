@@ -62,6 +62,12 @@ class MeshPowerManager {
                 this.notifyListeners();
             });
 
+            // EEW-FIX-3: Duty-cycle köprüsünü etkinleştir — BatteryOptimizedScanner
+            // profil değişikliklerini artık gerçekten HighPerformanceBle scan'ine
+            // uygular. Bu çağrı olmadan pil profili mantığı ölü kalır, BLE sürekli
+            // tam güçte tarar (afet sonrası kritik pil tüketimi).
+            batteryOptimizedScanner.enableDutyCycle();
+
             // Subscribe to battery state changes
             this.batterySubscription = Battery.addBatteryStateListener(({ batteryState }) => {
                 this.notifyListeners();
@@ -92,6 +98,7 @@ class MeshPowerManager {
         // FIX: Clear power state listeners to prevent stale references
         this.powerListeners.clear();
 
+        batteryOptimizedScanner.disableDutyCycle();
         batteryOptimizedScanner.destroy();
         backgroundMeshService.destroy();
 

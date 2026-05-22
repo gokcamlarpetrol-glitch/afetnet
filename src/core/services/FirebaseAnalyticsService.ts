@@ -94,8 +94,9 @@ class FirebaseAnalyticsService {
         await this.loadStoredEvents();
       }
 
-      // Enable by default (can be disabled via settings)
-      this.isEnabled = true;
+      // WP-4.5: Analytics yalnızca kullanıcının açık rızası ile aktif olur (KVKK/GDPR).
+      // Varsayılan KAPALI — kullanıcı Ayarlar'dan opt-in yapana dek event toplanmaz.
+      this.isEnabled = DirectStorage.getString('afetnet_analytics_consent') === 'true';
       this.isInitialized = true;
 
       if (__DEV__) {
@@ -120,6 +121,8 @@ class FirebaseAnalyticsService {
    */
   enable() {
     this.isEnabled = true;
+    // WP-4.5: Rızayı kalıcılaştır — sonraki açılışta initialize() bunu okur.
+    try { DirectStorage.setString('afetnet_analytics_consent', 'true'); } catch { /* best-effort */ }
     if (__DEV__) {
       logger.info('Analytics enabled');
     }
@@ -130,6 +133,7 @@ class FirebaseAnalyticsService {
    */
   disable() {
     this.isEnabled = false;
+    try { DirectStorage.setString('afetnet_analytics_consent', 'false'); } catch { /* best-effort */ }
     if (__DEV__) {
       logger.info('Analytics disabled');
     }

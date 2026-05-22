@@ -1342,6 +1342,41 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     marginTop: 2,
   },
+  // Kaynak badge — RESMİ UYARI (kırmızı) ve TAHMİN (turuncu) ayrımı
+  sourceBadgeOfficial: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#dc2626',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#b91c1c',
+  },
+  sourceBadgeTextOfficial: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.4,
+  },
+  sourceBadgeAI: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f59e0b',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#d97706',
+  },
+  sourceBadgeTextAI: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.4,
+  },
 });
 
 export { styles, SCREEN_WIDTH, SCREEN_HEIGHT, colors };

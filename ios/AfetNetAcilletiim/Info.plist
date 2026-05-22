@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.6.1</string>
+    <string>1.6.3</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -41,7 +41,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>36</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSApplicationQueriesSchemes</key>
@@ -81,7 +81,7 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>AfetNet, SOS sinyali gönderirken, sohbette konum paylaşırken, deprem yakınlık hesabı yaparken, toplanma alanlarını gösterirken ve afet haritasını kullanırken konumunuza erişir.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AfetNet, sohbette sesli mesaj göndermek, sesli arama yapmak ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.</string>
+    <string>AfetNet, sohbette sesli mesaj göndermek ve acil durum SOS sinyalinde ortam sesi kaydı almak için mikrofon kullanır.</string>
     <key>NSMotionUsageDescription</key>
     <string>AfetNet, deprem sarsıntısını algılayarak erken uyarı vermek, düşme/çarpışma tespiti yapmak ve kullanıcı aktivitesini değerlendirmek için hareket sensörlerini kullanır.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>

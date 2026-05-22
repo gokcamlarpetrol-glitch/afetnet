@@ -645,7 +645,11 @@ const ensureCachedAuthGuard = () => {
         return;
     }
     authCacheGuardInstalled = true;
-    useAuthStore.subscribe((state) => {
+    useAuthStore.subscribe((state, prevState) => {
+        // Yalnızca isAuthenticated gerçekten değiştiyse değerlendir. Aksi halde
+        // her state değişiminde (ör. isLoading) tetiklenir ve guard'ın setState'i
+        // ile kendini besleyen gereksiz tetiklenme zinciri oluşur.
+        if (state.isAuthenticated === prevState.isAuthenticated) return;
         if (!state.isAuthenticated && !isExplicitSignOutPending()) {
             if (hasCachedAuthenticatedSession()) {
                 console.warn('[AuthStore] isAuthenticated was set to false despite cached auth and no explicit sign-out — restoring immediately');

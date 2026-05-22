@@ -487,6 +487,7 @@ export const aiAssistantCoordinator = {
     message: string,
     history?: { role: 'user' | 'assistant', content: string }[],
     onChunk?: (delta: string, accumulated: string) => void,
+    signal?: AbortSignal,
   ): Promise<HybridAIResponse> {
     const startTime = Date.now();
 
@@ -513,7 +514,7 @@ export const aiAssistantCoordinator = {
       // 4. Try online enhancement if appropriate
       if (shouldTryOnline) {
         try {
-          const onlineResponse = await this.getOnlineResponse(message, offlineResponse, history, onChunk);
+          const onlineResponse = await this.getOnlineResponse(message, offlineResponse, history, onChunk, signal);
           if (onlineResponse) {
             // Append medical disclaimer for health/first-aid intents
             const answer = appendHealthDisclaimer(onlineResponse.answer, onlineResponse.intent);
@@ -558,6 +559,7 @@ export const aiAssistantCoordinator = {
     offlineContext: any,
     history?: { role: 'user' | 'assistant', content: string }[],
     onChunk?: (delta: string, accumulated: string) => void,
+    signal?: AbortSignal,
   ): Promise<HybridAIResponse | null> {
     try {
       // ELITE: Using static import to prevent LoadBundleFromServerRequestError
@@ -610,7 +612,7 @@ Bağlam bilgisi:
       // Stream when caller wired up onChunk (UI shows tokens as they arrive);
       // otherwise stick with the synchronous chat path so existing consumers don't change behaviour.
       const response = onChunk
-        ? await openAIService.chatStream(messagesToSend, onChunk)
+        ? await openAIService.chatStream(messagesToSend, onChunk, { signal })
         : await openAIService.chat(messagesToSend);
 
       // chat() returns string directly

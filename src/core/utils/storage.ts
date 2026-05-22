@@ -74,9 +74,14 @@ class AsyncStorageCache {
       }
       this.isLoaded = true;
       this.mutatedDuringHydration.clear();
-      console.log(`[AsyncStorageCache] Hydrated ${this.cache.size} keys from AsyncStorage`);
+      // M1-M3: __DEV__ guard — production noise lives in Sentry breadcrumbs,
+      // not stdout (perf overhead + log retention cost).
+      if (__DEV__) {
+        console.log(`[AsyncStorageCache] Hydrated ${this.cache.size} keys from AsyncStorage`);
+      }
       markStorageReady();
     } catch (e) {
+      // Errors stay unconditional — GlobalErrorHandler routes to Sentry.
       console.error('[AsyncStorageCache] Hydration failed:', e);
       this.isLoaded = true; // Mark as loaded anyway to prevent hanging
       this.mutatedDuringHydration.clear();
@@ -140,9 +145,13 @@ try {
   usingMMKV = true;
   storageBackend = 'mmkv';
   markStorageReady();
-  console.log('[Storage] MMKV initialized (fast, persistent)');
+  // M1-M3: __DEV__ guard.
+  if (__DEV__) {
+    console.log('[Storage] MMKV initialized (fast, persistent)');
+  }
 } catch (error: any) {
-  // MMKV failed — use AsyncStorage-backed cache instead of volatile MemoryStorage
+  // MMKV failed — use AsyncStorage-backed cache instead of volatile MemoryStorage.
+  // Error stays unconditional — needs to reach Sentry.
   console.error('[Storage] MMKV failed, using AsyncStorageCache fallback (still persistent):', error);
   storageInstance = new AsyncStorageCache();
 }

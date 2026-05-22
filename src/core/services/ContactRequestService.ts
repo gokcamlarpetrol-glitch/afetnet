@@ -23,7 +23,8 @@ import {
     orderBy,
     onSnapshot,
     serverTimestamp,
-    arrayUnion
+    arrayUnion,
+    writeBatch
 } from 'firebase/firestore';
 import { getFirestoreInstanceAsync } from './firebase/FirebaseInstanceManager';
 import { identityService } from './IdentityService';
@@ -267,7 +268,19 @@ class ContactRequestService {
                 updatedAt: serverTimestamp(),
             }, { merge: true });
 
-            // 2. Add sender as my contact (if not already)
+            // 2. Finalize the mutual/family boundary before adding local contact state.
+            const mutualStatusUpdated = await this.updateMutualStatus(request, true);
+            if (!mutualStatusUpdated) {
+                await setDoc(requestRef, {
+                    status: 'expired',
+                    updatedAt: serverTimestamp(),
+                }, { merge: true }).catch((rollbackError) => {
+                    logger.error('Failed to roll back accepted request after family approval failure:', rollbackError);
+                });
+                return false;
+            }
+
+            // 3. Add sender as my contact (if not already)
             const existingContact = contactService.getContact(request.fromUserId);
             if (!existingContact) {
                 await contactService.addContact(
@@ -277,12 +290,10 @@ class ContactRequestService {
                         addedVia: 'invite',
                         isVerified: true,
                         photoURL: request.fromPhotoURL,
+                        sendContactRequest: false,
                     }
                 );
             }
-
-            // 3. Update mutual status on both sides
-            await this.updateMutualStatus(request, true);
             await this.refreshFamilyStoreAfterApproval();
 
             // 4. Create a notification for the sender
@@ -334,24 +345,27 @@ class ContactRequestService {
     /**
      * Update mutual contact status
      */
-    private async updateMutualStatus(request: ContactRequest, isMutual: boolean): Promise<void> {
+    private async updateMutualStatus(request: ContactRequest, isMutual: boolean): Promise<boolean> {
         const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) return;
+        if (!cloudUid) return false;
 
         try {
             const db = await getFirestoreInstanceAsync();
-            if (!db) return;
+            if (!db) return false;
 
-            // Update my contact
+            if (isMutual) {
+                const finalized = await this.finalizeFamilyApproval(request);
+                if (!finalized) return false;
+            }
+
+            // Update my contact only after the family approval boundary is finalized.
             const myContactRef = doc(db, 'users', cloudUid, 'contacts', request.fromUserId);
             await setDoc(myContactRef, { isMutual, updatedAt: serverTimestamp() }, { merge: true });
 
-            if (isMutual) {
-                await this.finalizeFamilyApproval(request);
-            }
-
+            return true;
         } catch (error) {
             logger.error('Failed to update mutual status:', error);
+            return false;
         }
     }
 
@@ -359,12 +373,12 @@ class ContactRequestService {
      * Convert a pending family invitation into a mutual link.
      * This is the consent boundary that unlocks live location/status reads in Firestore rules.
      */
-    private async finalizeFamilyApproval(request: ContactRequest): Promise<void> {
+    private async finalizeFamilyApproval(request: ContactRequest): Promise<boolean> {
         const cloudUid = identityService.getCloudUid();
-        if (!cloudUid) return;
+        if (!cloudUid) return false;
 
         const db = await getFirestoreInstanceAsync();
-        if (!db) return;
+        if (!db) return false;
 
         const incomingLinkRef = doc(db, 'users', cloudUid, 'familyMembers', request.fromUserId);
         const incomingLinkDoc = await getDoc(incomingLinkRef);
@@ -372,8 +386,11 @@ class ContactRequestService {
         const familyId = request.familyId || (typeof incomingLink?.familyId === 'string' ? incomingLink.familyId : undefined);
 
         if (!familyId) {
-            logger.warn(`Accepted request from ${request.fromUserId}, but no familyId was available; live family access remains locked`);
-            return;
+            if (incomingLinkDoc.exists() || request.familyId) {
+                logger.error(`Accepted family request from ${request.fromUserId}, but no familyId was available; approval cannot be finalized`);
+                return false;
+            }
+            return true;
         }
 
         const myName = identityService.getDisplayName() || 'Aile Üyesi';
@@ -387,27 +404,25 @@ class ContactRequestService {
             updatedAt: serverTimestamp(),
         };
 
-        await Promise.all([
-            setDoc(incomingLinkRef, {
-                ...acceptedPayload,
-                adderUid: request.fromUserId,
-                adderName: request.fromName,
-                name: request.fromName,
-            }, { merge: true }),
-            setDoc(doc(db, 'users', request.fromUserId, 'familyMembers', cloudUid), {
-                ...acceptedPayload,
-                name: myName,
-            }, { merge: true }),
-            setDoc(doc(db, 'users', cloudUid, 'familyIds', familyId), {
-                active: true,
-                ownerUid: request.fromUserId,
-                role: 'member',
-                joinedAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            }, { merge: true }),
-        ]);
-
-        await setDoc(doc(db, 'families', familyId, 'members', cloudUid), {
+        const batch = writeBatch(db);
+        batch.set(incomingLinkRef, {
+            ...acceptedPayload,
+            adderUid: request.fromUserId,
+            adderName: request.fromName,
+            name: request.fromName,
+        }, { merge: true });
+        batch.set(doc(db, 'users', request.fromUserId, 'familyMembers', cloudUid), {
+            ...acceptedPayload,
+            name: myName,
+        }, { merge: true });
+        batch.set(doc(db, 'users', cloudUid, 'familyIds', familyId), {
+            active: true,
+            ownerUid: request.fromUserId,
+            role: 'member',
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+        batch.set(doc(db, 'families', familyId, 'members', cloudUid), {
             uid: cloudUid,
             id: cloudUid,
             name: myName,
@@ -421,6 +436,7 @@ class ContactRequestService {
             longitude: 0,
             location: null,
         }, { merge: true });
+        await batch.commit();
 
         const familyRef = doc(db, 'families', familyId);
         await updateDoc(familyRef, {
@@ -441,6 +457,8 @@ class ContactRequestService {
         } catch (error) {
             logger.debug('Family group chat join after approval skipped:', error);
         }
+
+        return true;
     }
 
     private async refreshFamilyStoreAfterApproval(): Promise<void> {

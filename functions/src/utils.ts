@@ -91,7 +91,10 @@ export interface ExpoPushMessage {
 // API Endpoints
 export const AFAD_API = 'https://deprem.afad.gov.tr/apiv2/event/filter';
 export const KANDILLI_API = 'https://www.koeri.boun.edu.tr/scripts/lst0.asp';
-export const USGS_API = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_hour.geojson';
+// 2.5_hour feed — yerel anlamlı (M4+) depremleri de kapsar. 4.5_hour feed,
+// Türkiye'deki orta büyüklükteki depremleri (M4.0–4.5) tamamen kaçırıyordu.
+// Alt sınır fetchUSGSEvents içinde M4.0 olarak uygulanır.
+export const USGS_API = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson';
 export const EMSC_API = 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&minmag=4.5&limit=20&orderby=time';
 
 // Thresholds
@@ -185,7 +188,6 @@ export function resolveAndroidChannelId(data?: Record<string, string>): string {
     if (rawType === 'new_message' || rawType === 'message' || rawType === 'message_received' || rawType === 'sos_message') {
         return 'messages';
     }
-    if (rawType === 'voice_call' || rawType === 'incoming_call') return 'calls';
     if (rawType === 'contact_request') return 'family_updates';
     if (rawType === 'news') return 'news_updates';
     return 'default';
@@ -386,6 +388,12 @@ export async function sendPushToToken(
         const notificationSound = isEmergencyType ? EMERGENCY_NOTIFICATION_SOUND : 'default';
 
         if (isExpoPushToken(token)) {
+            // G2: Propagate the same iOS category as native FCM path so Expo push
+            // recipients also get Quick Actions (Yardıma git / Kapat for SOS,
+            // Reply / View for chat). Without this, only native FCM tokens see
+            // the lock-screen action buttons — and most production users have
+            // Expo push tokens.
+            const expoCategory = mapTypeToApnsCategory(rawType);
             const result = await sendExpoPush([{
                 to: token,
                 title,
@@ -394,6 +402,7 @@ export async function sendPushToToken(
                 sound: notificationSound,
                 priority: 'high',
                 channelId,
+                ...(expoCategory ? { categoryId: expoCategory } : {}),
             }]);
             return result.successCount > 0;
         } else {
