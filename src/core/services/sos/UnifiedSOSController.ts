@@ -926,25 +926,57 @@ class UnifiedSOSController {
 
             useSOSStore.getState().updateDeviceStatus({ locationEnabled: true });
 
-            const location = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.High,
-            });
-
-            const sosLocation: SOSLocation = {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                accuracy: location.coords.accuracy || 10,
-                timestamp: Date.now(),
-                source: 'gps',
-            };
-
-            if (!isUsableSOSLocation(sosLocation)) {
-                logger.warn('SOS location rejected because coordinates, accuracy, or timestamp are invalid');
-                return null;
+            // 1) Önce gerçek-zamanlı GPS dene (yüksek doğruluk).
+            try {
+                const location = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.High,
+                });
+                const sosLocation: SOSLocation = {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                    accuracy: location.coords.accuracy || 10,
+                    timestamp: Date.now(),
+                    source: 'gps',
+                };
+                if (isUsableSOSLocation(sosLocation)) {
+                    useSOSStore.getState().updateLocation(sosLocation);
+                    return sosLocation;
+                }
+                logger.warn('SOS gerçek-zamanlı GPS reddedildi (koordinat/doğruluk/zaman damgası) — son-bilinen konuma düşülüyor');
+            } catch (liveErr) {
+                logger.warn('SOS gerçek-zamanlı GPS başarısız — son-bilinen konuma düşülüyor:', liveErr);
             }
 
-            useSOSStore.getState().updateLocation(sosLocation);
-            return sosLocation;
+            // 2) (görev #4): OS-önbellekli SON-BİLİNEN konuma düş — dakika/saat eski
+            // bile olsa hiç olmamasından İYİDİR. responder'lara "kullanıcı şurada
+            // son görüldü" bilgisi verir; CF onSOSBroadcast proximity matcher'ı bu
+            // koordinatla kurtarıcı bulabilir. Konum kaynağı 'cached' damgalanır —
+            // alıcılar tazeliği görsün.
+            try {
+                const lastKnown = await Location.getLastKnownPositionAsync({
+                    maxAge: 60 * 60 * 1000, // 1 saat — life-safety: eski bile değerli
+                });
+                if (lastKnown && Number.isFinite(lastKnown.coords.latitude) && Number.isFinite(lastKnown.coords.longitude)) {
+                    const lastKnownTs = typeof lastKnown.timestamp === 'number' && Number.isFinite(lastKnown.timestamp)
+                        ? lastKnown.timestamp
+                        : Date.now();
+                    const fallback: SOSLocation = {
+                        latitude: lastKnown.coords.latitude,
+                        longitude: lastKnown.coords.longitude,
+                        accuracy: lastKnown.coords.accuracy || 1000,
+                        timestamp: lastKnownTs,
+                        source: 'cached',
+                    };
+                    const ageSec = Math.floor((Date.now() - lastKnownTs) / 1000);
+                    logger.warn(`SOS son-bilinen konum kullanılıyor (yaş ${ageSec}sn) — gerçek-zamanlı GPS yok`);
+                    useSOSStore.getState().updateLocation(fallback);
+                    return fallback;
+                }
+            } catch (lastErr) {
+                logger.warn('Son-bilinen konum fetch de başarısız:', lastErr);
+            }
+
+            return null; // hiçbir konum yok — mesh + family + push hâlâ çalışır
         } catch (error) {
             logger.error('Failed to get location:', error);
             return null;

@@ -326,10 +326,21 @@ public class AfetNetBlePeripheralModule: Module {
         isRunning = true
         pendingStartPromise?.resolve(nil)
         pendingStartPromise = nil
+        // (görev mesh-M1): BT geri açıldı + start sürüyordu → bekleyen yüksek
+        // öncelikli SOS notification'larını yeniden dene.
+        if !pendingNotifications.isEmpty {
+          NSLog("[AfetNetBlePeripheral] BT geri açıldı — \(pendingNotifications.count) bekleyen notification retry ediliyor")
+          retryPendingNotifications()
+        }
       } else if isRunning {
         // Bluetooth was turned back on while running — resume
         setupGATTService()
         startAdvertising()
+        // (görev mesh-M1): BT geri açıldı → korunan SOS notification'larını retry.
+        if !pendingNotifications.isEmpty {
+          NSLog("[AfetNetBlePeripheral] BT geri açıldı (running) — \(pendingNotifications.count) bekleyen notification retry ediliyor")
+          retryPendingNotifications()
+        }
       }
     } else {
       // Handle ALL non-poweredOn states: poweredOff, unauthorized, resetting, unsupported, unknown
@@ -337,7 +348,16 @@ public class AfetNetBlePeripheralModule: Module {
       isRunning = false
       subscribedCentrals.removeAll()
       connectedCentralIds.removeAll()
-      pendingNotifications.removeAll()
+      // (görev mesh-M1): BT power-off / resetting GEÇİCİ olabilir (cep, iOS power-saving,
+      // kullanıcı tap). YÜKSEK ÖNCELİKLİ (SOS) notification'ları KORU — BT geri
+      // açıldığında retryPendingNotifications ile tekrar denenir. Düşük öncelikli
+      // (chat vs.) eskiyebilir — at. stopPeripheral (explicit JS-side stop) hâlâ
+      // tüm kuyruğu temizler.
+      let preservedCount = pendingNotifications.count
+      pendingNotifications = pendingNotifications.filter { $0.isHighPriority }
+      if pendingNotifications.count < preservedCount {
+        NSLog("[AfetNetBlePeripheral] BT state \(peripheral.state.rawValue) — \(preservedCount - pendingNotifications.count) düşük-öncelikli silindi, \(pendingNotifications.count) SOS-öncelikli korundu")
+      }
 
       if let promise = pendingStartPromise {
         promise.reject("BLE_UNAVAILABLE", "Bluetooth is not available (state: \(peripheral.state.rawValue))")
