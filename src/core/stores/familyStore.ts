@@ -803,7 +803,12 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
       // Detects when someone adds us to their family in real-time
       try {
         const { subscribeToFamilyMemberLinks } = await import('../services/firebase/FirebaseFamilyOperations');
-        familyLinksUnsubscribe = await subscribeToFamilyMemberLinks(
+        // (Family M4): yarışma korunaklı atama. İki concurrent initialize() çağrısı
+        // ikisi de cleanup'tan geçip subscribe'a girerse, ikinci `=` ataması ilk
+        // subscription'ı orphan bırakırdı (referans yok → cleanup imkânsız → listener
+        // sızıntısı + yedek dinleyici Firestore quota tüketir). Çözüm: local'e al,
+        // global slot dolduysa yenisini düşür.
+        const newUnsub = await subscribeToFamilyMemberLinks(
           ownerUid,
           myDisplayName,
           async (member, _familyId) => {
@@ -825,6 +830,12 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
             }
           },
         );
+        if (familyLinksUnsubscribe) {
+          // Yarışma — başka bir initialize() çağrısı bizden önce yetişti.
+          try { newUnsub(); } catch (e) { logger.debug('familyLinks race cleanup failed:', e); }
+        } else {
+          familyLinksUnsubscribe = newUnsub;
+        }
       } catch (error) {
         logger.warn('Family member links subscription failed:', error);
       }

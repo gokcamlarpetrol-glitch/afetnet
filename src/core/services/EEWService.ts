@@ -532,10 +532,21 @@ class EEWService {
       logger.error(
         `AFAD beslemesi kesintisi — ${this.consecutivePollFailures} ardışık poll başarısız; resmi kaynak deprem verisi gelmiyor olabilir`,
       );
-      useEEWStore.getState().setStatus(
-        'connected',
-        'Sınırlı: resmi kaynak (AFAD) beslemesine ulaşılamıyor — uyarılar gecikebilir',
-      );
+      // (EEW M2): cihaz çevrimdışıysa "AFAD ulaşılamıyor" mesajı yanıltıcı —
+      // gerçekte bizim internetimiz yok. NetInfo ile ayır, doğru kullanıcı mesajı.
+      void (async () => {
+        let isOffline = false;
+        try {
+          const netState = await NetInfo.fetch();
+          isOffline = !netState.isConnected || netState.isInternetReachable === false;
+        } catch { /* netinfo başarısızsa varsayılan mesajı kullan */ }
+        useEEWStore.getState().setStatus(
+          'connected',
+          isOffline
+            ? 'Çevrimdışı — bağlantı dönünce resmi kaynak uyarıları geri gelir'
+            : 'Sınırlı: resmi kaynak (AFAD) beslemesine ulaşılamıyor — uyarılar gecikebilir',
+        );
+      })();
     }
   }
 

@@ -36,6 +36,7 @@ import * as haptics from '../../utils/haptics';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useMessageStore } from '../../stores/messageStore';
 import { useFamilyStore } from '../../stores/familyStore';
+import { MESSAGE_STATUS_PRIORITY } from '../../services/messaging/constants';
 import { validateMessage, sanitizeForDisplay } from '../../utils/messageSanitizer';
 import MessageOptionsModal from '../../components/messages/MessageOptionsModal';
 import { getDeviceId as getDeviceIdFromLib } from '../../../lib/device';
@@ -576,7 +577,8 @@ export default function ConversationScreen({ navigation, route }: ConversationSc
         const updates: Partial<MeshMessage> = {};
         // TRIPLE-TICK: Sync status from messageStore (authoritative) when it has higher priority
         // Uses shared state machine guard for consistency across all status transitions
-        const { MESSAGE_STATUS_PRIORITY } = require('../../services/messaging/constants');
+        // (Family M3): import top-level — `require()` her merge iterasyonunda Metro
+        // require cache lookup yapıyordu; static import ile sıfır overhead.
         const existingLevel = MESSAGE_STATUS_PRIORITY[existing.status || ''] ?? 0;
         const storeMsgStatus = storeMsg.status || (storeMsg.read ? 'read' : storeMsg.delivered ? 'delivered' : 'sent');
         const storeLevel = MESSAGE_STATUS_PRIORITY[storeMsgStatus] ?? 0;

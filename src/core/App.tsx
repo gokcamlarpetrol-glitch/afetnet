@@ -462,7 +462,13 @@ export default function CoreApp() {
             </PermissionGuard>
 
             {/* ELITE: Compliance - Mandatory EULA */}
-              {isBootStorageReady ? <EULAModal /> : null}
+            {/* (App H2): kendi ErrorBoundary'sinde — EULA render crash'i life-safety
+                overlay'lerini (SOSFullScreenAlert / ActiveSOSBanner) öldürmesin. */}
+            {isBootStorageReady ? (
+              <ErrorBoundary fallback={null}>
+                <EULAModal />
+              </ErrorBoundary>
+            ) : null}
 
             {/* LIFE-SAFETY (görev #20): Her can-güvenliği overlay'i KENDİ
                 ErrorBoundary'sine sarılır. Tek bir kök ErrorBoundary vardı;

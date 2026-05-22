@@ -1673,8 +1673,14 @@ export const eewWebhook = functions
             const rawSource = typeof req.body.source === 'string' ? req.body.source.toUpperCase() : 'AFAD';
             const source = (VALID_SOURCES.includes(rawSource as EEWEvent['source']) ? rawSource : 'AFAD') as EEWEvent['source'];
 
+            // (EEW M3): id eksikse kompozit stable id. Eski `webhook-${Date.now()}`
+            // her POST'ta YENİ id üretiyordu — kaynak retry / çift kaynak aynı
+            // olayı 2x gönderse line 1692-1693 check-then-set idempotency koruması
+            // bypass oluyor → cihazlara çift ulusal alarm gidiyordu. Aynı
+            // (source, lat, lon, mag, dakika) → aynı id → idempotency çalışır.
+            const fallbackEventId = `webhook-${source}-${latitude.toFixed(2)}-${longitude.toFixed(2)}-${magnitude.toFixed(1)}-${Math.floor(Date.now() / 60000)}`;
             const event: EEWEvent = {
-                id: req.body.id || `webhook-${Date.now()}`,
+                id: req.body.id || fallbackEventId,
                 magnitude,
                 latitude,
                 longitude,
