@@ -1148,6 +1148,7 @@ class MeshNetworkService {
     from: string;
     to: string;
     type: string;
+    signalId?: string;
     senderName?: string;
     content: string;
     timestamp: number;
@@ -1164,6 +1165,7 @@ class MeshNetworkService {
     let parsedTo: string | null = null;
     let parsedToAliases: string[] | undefined;
     let parsedType: string | null = null;
+    let parsedSignalId: string | null = null;
     let parsedSenderName: string | null = null;
     let parsedMediaType: 'image' | 'voice' | 'location' | undefined;
     let parsedMediaUrl: string | undefined;
@@ -1181,6 +1183,13 @@ class MeshNetworkService {
         }
         if (typeof parsed.type === 'string' && parsed.type.trim().length > 0) {
           parsedType = parsed.type.trim();
+        }
+        // görev #28: SOS_BEACON signalId'sini zarfa taşı — criticalQueue coalesce
+        // mantığı (coalesceSosBeacons) bunu okur. Zarfa konmazsa coalesce no-op
+        // olur: ham beacon JSON'u zarfta saklanmaz, yalnızca 'message' alanı
+        // 'content'e geçer ve signalId kaybolur.
+        if (typeof parsed.signalId === 'string' && parsed.signalId.trim().length > 0) {
+          parsedSignalId = parsed.signalId.trim();
         }
         if (typeof parsed.from === 'string' && parsed.from.trim().length > 0) {
           parsedFrom = parsed.from.trim();
@@ -1224,6 +1233,7 @@ class MeshNetworkService {
       from: options.senderId || parsedFrom || this.myId || 'ME',
       to: options.to || parsedTo || 'broadcast',
       type: parsedType || (options.meshType === MeshMessageType.SOS ? 'SOS' : 'CHAT'),
+      ...(parsedSignalId ? { signalId: parsedSignalId } : {}),
       ...(parsedSenderName ? { senderName: parsedSenderName } : {}),
       content: parsedContent,
       timestamp: parsedTimestamp ?? Date.now(),

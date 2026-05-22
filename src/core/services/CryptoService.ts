@@ -79,8 +79,10 @@ const isSecureStoreAvailable = async (): Promise<boolean> => {
     try {
         // SecureStore not available in Expo Go or simulator on some platforms
         if (Platform.OS === 'web') return false;
-        await SecureStore.isAvailableAsync();
-        return true;
+        // isAvailableAsync() bazı emülatör/simülatörde false döner — sonucu YUTMA,
+        // gerçek değeri döndür. Aksi halde SecureStore yokken bile useSecureStorage
+        // true olur, sonra hassas anahtar yazımında exception patlar.
+        return await SecureStore.isAvailableAsync();
     } catch {
         return false;
     }
