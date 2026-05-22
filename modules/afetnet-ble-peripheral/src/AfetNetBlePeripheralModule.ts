@@ -18,8 +18,8 @@ export type OnDeviceDisconnectedEvent = {
 };
 
 // API
-export function startPeripheral(serviceUUID: string, characteristicUUIDs: string[]): Promise<void> {
-  return AfetNetBlePeripheralNativeModule.startPeripheral(serviceUUID, characteristicUUIDs);
+export function startPeripheral(serviceUUID: string, characteristicUUIDs: string[], sosCharacteristicUUID: string): Promise<void> {
+  return AfetNetBlePeripheralNativeModule.startPeripheral(serviceUUID, characteristicUUIDs, sosCharacteristicUUID);
 }
 
 export function stopPeripheral(): Promise<void> {

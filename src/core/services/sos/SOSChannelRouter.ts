@@ -858,6 +858,23 @@ class SOSChannelRouter {
                 ]).catch(e => logger.warn('Mesh start failed/timeout, continuing with broadcast:', e));
             }
 
+            // K3: If start() found BLE unavailable (permission/off/unsupported),
+            // mesh is still not running. Fail this channel fast so the user
+            // gets actionable UX (via OfflineIndicator banner) instead of a
+            // hanging "sending..." spinner.
+            if (!meshNetworkService.getIsRunning()) {
+                try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { useMeshStore } = require('../mesh/MeshStore');
+                    const reason = useMeshStore.getState().meshUnavailableReason;
+                    logger.warn(`Mesh SOS aborted — mesh not running (reason: ${reason ?? 'unknown'})`);
+                } catch {
+                    // best-effort logging
+                }
+                updateStatus('mesh', 'failed');
+                throw new Error('Mesh unavailable (BLE off or permission denied)');
+            }
+
             // Create SOS payload
             // CRITICAL FIX: Include signal.status so receivers can distinguish active vs cancelled SOS.
             // Without this, a cancelled SOS broadcast via mesh is indistinguishable from a new SOS.
@@ -915,9 +932,13 @@ class SOSChannelRouter {
             }
 
             if (postPeerCount === 0) {
-                updateStatus('mesh', 'failed');
-                logger.warn('⚠️ Mesh SOS queued but 0 peers — not marked sent until a peer is visible');
-                throw new Error('Mesh SOS queued but no visible peers');
+                // F3: 'queued' (not 'failed') — packet is in mesh queue, will auto-flush
+                // when a peer comes into range. Distinct from "failed" so the UI shows
+                // "yardım çağrısı bekleniyor" instead of "gönderilemedi".
+                updateStatus('mesh', 'queued');
+                logger.warn('⚠️ Mesh SOS queued, 0 peers visible — auto-delivery when peer enters range');
+                // Still throw to trigger retry scheduler — but UI now shows correct state.
+                throw new Error('Mesh SOS queued — waiting for peer');
             }
 
             // FIX 11: Status is 'sent' because peers were visible, but this means
@@ -927,7 +948,13 @@ class SOSChannelRouter {
             logger.info(`✅ SOS queued to ${postPeerCount} visible mesh peer(s) — delivery not confirmed (BLE fire-and-forget)`);
         } catch (error) {
             logger.error('❌ Mesh broadcast failed:', error);
-            updateStatus('mesh', 'failed');
+            // F3: 0-peer state already set 'queued' via the explicit guard above.
+            // Don't overwrite it with 'failed' — the message IS queued, just no
+            // visible peer to deliver to yet. Other errors still mark 'failed'.
+            const msg = error instanceof Error ? error.message : String(error ?? '');
+            if (!/queued|waiting for peer/i.test(msg)) {
+                updateStatus('mesh', 'failed');
+            }
             throw error;
         }
     }
@@ -995,7 +1022,15 @@ class SOSChannelRouter {
                 trapped: signal.trapped,
                 reason: signal.reason,
                 battery: signal.device.batteryLevel,
-                timestamp: signal.timestamp,
+                // KRİTİK (görev #1): `timestamp` YAYIN zamanıdır, olay zamanı değil.
+                // Firestore kuralı isRecentClientTimestamp bunu ±5dk pencerede ister.
+                // SOS offline tetiklenip bağlantı 5dk+ sonra dönerse retry bir CREATE
+                // olur; signal.timestamp (orijinal olay zamanı) bayat → kural reddeder
+                // ve offline-kurtulan için yazılan tüm retry sistemi sessizce çöker.
+                // Date.now() her (yeniden) yazımda taze damga verir; orijinal olay
+                // zamanı signalCreatedAt alanında korunur.
+                timestamp: Date.now(),
+                signalCreatedAt: signal.timestamp,
                 status: signal.status === 'cancelled' ? 'cancelled' : 'active',
                 healthInfo,
             });
@@ -1151,7 +1186,12 @@ class SOSChannelRouter {
                 } : null,
                 trapped: signal.trapped,
                 battery: signal.device.batteryLevel,
-                timestamp: signal.timestamp,
+                // KRİTİK (görev #1): `timestamp` = YAYIN zamanı. devices/{id}/sos_alerts
+                // ve sos_alerts/{uid}/items create kuralları isRecentClientTimestamp ile
+                // ±5dk ister; SOS offline tetiklenip geç dönen retry CREATE olur, bayat
+                // signal.timestamp reddedilir. Orijinal olay zamanı signalCreatedAt'te.
+                timestamp: Date.now(),
+                signalCreatedAt: signal.timestamp,
                 status: signal.status === 'cancelled' ? 'cancelled' : 'active',
                 healthInfo,
             };
@@ -1368,7 +1408,12 @@ class SOSChannelRouter {
                 hasLocation: hasLocation,
                 trapped: signal.trapped,
                 battery: signal.device.batteryLevel,
-                timestamp: signal.timestamp,
+                // KRİTİK (görev #1): `timestamp` = YAYIN zamanı. sos_broadcasts create
+                // kuralı isRecentClientTimestamp ile ±5dk ister; SOS offline tetiklenip
+                // geç dönen retry bir CREATE olur ve bayat signal.timestamp reddedilir.
+                // Orijinal olay zamanı signalCreatedAt'te korunur.
+                timestamp: Date.now(),
+                signalCreatedAt: signal.timestamp,
                 status: signal.status === 'cancelled' ? 'cancelled' : 'active',
             };
 

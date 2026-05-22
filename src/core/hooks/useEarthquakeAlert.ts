@@ -17,6 +17,7 @@ import * as Location from 'expo-location';
 import { DirectStorage } from '../utils/storage';
 import { useEarthquakeStore } from '../stores/earthquakeStore';
 import { notificationCenter } from '../services/notifications/NotificationCenter';
+import { shouldDeliverNotification } from '../services/NotificationService';
 import { firebaseAnalyticsService } from '../services/FirebaseAnalyticsService';
 import { createLogger } from '../utils/logger';
 import { GENERAL_EARTHQUAKE_NOTIFICATION_MIN_MAGNITUDE } from '../config/earthquakeDefaults';
@@ -145,9 +146,13 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         requestLocationPermission();
     }, []);
 
-    // ELITE: Monitor earthquakes and trigger alerts
+    // ELITE: Monitor earthquakes and trigger alerts.
+    // KRİTİK (görev #11): userLocation null olsa bile izlemeye devam et — konum
+    // yoksa checkAndTriggerAlert mesafe filtresini atlayıp büyüklük-bazlı uyarı
+    // verir. Önceki kod userLocation null iken TÜM deprem uyarılarını sessizce
+    // düşürüyordu (kullanıcı izni sonradan verse bile asla yakalanmıyordu).
     useEffect(() => {
-        if (!settings.enabled || !userLocation) return;
+        if (!settings.enabled) return;
 
         const newEarthquakes = earthquakes.filter((eq) => {
             // Skip already processed
@@ -200,6 +205,20 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         }
     };
 
+    // KRİTİK (görev #11): Uygulama ön plana geldiğinde konum iznini yeniden
+    // kontrol et. Kullanıcı izni sonradan verirse (ayarlar / ayrı izin akışı)
+    // bu hook onu yakalar — aksi halde userLocation sonsuza dek null kalıp
+    // deprem uyarıları sessizce ölü kalırdı. Ön planda konumu tazelemek bayat
+    // konumla mesafe filtreleme sorununu da hafifletir.
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+            if (next === 'active') {
+                void requestLocationPermission();
+            }
+        });
+        return () => sub.remove();
+    }, []);
+
     // ELITE: Update settings
     const updateSettings = useCallback(async (newSettings: Partial<EarthquakeAlertSettings>) => {
         try {
@@ -220,27 +239,31 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
 
     // ELITE: Check earthquake and trigger alert if needed
     const checkAndTriggerAlert = async (earthquake: { id: string; magnitude: number; latitude: number; longitude: number; location: string; time: string | number; depth?: number; source?: string }) => {
-        if (!userLocation) return;
-
-        // Calculate distance
-        const distance = calculateDistance(
-            userLocation.latitude,
-            userLocation.longitude,
-            earthquake.latitude,
-            earthquake.longitude
-        );
-
-        // Check if meets alert criteria
+        // Magnitude eşiği her zaman uygulanır.
         if (earthquake.magnitude < settings.minMagnitude) return;
-        if (distance > settings.maxDistanceKm) return;
 
-        // Determine alert type based on magnitude and distance
+        // KRİTİK (görev #11): Mesafe YALNIZCA kullanıcı konumu varken hesaplanır.
+        // Konum yoksa sessiz kalmak yerine — mesafe filtresi atlanır ve büyüklük
+        // eşiğini geçen deprem için yine de uyarı verilir (kişiselleştirilmiş
+        // mesafe olmadan). Sessiz ölü dal yerine işleyen bir fallback.
+        let distance: number | null = null;
+        if (userLocation) {
+            distance = calculateDistance(
+                userLocation.latitude,
+                userLocation.longitude,
+                earthquake.latitude,
+                earthquake.longitude
+            );
+            if (distance > settings.maxDistanceKm) return;
+        }
+
+        // Determine alert type based on magnitude and (when available) distance
         let alertType: 'critical' | 'high' | 'medium' | 'low' = 'low';
-        if (earthquake.magnitude >= settings.criticalMagnitude || distance < 50) {
+        if (earthquake.magnitude >= settings.criticalMagnitude || (distance !== null && distance < 50)) {
             alertType = 'critical';
-        } else if (earthquake.magnitude >= 5.0 || distance < 100) {
+        } else if (earthquake.magnitude >= 5.0 || (distance !== null && distance < 100)) {
             alertType = 'high';
-        } else if (earthquake.magnitude >= 4.5 || distance < 200) {
+        } else if (earthquake.magnitude >= 4.5 || (distance !== null && distance < 200)) {
             alertType = 'medium';
         }
 
@@ -257,18 +280,39 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
             earthquakeId: earthquake.id,
             magnitude: earthquake.magnitude,
             location: earthquake.location,
-            distance: Math.round(distance),
             alertType,
+            // distance yalnızca kullanıcı konumu varken anlamlıdır (görev #11)
+            ...(distance !== null ? { distance: Math.round(distance) } : {}),
         };
 
         setLastAlert(result);
         setAlertCount((prev) => prev + 1);
 
+        // K4: Cross-category dedup with EEW path. NotificationService keeps a
+        // 10-minute fingerprint by location bucket + magnitude + time bucket; if
+        // EEWService already delivered an alert for this earthquake, skip the
+        // duplicate 'earthquake' notification (user already saw EEW countdown).
+        const eqTimestamp = typeof earthquake.time === 'string'
+            ? new Date(earthquake.time).getTime()
+            : earthquake.time;
+        const delivered = shouldDeliverNotification(
+            earthquake.magnitude,
+            earthquake.location,
+            eqTimestamp,
+            'useEarthquakeAlert',
+            earthquake.latitude,
+            earthquake.longitude,
+        );
+        if (!delivered) {
+            logger.debug('Earthquake notification skipped — already delivered via EEW path');
+            return;
+        }
+
         // Use NotificationCenter for unified alert delivery
         await notificationCenter.notify('earthquake', {
             magnitude: earthquake.magnitude,
             location: earthquake.location,
-            timestamp: typeof earthquake.time === 'string' ? new Date(earthquake.time).getTime() : earthquake.time,
+            timestamp: eqTimestamp,
             latitude: earthquake.latitude,
             longitude: earthquake.longitude,
             depth: earthquake.depth,
@@ -278,12 +322,15 @@ export function useEarthquakeAlert(): UseEarthquakeAlertReturn {
         // Track alert
         firebaseAnalyticsService.logEvent('earthquake_alert_triggered', {
             magnitude: earthquake.magnitude,
-            distance_km: distance,
+            distance_km: distance ?? -1,
             alert_type: alertType,
             location: earthquake.location,
         });
 
-        logger.info(`🚨 EARTHQUAKE ALERT: M${earthquake.magnitude} at ${earthquake.location}, ${Math.round(distance)}km away`);
+        logger.info(
+            `🚨 EARTHQUAKE ALERT: M${earthquake.magnitude} at ${earthquake.location}` +
+            (distance !== null ? `, ${Math.round(distance)}km away` : ' (konum yok — büyüklük-bazlı)')
+        );
     };
 
     // ELITE: Test alert function

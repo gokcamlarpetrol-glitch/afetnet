@@ -17,9 +17,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 import PermissionGuard from './components/PermissionGuard';
 import OfflineIndicator from './components/OfflineIndicator';
 import SOSFullScreenAlert from './components/SOSFullScreenAlert';
-import IncomingCallOverlay from './components/IncomingCallOverlay';
 import EEWCountdownAlert from './components/EEWCountdownAlert';
 import SOSFailureBanner from './components/SOSFailureBanner';
+import ActiveSOSBanner from './components/ActiveSOSBanner';
 import ClockSkewBanner from './components/ClockSkewBanner';
 import BiometricLockOverlay from './components/BiometricLockOverlay';
 import NotificationRePromptModal from './components/NotificationRePromptModal';
@@ -146,7 +146,20 @@ export default function CoreApp() {
   // the app is memory-aware. Log for Crashlytics diagnostics.
   useEffect(() => {
     const memoryWarningSubscription = AppState.addEventListener('memoryWarning', () => {
-      console.warn('[MemoryWarning] iOS memory warning received — app is memory-aware');
+      // M1-M3: route through logger so Crashlytics breadcrumb captures it
+      // instead of bare console (which is no-op in production builds).
+      if (__DEV__) {
+        console.warn('[MemoryWarning] iOS memory warning received — app is memory-aware');
+      } else {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { createLogger } = require('./utils/logger');
+          createLogger('MemoryWarning').warn('iOS memory warning received');
+        } catch {
+          /* logger import failure — bare console fallback */
+          console.warn('[MemoryWarning] iOS memory warning received');
+        }
+      }
       // Future: add cache trimming if stores implement trimInMemoryCache()
     });
     return () => memoryWarningSubscription.remove();
@@ -289,10 +302,25 @@ export default function CoreApp() {
             if (useAuthStore.getState().isAuthenticated && !appInitializedRef.current && !appInitializingRef.current) {
               if (__DEV__) console.log('Retrying failed init...');
               appInitializingRef.current = true;
+              // CRITICAL FIX: Retry path da ilk init gibi 35s güvenlik zamanlayıcısı
+              // kurmalı. Aksi halde retry'daki initializeApp() askıda kalırsa
+              // appInitializingRef sonsuza kadar true kalır ve hem shutdown hem
+              // yeni init kalıcı olarak bloke olur.
+              if (initSafetyTimerRef.current) clearTimeout(initSafetyTimerRef.current);
+              initSafetyTimerRef.current = setTimeout(() => {
+                initSafetyTimerRef.current = null;
+                if (appInitializingRef.current) {
+                  if (__DEV__) console.warn('App.tsx: retry init safety timeout (35s) — releasing appInitializingRef');
+                  appInitializingRef.current = false;
+                }
+              }, 35_000);
               initializeApp({ authenticated: true })
                 .then(() => { appInitializedRef.current = true; })
                 .catch(() => { appInitializedRef.current = false; })
-                .finally(() => { appInitializingRef.current = false; });
+                .finally(() => {
+                  if (initSafetyTimerRef.current) { clearTimeout(initSafetyTimerRef.current); initSafetyTimerRef.current = null; }
+                  appInitializingRef.current = false;
+                });
             }
           }, 5000);
         })
@@ -439,14 +467,16 @@ export default function CoreApp() {
             {/* ELITE V4: Full-screen SOS alert for foreground notifications */}
             <SOSFullScreenAlert />
 
-            {/* ELITE: Incoming voice call overlay */}
-            <IncomingCallOverlay />
-
             {/* LIFE-SAFETY: Global EEW countdown overlay — covers every screen */}
             <EEWCountdownAlert />
 
             {/* LIFE-SAFETY: SOS 6/6 channel failure banner — persistent until SOS resolved */}
             <SOSFailureBanner />
+
+            {/* LIFE-SAFETY (görev #9): Aktif SOS varken HER ekranda görünen global
+                DURDUR kontrolü. SOSModal yalnızca HomeScreen'e bağlıydı; başka
+                ekrana geçilince SOS durdurulamadan yayında kalıyordu. */}
+            <ActiveSOSBanner />
 
             {/* DATA-INTEGRITY: Clock skew banner — Firestore rejects ±5min stale writes */}
             <ClockSkewBanner />

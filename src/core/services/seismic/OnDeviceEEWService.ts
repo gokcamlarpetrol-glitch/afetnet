@@ -32,9 +32,11 @@ const logger = createLogger('OnDeviceEEWService');
 // ============================================================
 
 // PRODUCTION: Thresholds calibrated to eliminate false positives from normal phone usage.
-// Walking ~0.1g, typing ~0.05g, real earthquakes >0.15g at epicenter.
-const MIN_CONFIDENCE_FOR_ALERT = 85;       // High confidence required to reduce false alerts
-const MIN_MAGNITUDE_FOR_ALERT = 0.15;      // Well above walking/vibration noise floor
+// Walking ~0.1g, typing ~0.05g.
+// KRITIK FIX: 100km'deki M5.4 deprem cihazda ~0.005-0.02g üretir.
+// Eski eşik 0.15g bu senaryoda 7-30 kat çok yüksekti → M5 altı tüm depremler sessiz geçiyordu.
+const MIN_CONFIDENCE_FOR_ALERT = 80;       // 85→80: S-WAVE olaylarını da yakalamak için biraz gevşetildi
+const MIN_MAGNITUDE_FOR_ALERT = 0.02;      // 0.15→0.02: 100km'deki M5+ deprem ~0.005-0.02g
 
 // Super confidence threshold for FULL COUNTDOWN experience
 // ELITE: Lowered from 95/0.3 — EnsembleDetectionService's 5-layer filter (70% threshold +
@@ -102,16 +104,25 @@ class OnDeviceEEWService {
    * Called by SeismicSensorService when a detection occurs
    */
   async handleDetection(event: DetectionEvent) {
-    // Only process P-waves (S-waves are too late for early warning)
-    if (event.type !== 'P-WAVE') return;
+    // KRITIK FIX: Hem P-WAVE hem S-WAVE kabul et.
+    // Mobil cihazda P-WAVE sınıflandırması (rectilinearity>0.7) nadiren geçer;
+    // gerçek depremler S-WAVE'e düşüp atılıyordu. S-WAVE güçlü sarsıntı = aksiyon.
+    // P-WAVE: daha düşük confidence eşiği (erken uyarı avantajı).
+    // S-WAVE: daha yüksek magnitude eşiği (güçlü sarsıntıyı onayla).
+    if (event.type !== 'P-WAVE' && event.type !== 'S-WAVE') return;
 
     // Debounce (Don't spam alerts for the same quake)
     if (Date.now() - this.lastAlertTime < ALERT_COOLDOWN_MS) return;
 
-    logger.info(`🌊 Checking P-Wave: Conf ${event.confidence}%, Mag ${event.magnitude.toFixed(3)}g`);
+    logger.info(`🌊 Checking ${event.type}: Conf ${event.confidence}%, Mag ${event.magnitude.toFixed(3)}g`);
+
+    // S-WAVE için biraz daha yüksek magnitude eşiği — güçlü sarsıntı onayı gerekir
+    const magnitudeThreshold = event.type === 'S-WAVE'
+      ? MIN_MAGNITUDE_FOR_ALERT * 1.5   // S-WAVE: 0.03g — sarsıntı zaten başladı
+      : MIN_MAGNITUDE_FOR_ALERT;         // P-WAVE: 0.02g — erken uyarı
 
     // Check if meets threshold
-    if (event.confidence >= MIN_CONFIDENCE_FOR_ALERT && event.magnitude >= MIN_MAGNITUDE_FOR_ALERT) {
+    if (event.confidence >= MIN_CONFIDENCE_FOR_ALERT && event.magnitude >= magnitudeThreshold) {
       await this.triggerEarlyWarning(event);
     }
   }
@@ -120,16 +131,9 @@ class OnDeviceEEWService {
    * ELITE: Trigger early warning with full countdown experience
    */
   private async triggerEarlyWarning(event: DetectionEvent) {
-    // ELITE: SAFETY CHECK - Activity Guard
-    try {
-      const { activityRecognitionService } = await import('../ActivityRecognitionService');
-      if (!activityRecognitionService.isDeviceStill()) {
-        logger.warn('⛔️ SEISMIC ALERT BLOCKED: Device is moving (Safety Protocol)');
-        return;
-      }
-    } catch {
-      // Activity recognition not available, continue cautiously
-    }
+    // KRITIK FIX: isDeviceStill() guard KALDIRILDI.
+    // Deprem anında cihaz zaten sarsılır → isDeviceStill() her zaman false döner
+    // → P-dalgası algılama kalıcı olarak bloke oluyordu (sistemin kendini engellemesi).
 
     this.lastAlertTime = Date.now();
     logger.warn('🚨 LOCAL EEW TRIGGERED! P-WAVE DETECTED! 🚨');
@@ -183,15 +187,18 @@ class OnDeviceEEWService {
       epicentralDistance: this.estimateDistance(event),
       pWaveArrivalTime: 0, // Already arrived
       sWaveArrivalTime: estimatedWarningTime,
-      origin: this.userLocation ? {
-        latitude: this.userLocation.latitude,
-        longitude: this.userLocation.longitude,
-        depth: 10, // Assumed shallow
-      } : {
-        latitude: 0,
-        longitude: 0,
-        depth: 10,
-      },
+      // KRİTİK (görev #12): Konum yoksa SAHTE (0,0) merkez (Null Island —
+      // Türkiye'den ~6000 km) sentezleme. On-device EEW'de "origin" cihazın
+      // kendi konumunun vekilidir; konum bilinmiyorsa origin tamamen atlanır.
+      // Geri sayım süresi/büyüklük zaten origin'e bağlı değil; engine de
+      // origin'i yalnızca mesh yayınında kullanır ve undefined'ı es geçer.
+      ...(this.userLocation ? {
+        origin: {
+          latitude: this.userLocation.latitude,
+          longitude: this.userLocation.longitude,
+          depth: 10, // Assumed shallow
+        },
+      } : {}),
     };
 
     // START COUNTDOWN ENGINE!
@@ -325,7 +332,10 @@ class OnDeviceEEWService {
 
       logger.info('📡 P-wave broadcast to mesh network');
     } catch (error) {
-      // Mesh not available
+      // görev #13: Boş catch yerine logla. Mesh yayını başarısızlığı kritik
+      // DEĞİL (Firebase + bildirim yolları P-dalga sinyalini zaten taşır), bu
+      // yüzden debug seviyesi — ama hata artık sessizce yutulmuyor.
+      logger.debug('P-wave mesh broadcast failed (non-critical — Firebase/notification paths cover it):', error);
     }
   }
 

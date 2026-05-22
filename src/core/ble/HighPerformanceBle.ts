@@ -13,7 +13,7 @@ try {
 
 // AfetNet BLE Peripheral (GATT Server) — replaces broken react-native-ble-peripheral
 interface AfetNetPeripheralAPI {
-  startPeripheral(serviceUUID: string, characteristicUUIDs: string[]): Promise<void>;
+  startPeripheral(serviceUUID: string, characteristicUUIDs: string[], sosCharacteristicUUID: string): Promise<void>;
   stopPeripheral(): Promise<void>;
   isPeripheralRunning(): boolean;
   updateAdvertisementData(data: string): void;
@@ -181,6 +181,39 @@ class HighPerformanceBle {
     }
   }
 
+  /**
+   * K3: Resolve the raw BLE state into a user-actionable reason.
+   *
+   * Returns null when mesh is healthy and ready to use. When unavailable,
+   * the reason maps to MeshStore.meshUnavailableReason so the UI can show
+   * a precise banner ("Bluetooth açık mı?" vs "İzin verin").
+   *
+   * - 'unsupported': BleManager wasn't even constructable on this device
+   *                  (typically iOS simulator without Bluetooth, or Android
+   *                  without BLE chipset). Mesh is permanently disabled here.
+   * - 'no-permission': iOS 'Unauthorized' or Android missing BLUETOOTH_*.
+   *                    User must enable in Settings.
+   * - 'bluetooth-off': hardware is fine + permission OK, but radio is off.
+   *                    Quick fix — toggle Bluetooth.
+   */
+  async getMeshAvailabilityReason(): Promise<
+    'no-permission' | 'bluetooth-off' | 'unsupported' | null
+  > {
+    if (!this.manager) return 'unsupported';
+    try {
+      const state = await this.manager.state();
+      if (state === 'Unauthorized') return 'no-permission';
+      if (state === 'PoweredOff') return 'bluetooth-off';
+      if (state === 'Unsupported') return 'unsupported';
+      if (state === 'PoweredOn') return null;
+      // 'Unknown' / 'Resetting' — treat as transient; report as 'bluetooth-off'
+      // so the user sees actionable guidance rather than a spinner.
+      return 'bluetooth-off';
+    } catch {
+      return 'unsupported';
+    }
+  }
+
   // ===========================================================================
   // DUAL MODE: GATT Server (peripheral) + BLE Scanner (central)
   // ===========================================================================
@@ -261,7 +294,7 @@ class HighPerformanceBle {
 
     this.startingPeripheral = true;
     try {
-      await AfetNetPeripheral.startPeripheral(AFETNET_SERVICE_UUID, ALL_CHAR_UUIDS);
+      await AfetNetPeripheral.startPeripheral(AFETNET_SERVICE_UUID, ALL_CHAR_UUIDS, AFETNET_CHAR_SOS_UUID);
       this.peripheralRunning = true;
       this.isAdvertising = true;
 

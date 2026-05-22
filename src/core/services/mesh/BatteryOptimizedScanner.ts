@@ -15,6 +15,7 @@ import * as Battery from 'expo-battery';
 import { AppState, AppStateStatus } from 'react-native';
 import { useMeshStore } from './MeshStore';
 import NetInfo from '@react-native-community/netinfo';
+import { highPerformanceBle } from '../../ble/HighPerformanceBle';
 
 const logger = createLogger('BatteryOptimizedScanner');
 
@@ -101,6 +102,11 @@ class BatteryOptimizedScanner {
     private profileListeners: Set<(profile: ScanProfile) => void> = new Set();
     private lastProfileChange = 0;
 
+    // Duty-cycle yönetimi: BLE scan'i profiline göre açıp kapatan zamanlayıcılar
+    private dutyCycleScanTimer: ReturnType<typeof setTimeout> | null = null;
+    private dutyCyclePauseTimer: ReturnType<typeof setTimeout> | null = null;
+    private dutyCycleActive = false;
+
     // Power tracking
     private scanCount = 0;
     private totalScanTime = 0;
@@ -148,6 +154,9 @@ class BatteryOptimizedScanner {
      * Cleanup resources
      */
     destroy(): void {
+        this.dutyCycleActive = false;
+        this.clearDutyCycleTimers();
+
         if (this.batterySubscription) {
             this.batterySubscription.remove();
             this.batterySubscription = null;
@@ -173,9 +182,74 @@ class BatteryOptimizedScanner {
             this.currentProfile = newProfile;
             this.lastProfileChange = Date.now();
 
-            logger.info(`Profile changed: ${prevProfile.name} → ${newProfile.name}`);
+            logger.info(`Profil değişti: ${prevProfile.name} → ${newProfile.name}`);
             this.notifyListeners(newProfile);
+
+            // Profil değiştiğinde HighPerformanceBle'nin duty-cycle'ını güncelle
+            if (this.dutyCycleActive) {
+                this.applyDutyCycle(newProfile);
+            }
         }
+    }
+
+    // ============================================================================
+    // DUTY-CYCLE KÖPRÜSÜ (BatteryOptimizedScanner → HighPerformanceBle)
+    // ============================================================================
+
+    /**
+     * Duty-cycle kontrolünü etkinleştirir.
+     * Emergency modda: scan sürekli tam güçte çalışır.
+     * Diğer profillerde: scanDuration ms açık, scanInterval ms kapalı döngüsü.
+     */
+    enableDutyCycle(): void {
+        if (this.dutyCycleActive) return;
+        this.dutyCycleActive = true;
+        this.applyDutyCycle(this.currentProfile);
+        logger.info(`Duty-cycle etkinleştirildi. Profil: ${this.currentProfile.name}`);
+    }
+
+    /**
+     * Duty-cycle kontrolünü devre dışı bırakır.
+     * HighPerformanceBle'yi durdurmaz — üst katman yönetir.
+     */
+    disableDutyCycle(): void {
+        this.dutyCycleActive = false;
+        this.clearDutyCycleTimers();
+        logger.info('Duty-cycle devre dışı');
+    }
+
+    private clearDutyCycleTimers(): void {
+        if (this.dutyCycleScanTimer !== null) {
+            clearTimeout(this.dutyCycleScanTimer);
+            this.dutyCycleScanTimer = null;
+        }
+        if (this.dutyCyclePauseTimer !== null) {
+            clearTimeout(this.dutyCyclePauseTimer);
+            this.dutyCyclePauseTimer = null;
+        }
+    }
+
+    /**
+     * Duty-cycle "köprüsü": BLE tarayıcısının açık kalmasını sağlar.
+     *
+     * KRİTİK P0 (görev #5 / v1.6.3 "EEW-FIX-3" regresyonu): Önceki sürüm
+     * düşük-pil profillerinde (POWER_SAVER → 30 sn, ULTRA_SAVER → 60 sn) BLE
+     * tarayıcısını periyodik olarak durduruyordu. Acil iletişim uygulamasında
+     * bu kabul edilemez: tarayıcı kapalıyken yakındaki bir SOS beacon'ı
+     * DUYULMAZ — mahsur kullanıcı, kurtarıcı telefonlara o pencere boyunca
+     * görünmez kalır. Bu yüzden tarama artık TÜM profillerde sürekli açık
+     * tutulur. Pil optimizasyonu ileride tarayıcıyı kapatarak değil, düşük-güç
+     * tarama KİPİ (BLE scan mode) ile yapılmalıdır. Profil bilgisi yine
+     * getScanParams() üzerinden advertise/zamanlama kararlarını etkiler.
+     */
+    private applyDutyCycle(_profile: ScanProfile): void {
+        this.clearDutyCycleTimers();
+
+        if (!this.dutyCycleActive) return;
+
+        highPerformanceBle.startScanning().catch((err: unknown) => {
+            logger.warn('Duty-cycle scan başlatma hatası:', err);
+        });
     }
 
     private selectOptimalProfile(): ScanProfile {
@@ -226,7 +300,7 @@ class BatteryOptimizedScanner {
     // ============================================================================
 
     /**
-     * Enable emergency mode - maximum scanning power
+     * Acil modu etkinleştirir — maksimum tarama gücü.
      */
     enableEmergencyMode(): void {
         if (this.isEmergencyMode) return;
@@ -234,11 +308,22 @@ class BatteryOptimizedScanner {
         this.isEmergencyMode = true;
         this.updateProfile();
 
-        logger.warn('⚠️ Emergency mode enabled - Maximum scan power');
+        // KRİTİK (görev #6): Acil modda BLE taraması KOŞULSUZ açılır — duty-cycle
+        // initialize edilmemiş olsa bile (init hatası / başlatma sırası sorunu).
+        // Önceki kod scan başlatmayı `if (this.dutyCycleActive)` ile sınırlıyordu;
+        // init başarısızsa enableEmergencyMode tarayıcıya hiç dokunmuyor, SOS
+        // tetiklendiği anda tarayıcı kısık kalabiliyordu. Acil mod, yaşam-döngüsünden
+        // bağımsız sert override olmalı — tarayıcı her hâlükârda açık.
+        this.clearDutyCycleTimers();
+        highPerformanceBle.startScanning().catch((err: unknown) => {
+            logger.warn('Acil mod scan başlatma hatası:', err);
+        });
+
+        logger.warn('Acil mod etkinleştirildi — maksimum tarama gücü');
     }
 
     /**
-     * Disable emergency mode - return to normal optimization
+     * Acil modu devre dışı bırakır — normal optimizasyona dön
      */
     disableEmergencyMode(): void {
         if (!this.isEmergencyMode) return;
@@ -246,7 +331,12 @@ class BatteryOptimizedScanner {
         this.isEmergencyMode = false;
         this.updateProfile();
 
-        logger.info('✅ Emergency mode disabled - Normal optimization resumed');
+        // Normal profil için duty-cycle'ı yeniden başlat
+        if (this.dutyCycleActive) {
+            this.applyDutyCycle(this.currentProfile);
+        }
+
+        logger.info('Acil mod devre dışı — normal optimizasyon devam ediyor');
     }
 
     // ============================================================================

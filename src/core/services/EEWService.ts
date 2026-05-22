@@ -158,10 +158,17 @@ class EEWService {
         logger.info('✅ SeismicSensorService listener registered - REAL early warnings active!');
       }
     } catch (error) {
-      // SeismicSensorService may not be available in all environments (no accelerometer, etc.)
-      // AFAD polling still works as primary notification method.
-      // Log in ALL builds so Crashlytics captures this for diagnostics.
-      console.warn('[EEW] SeismicSensorService registration failed — P-wave early warning disabled. Polling continues.', error);
+      // KRİTİK (görev #13): P-dalga sensör kaydı başarısız → GERÇEK erken uyarı
+      // (depremden ÖNCE uyarı) devre dışı; yalnızca GEÇ AFAD polling kalır.
+      // Önceki kod bare console.warn kullanıyordu — production'da Crashlytics'e
+      // GİTMEZ, yani hata sessiz kalıyordu (uygulama "erken uyarı aktif"
+      // görüntüsünü korurken hiçbir erken uyarı vermiyordu). logger.error ile
+      // Crashlytics'e + EEW store'da kullanıcı-görünür degraded mesaj.
+      logger.error('SeismicSensorService registration failed — P-wave early warning DISABLED, only late AFAD polling remains', error);
+      useEEWStore.getState().setStatus(
+        'connected',
+        'Sınırlı: P-dalga sensörü yok — yalnızca resmi kaynak (AFAD) uyarısı; gerçek erken uyarı kapalı',
+      );
     }
 
     if (__DEV__) {
@@ -869,6 +876,9 @@ class EEWService {
           : Math.max(0, waveCalculation.effectiveWarningTime - waveCalculation.warningTimeUncertainty))
       : warningTime;
 
+    // S1 TODO (v1.7): These EEW alert titles are hardcoded Turkish. Migrate
+    // to i18nService.t('eew.titles.shakingStarted') etc. so ar/en/ru users
+    // receive localized critical alerts. Tracked in v1.7 backlog.
     if (waveCalculation && waveCalculation.sWaveAlreadyArrived) {
       // Shaking has started — drop the "warning" wording, use action wording
       alertTitle = '🚨🚨🚨 DEPREM BAŞLADI — ÇÖK-KAPAN-TUTUN 🚨🚨🚨';

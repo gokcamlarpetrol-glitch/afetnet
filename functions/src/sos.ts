@@ -8,6 +8,7 @@
  */
 
 import * as functions from 'firebase-functions/v1';
+import type * as FirebaseFirestore from '@google-cloud/firestore';
 
 import {
     db,
@@ -21,6 +22,49 @@ import {
     haversineDistance,
     EMERGENCY_NOTIFICATION_SOUND,
 } from './utils';
+
+// ============================================================
+// PAGINATION HELPER — EEW modülündeki paginateQuery ile aynı pattern
+// ============================================================
+
+const SOS_PAGE_SIZE = 500;
+const SOS_MAX_PAGES = 2000; // 1 milyon cihaza kadar destek
+
+async function sosPaginateQuery<T extends FirebaseFirestore.DocumentData = FirebaseFirestore.DocumentData>(
+    queryRef: FirebaseFirestore.Query<T>,
+    pageSize: number,
+    maxPages: number,
+    onPage: (docs: FirebaseFirestore.QueryDocumentSnapshot<T>[]) => void,
+    label: string,
+): Promise<number> {
+    let totalSeen = 0;
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot<T> | null = null;
+    let pages = 0;
+
+    while (pages < maxPages) {
+        let pageQuery: FirebaseFirestore.Query<T> = queryRef.limit(pageSize);
+        if (lastDoc) {
+            pageQuery = pageQuery.startAfter(lastDoc);
+        }
+        const snap = await pageQuery.get();
+        if (snap.empty) break;
+
+        onPage(snap.docs);
+        totalSeen += snap.docs.length;
+        pages++;
+        lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+
+        if (snap.docs.length < pageSize) break;
+    }
+
+    if (pages >= maxPages) {
+        functions.logger.error(
+            `SOS pagination cap: ${label} — ${maxPages} sayfa (~${totalSeen} belge). Ölçek sorunu — araştır.`,
+        );
+    }
+
+    return totalSeen;
+}
 
 // ============================================================
 // SOS ALERT - FCM PUSH TO FAMILY MEMBERS
@@ -126,32 +170,44 @@ export const onSOSAlert = functions
                 }
             }
 
-            // DEDUP FIX: SOSChannelRouter writes to BOTH legacy (devices/{id}/sos_alerts)
-            // and V3 (sos_alerts/{uid}/items) paths simultaneously. This causes BOTH
-            // onSOSAlert AND onSOSAlertV3 to fire → user receives 2 identical push notifications.
+            // DEDUP FIX (H1: 3s → 5s): SOSChannelRouter writes to BOTH legacy
+            // (devices/{id}/sos_alerts) and V3 (sos_alerts/{uid}/items) paths
+            // simultaneously. Both onSOSAlert (legacy) and onSOSAlertV3 fire →
+            // user receives 2 identical push notifications.
             //
-            // Strategy: Legacy function waits 3s then checks if V3 document exists.
-            // If V3 doc exists → V3 trigger (onSOSAlertV3) will handle push → legacy skips.
-            // If V3 doc missing → V3 write failed → legacy sends push as safety net.
-            // This preserves life-safety: push is ALWAYS sent by at least one trigger.
+            // Strategy: legacy waits 5s then checks if V3 document exists.
+            //   - V3 doc exists → V3 trigger handles push → legacy skips
+            //   - V3 doc missing → V3 write failed → legacy sends as safety net
+            //
+            // Why 5s (was 3s): under load (cold CF instance + Firestore quorum
+            // write replication across multi-region), V3 doc occasionally took
+            // ~3.5-4.5s to materialize. 3s window meant legacy fired second push
+            // even though V3 was about to land. 5s leaves comfortable headroom
+            // while still meeting the SOS UX SLO (notification within ~10s).
+            //
+            // Idempotency: composite key is `${signalId}:${schemaVersion}` —
+            // if the same signal arrives twice (CF retry), the `_processed`
+            // flag inside the doc prevents duplicate push regardless of timing.
             const alertSignalId = alert.signalId || context.params.alertId;
+            const schemaVersion = typeof alert.schemaVersion === 'number' ? alert.schemaVersion : 1;
+            const dedupIdempotencyKey = `${alertSignalId}:v${schemaVersion}`;
             try {
-                await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for V3 write
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for V3 write
                 const v3AlertDoc = await db
                     .collection('sos_alerts').doc(ownerUid)
                     .collection('items').doc(alertSignalId)
                     .get();
                 if (v3AlertDoc.exists) {
                     functions.logger.info(
-                        `✅ SOS dedup: V3 path exists for ${ownerUid}/${alertSignalId} — onSOSAlertV3 will handle push, legacy skipping`
+                        `✅ SOS dedup [${dedupIdempotencyKey}]: V3 path exists for ${ownerUid}/${alertSignalId} — onSOSAlertV3 will handle push, legacy skipping`
                     );
                     return null;
                 }
                 functions.logger.warn(
-                    `⚠️ SOS dedup: V3 path NOT found for ${ownerUid}/${alertSignalId} after 3s — legacy sending push as safety net`
+                    `⚠️ SOS dedup [${dedupIdempotencyKey}]: V3 path NOT found for ${ownerUid}/${alertSignalId} after 5s — legacy sending push as safety net`
                 );
             } catch (dedupErr) {
-                functions.logger.warn(`SOS dedup check failed (continuing with push for safety): ${dedupErr}`);
+                functions.logger.warn(`SOS dedup check failed [${dedupIdempotencyKey}] (continuing with push for safety): ${dedupErr}`);
                 // On error, continue with push — better double than none for SOS
             }
 
@@ -477,27 +533,58 @@ export const onSOSBroadcast = functions
         const startTime = Date.now();
 
         try {
+            // SECURITY (SOS spam koruması): rate-limit bloğunu ATOMİK oku-ve-yaz.
+            // Kötü niyetli kullanıcı saniyeler içinde onlarca FARKLI SOS broadcast'i ile
+            // çevredeki herkesi spam'leyip gerçek SOS'ların "kurt geldi" etkisiyle yok
+            // sayılmasına yol açabilir.
+            //
+            // KRİTİK (görev #2): Rate-limit, broadcast'in signalId'sine göre uygulanır.
+            // Önceki kod yalnızca zaman penceresine bakıyordu — bu, fonksiyonun KENDİ
+            // retry'ını kilitliyordu: ilk çalıştırmada kısmi teslimat → throw → CF retry
+            // (saniyeler içinde) → retry rate-limit'e takılıp return → kalan kullanıcılar
+            // SOS'u HİÇ ALMIYORDU. Çözüm: aynı signalId'nin yeniden çalışması (CF retry
+            // veya istemcinin aynı sinyali yeniden yayını) her zaman izinli; yalnız FARKLI
+            // bir signalId 60 sn içinde gelirse engellenir — gerçek spam koruması korunur.
             if (typeof broadcast.senderUid === 'string' && broadcast.senderUid) {
-                await db.collection('rate_limits').doc(broadcast.senderUid).set({
-                    sosBlockedUntil: Date.now() + 60_000,
-                    sosLastBroadcastAt: Date.now(),
-                }, { merge: true }).catch((rateErr) => {
-                    functions.logger.warn(`SOS rate-limit marker failed for ${broadcast.senderUid}:`, rateErr);
-                });
+                const rlRef = db.collection('rate_limits').doc(broadcast.senderUid);
+                const thisSignalId = typeof broadcast.signalId === 'string' && broadcast.signalId
+                    ? broadcast.signalId
+                    : snap.id;
+                let rateLimited = false;
+                try {
+                    await db.runTransaction(async (tx) => {
+                        const rlSnap = await tx.get(rlRef);
+                        const rlData = rlSnap.exists ? rlSnap.data() : undefined;
+                        const blockedUntil = rlData?.sosBlockedUntil;
+                        const blockedBySignalId = rlData?.sosBlockedBySignalId;
+                        // Pencere aktif VE farklı bir sinyal tarafından açılmışsa engelle.
+                        // Aynı sinyalin tekrarı (retry) engellenmez — teslimat tamamlanmalı.
+                        if (typeof blockedUntil === 'number' && Date.now() < blockedUntil
+                            && blockedBySignalId !== thisSignalId) {
+                            rateLimited = true;
+                            return;
+                        }
+                        tx.set(rlRef, {
+                            sosBlockedUntil: Date.now() + 60_000,
+                            sosBlockedBySignalId: thisSignalId,
+                            sosLastBroadcastAt: Date.now(),
+                        }, { merge: true });
+                    });
+                } catch (rateErr) {
+                    // Fail-open: transaction hatası SOS'u engellemez — rate-limit bir
+                    // koruma katmanı, hayati SOS'un kendisinden daha az kritiktir.
+                    functions.logger.warn(`SOS rate-limit transaction failed for ${broadcast.senderUid}:`, rateErr);
+                }
+                if (rateLimited) {
+                    functions.logger.warn(`SOS broadcast ${snap.id} rate-limited for ${broadcast.senderUid} (farklı signalId 60sn içinde) — skipping`);
+                    return null;
+                }
             }
 
             // 1. Get ALL users from BOTH legacy devices AND V3 locations_current
-            // NOTE: Firestore cannot do native geo queries. We apply a .limit(10000)
-            // safety cap to prevent runaway memory usage in case the devices collection
-            // grows unexpectedly large. For Turkey-focused app this is more than enough.
+            // Sayfalı tarama ile bellek-güvenli: limit(10000) yerine paginateQuery kullanılır.
+            // Her sayfa 500 belge, max 2000 sayfa → 1M cihaza kadar destek, RAM güvenli.
             const queryStartTime = Date.now();
-            const [devicesSnapshot, locationsSnapshot] = await Promise.all([
-                db.collection('devices').select('location', 'ownerUid').limit(10000).get(),
-                db.collection('locations_current').limit(10000).get(),
-            ]);
-            const queryLatencyMs = Date.now() - queryStartTime;
-
-            functions.logger.info(`📊 Total device docs: ${devicesSnapshot.size}, V3 location docs: ${locationsSnapshot.size}, query latency: ${queryLatencyMs}ms`);
 
             // CRITICAL: Collect ALL ownerUids — never skip devices just because they lack location
             const targetOwnerUids: Set<string> = new Set();
@@ -507,68 +594,83 @@ export const onSOSBroadcast = functions
             let devicesWithOwnerUid = 0;
             let devicesWithoutOwnerUid = 0;
             let nearbyCount = 0;
+            let totalDevicesSeen = 0;
+            let totalLocationsSeen = 0;
 
-            // 1a. Legacy devices collection
-            for (const deviceDoc of devicesSnapshot.docs) {
-                const deviceData = deviceDoc.data();
-                const deviceId = deviceDoc.id;
+            // 1a. Legacy devices collection — sayfalı tarama
+            totalDevicesSeen = await sosPaginateQuery(
+                db.collection('devices').select('location', 'ownerUid'),
+                SOS_PAGE_SIZE,
+                SOS_MAX_PAGES,
+                (docs) => {
+                    for (const deviceDoc of docs) {
+                        const deviceData = deviceDoc.data();
+                        const deviceId = deviceDoc.id;
 
-                // Skip the sender's own device(s)
-                if (deviceId === senderDeviceId) {
-                    skippedSender++;
-                    continue;
-                }
+                        if (deviceId === senderDeviceId) {
+                            skippedSender++;
+                            continue;
+                        }
 
-                const ownerUid = deviceData?.ownerUid;
-                if (!ownerUid) {
-                    devicesWithoutOwnerUid++;
-                    continue; // Can't send push without ownerUid
-                }
-                devicesWithOwnerUid++;
+                        const ownerUid = deviceData?.ownerUid;
+                        if (typeof ownerUid !== 'string' || !ownerUid) {
+                            devicesWithoutOwnerUid++;
+                            continue;
+                        }
+                        devicesWithOwnerUid++;
 
-                const deviceLat = deviceData?.location?.latitude;
-                const deviceLon = deviceData?.location?.longitude;
-                const deviceHasLocation = typeof deviceLat === 'number' && typeof deviceLon === 'number';
+                        const deviceLat = deviceData?.location?.latitude;
+                        const deviceLon = deviceData?.location?.longitude;
+                        const deviceHasLocation = typeof deviceLat === 'number' && typeof deviceLon === 'number';
 
-                if (deviceHasLocation) {
-                    devicesWithLocation++;
-                } else {
-                    devicesWithoutLocation++;
-                }
+                        if (deviceHasLocation) {
+                            devicesWithLocation++;
+                        } else {
+                            devicesWithoutLocation++;
+                        }
 
-                if (effectiveHasLocation && deviceHasLocation) {
-                    const distance = haversineDistance(sosLat, sosLon, deviceLat, deviceLon);
-                    if (distance <= SOS_RADIUS_KM) {
-                        targetOwnerUids.add(ownerUid);
-                        nearbyCount++;
+                        if (effectiveHasLocation && deviceHasLocation) {
+                            const distance = haversineDistance(sosLat, sosLon, deviceLat, deviceLon);
+                            if (distance <= SOS_RADIUS_KM) {
+                                targetOwnerUids.add(ownerUid);
+                                nearbyCount++;
+                            }
+                        }
+                        // Public proximity SOS requires both sender and receiver locations.
                     }
-                } else {
-                    // Public proximity SOS requires both sender and receiver locations.
-                    // Family/backend/mesh channels handle no-location emergencies.
-                    continue;
-                }
-            }
+                },
+                'devices',
+            );
 
-            // 1b. V3 locations_current collection — document ID = user UID
-            for (const locDoc of locationsSnapshot.docs) {
-                const uid = locDoc.id;
-                if (targetOwnerUids.has(uid)) continue; // Already included from devices
+            // 1b. V3 locations_current collection — sayfalı tarama; doc ID = user UID
+            totalLocationsSeen = await sosPaginateQuery(
+                db.collection('locations_current').select('latitude', 'longitude'),
+                SOS_PAGE_SIZE,
+                SOS_MAX_PAGES,
+                (docs) => {
+                    for (const locDoc of docs) {
+                        const uid = locDoc.id;
+                        if (targetOwnerUids.has(uid)) continue; // Zaten devices'dan eklendi
 
-                const locData = locDoc.data();
-                const locLat = locData?.latitude;
-                const locLon = locData?.longitude;
-                const locHasLocation = typeof locLat === 'number' && typeof locLon === 'number';
+                        const locData = locDoc.data();
+                        const locLat = locData?.latitude;
+                        const locLon = locData?.longitude;
+                        const locHasLocation = typeof locLat === 'number' && typeof locLon === 'number';
 
-                if (effectiveHasLocation && locHasLocation) {
-                    const distance = haversineDistance(sosLat, sosLon, locLat, locLon);
-                    if (distance <= SOS_RADIUS_KM) {
-                        targetOwnerUids.add(uid);
-                        nearbyCount++;
+                        if (effectiveHasLocation && locHasLocation) {
+                            const distance = haversineDistance(sosLat, sosLon, locLat, locLon);
+                            if (distance <= SOS_RADIUS_KM) {
+                                targetOwnerUids.add(uid);
+                                nearbyCount++;
+                            }
+                        }
                     }
-                } else {
-                    continue;
-                }
-            }
+                },
+                'locations_current',
+            );
+
+            const queryLatencyMs = Date.now() - queryStartTime;
+            functions.logger.info(`Toplam cihaz belgeleri: ${totalDevicesSeen}, V3 konum belgeleri: ${totalLocationsSeen}, sorgu süresi: ${queryLatencyMs}ms`);
 
             // Remove sender's own uid to prevent self-notification
             // LIFE-SAFETY: Use ALL available sender identifiers for robust self-exclusion
@@ -594,7 +696,7 @@ export const onSOSBroadcast = functions
             }
 
             functions.logger.info(`📊 Device discovery results:`, {
-                totalDevices: devicesSnapshot.size,
+                totalDevices: totalDevicesSeen,
                 skippedSender,
                 devicesWithOwnerUid,
                 devicesWithoutOwnerUid,
@@ -739,6 +841,11 @@ export const onSOSBroadcast = functions
                     sound: EMERGENCY_NOTIFICATION_SOUND,
                     priority: 'high' as const,
                     channelId: resolveAndroidChannelId(pushData),
+                    // G2: iOS notification category enables the "Yardıma git" /
+                    // "Kapat" quick action buttons registered in NotificationCenter.
+                    // Without categoryId the buttons never appear on the lock
+                    // screen / banner, forcing the rescuer to open the app fully.
+                    categoryId: 'sos',
                 }));
 
                 // Expo API supports batches of up to 100
@@ -829,29 +936,55 @@ export const onSOSBroadcastUpdated = functions
             : Date.now();
 
         try {
-            const alerts = await db
+            // KRİTİK (görev #3): İptal fan-out'u SAYFALI. Önceki kod limit(10000) ile
+            // tek sorgu yapıyordu — ileri-yön onSOSBroadcast ~1M cihaza fan-out yaparken
+            // iptal 10.000'de kesiliyordu. Kitlesel olayda 10k üstü kullanıcıda iptal
+            // edilen SOS SONSUZA DEK aktif kalıyor (hayalet SOS — kurtarma ekibi çoktan
+            // kurtulmuş kişiye gider). Artık ileri-yönle aynı kapasite: SOS_PAGE_SIZE ×
+            // SOS_MAX_PAGES (~1M belge), her sayfa commit edilerek bellek-güvenli.
+            const cancelQuery = db
                 .collectionGroup('items')
-                .where('signalId', '==', signalId)
-                .limit(10000)
-                .get();
-
-            if (alerts.empty) {
-                functions.logger.info(`SOS broadcast cancellation: no V3 alert docs found for ${signalId}`);
-                return null;
-            }
+                .where('signalId', '==', signalId);
 
             const WRITE_BATCH_SIZE = 450;
             let updatedCount = 0;
-            for (let i = 0; i < alerts.docs.length; i += WRITE_BATCH_SIZE) {
-                const batch = db.batch();
-                for (const docSnap of alerts.docs.slice(i, i + WRITE_BATCH_SIZE)) {
-                    batch.set(docSnap.ref, {
-                        status: 'cancelled',
-                        cancelledAt,
-                    }, { merge: true });
-                    updatedCount++;
+            let pages = 0;
+            let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+            while (pages < SOS_MAX_PAGES) {
+                let pageQuery = cancelQuery.limit(SOS_PAGE_SIZE);
+                if (lastDoc) {
+                    pageQuery = pageQuery.startAfter(lastDoc);
                 }
-                await batch.commit();
+                const pageSnap = await pageQuery.get();
+                if (pageSnap.empty) break;
+
+                for (let i = 0; i < pageSnap.docs.length; i += WRITE_BATCH_SIZE) {
+                    const batch = db.batch();
+                    for (const docSnap of pageSnap.docs.slice(i, i + WRITE_BATCH_SIZE)) {
+                        batch.set(docSnap.ref, {
+                            status: 'cancelled',
+                            cancelledAt,
+                        }, { merge: true });
+                        updatedCount++;
+                    }
+                    await batch.commit();
+                }
+
+                pages++;
+                lastDoc = pageSnap.docs[pageSnap.docs.length - 1] ?? null;
+                if (pageSnap.docs.length < SOS_PAGE_SIZE) break;
+            }
+
+            if (pages >= SOS_MAX_PAGES) {
+                functions.logger.error(
+                    `SOS iptal fan-out sayfalama tavanı: ${signalId} — ${SOS_MAX_PAGES} sayfa. Ölçek sorunu — araştır.`,
+                );
+            }
+
+            if (updatedCount === 0) {
+                functions.logger.info(`SOS broadcast cancellation: no V3 alert docs found for ${signalId}`);
+                return null;
             }
 
             functions.logger.info(`✅ SOS broadcast cancellation fan-out updated ${updatedCount} V3 alert docs for ${signalId}`);

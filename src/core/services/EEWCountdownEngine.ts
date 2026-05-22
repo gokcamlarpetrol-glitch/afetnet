@@ -41,7 +41,10 @@ export interface CountdownConfig {
     epicentralDistance: number; // km
     pWaveArrivalTime: number; // seconds from origin
     sWaveArrivalTime: number; // seconds from origin
-    origin: {
+    // Opsiyonel (görev #12): on-device EEW'de cihaz konumu yoksa sağlanmaz.
+    // Sahte (0,0) merkez (Null Island) sentezlemek yerine origin tamamen
+    // atlanır; mesh yayınında JSON.stringify undefined alanı zaten düşürür.
+    origin?: {
         latitude: number;
         longitude: number;
         depth: number;

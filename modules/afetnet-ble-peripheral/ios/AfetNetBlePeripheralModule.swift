@@ -49,15 +49,23 @@ private class PeripheralDelegate: NSObject, CBPeripheralManagerDelegate {
 
 // MARK: - Pending Notification
 
+// SOS ve acil durum mesajlarının silinmemesi için öncelik işaretçisi
 private struct PendingNotification {
   let data: Data
   let characteristic: CBMutableCharacteristic
   let timestamp: Date
+  let isHighPriority: Bool  // SOS/kritik paketler true — eviction'da korunur
 }
+
+// SOS characteristic UUID — düşük öncelikli paket eviction kararı için referans
+private let SOSCharacteristicUUID = "00000004-0000-1000-8000-00805f9b34fb"
 
 // MARK: - Expo Module
 
 public class AfetNetBlePeripheralModule: Module {
+  // BLE callback'leri için dedicated queue — main thread'den bağımsız çalışır,
+  // yoğun SOS trafiğinde UI gecikmesi yaşanmaz
+  private let bleQueue = DispatchQueue(label: "com.afetnet.ble.peripheral", qos: .userInitiated)
   private var peripheralManager: CBPeripheralManager?
   private let peripheralDelegate = PeripheralDelegate()
   private var gattService: CBMutableService?
@@ -74,6 +82,10 @@ public class AfetNetBlePeripheralModule: Module {
   // Queue for notifications that failed due to BLE queue pressure
   private var pendingNotifications: [PendingNotification] = []
   private let maxPendingNotifications = 50
+  // SOS karakteristik UUID'si — JS tarafından startPeripheral'da geçilir (tek
+  // kaynak: constants.ts → AFETNET_CHAR_SOS_UUID). Varsayılan, JS hiç geçmezse
+  // diye güvenli fallback'tir. queuePendingNotification eviction kararında kullanılır.
+  private var activeSosCharUUID: String = SOSCharacteristicUUID
 
   public func definition() -> ModuleDefinition {
     Name("AfetNetBlePeripheral")
@@ -84,82 +96,111 @@ public class AfetNetBlePeripheralModule: Module {
       self.peripheralDelegate.module = self
     }
 
-    AsyncFunction("startPeripheral") { (serviceUUID: String, characteristicUUIDs: [String], promise: Promise) in
-      guard !self.isRunning else {
-        promise.resolve(nil)
-        return
-      }
+    AsyncFunction("startPeripheral") { (serviceUUID: String, characteristicUUIDs: [String], sosCharacteristicUUID: String, promise: Promise) in
+      // THREAD-SAFETY (görev #7): Tüm paylaşılan durum (isRunning, pendingStartPromise,
+      // peripheralManager, characteristics, gattService, pendingNotifications...)
+      // yalnızca bleQueue üzerinde okunur/yazılır. CBPeripheralManager delegate
+      // callback'leri zaten bleQueue'da çalışıyor; Expo fonksiyon gövdeleri de
+      // bleQueue'ya alınarak tek seri senkronizasyon alanı sağlanır — aksi halde
+      // JS thread ↔ bleQueue arasında veri yarışı (Array/Dictionary çökmesi).
+      self.bleQueue.async {
+        // görev #8: SOS karakteristik UUID'sini JS'ten al — Swift'te hardcode
+        // değil, constants.ts tek kaynak. Sürümler arası sapma riski ortadan kalkar.
+        self.activeSosCharUUID = sosCharacteristicUUID.lowercased()
 
-      // CRITICAL FIX: If a previous start is pending (waiting for BT power-on),
-      // reject the new call to prevent the first promise from hanging forever.
-      if let pending = self.pendingStartPromise {
-        pending.resolve(nil) // Resolve previous (best effort)
-      }
+        guard !self.isRunning else {
+          promise.resolve(nil)
+          return
+        }
 
-      self.pendingServiceUUID = serviceUUID
-      self.pendingCharUUIDs = characteristicUUIDs
-      self.pendingStartPromise = promise
+        // K9: If a previous start is still pending (waiting for BT power-on),
+        // REJECT it. Previous code resolved with nil — JS side saw "start success"
+        // for a call that was actually superseded. Reject matches stopPeripheral
+        // semantics and lets the JS side fall back / retry correctly.
+        if let pending = self.pendingStartPromise {
+          pending.reject("CANCELLED", "Superseded by new startPeripheral call")
+        }
 
-      if self.peripheralManager == nil {
-        self.peripheralManager = CBPeripheralManager(delegate: self.peripheralDelegate, queue: DispatchQueue.main)
-      } else if self.peripheralManager?.state == .poweredOn {
-        self.setupGATTService()
-        self.startAdvertising()
-        self.isRunning = true
-        self.pendingStartPromise?.resolve(nil)
-        self.pendingStartPromise = nil
+        self.pendingServiceUUID = serviceUUID
+        self.pendingCharUUIDs = characteristicUUIDs
+        self.pendingStartPromise = promise
+
+        if self.peripheralManager == nil {
+          // bleQueue: UI thread'den bağımsız dedicated BLE kuyruğu
+          self.peripheralManager = CBPeripheralManager(delegate: self.peripheralDelegate, queue: self.bleQueue)
+        } else if self.peripheralManager?.state == .poweredOn {
+          self.setupGATTService()
+          self.startAdvertising()
+          self.isRunning = true
+          self.pendingStartPromise?.resolve(nil)
+          self.pendingStartPromise = nil
+        }
+        // else: wait for peripheralManagerDidUpdateState callback
       }
-      // else: wait for peripheralManagerDidUpdateState callback
     }
 
     AsyncFunction("stopPeripheral") { (promise: Promise) in
-      self.peripheralManager?.stopAdvertising()
-      if let service = self.gattService {
-        self.peripheralManager?.remove(service)
+      // THREAD-SAFETY (görev #7): teardown bleQueue üzerinde yapılır — delegate
+      // callback'leriyle (retryPendingNotifications vb.) aynı seri alanda, böylece
+      // pendingNotifications/subscribedCentrals eşzamanlı mutasyonu engellenir.
+      self.bleQueue.async {
+        self.peripheralManager?.stopAdvertising()
+        if let service = self.gattService {
+          self.peripheralManager?.remove(service)
+        }
+        self.characteristics.removeAll()
+        self.subscribedCentrals.removeAll()
+        self.connectedCentralIds.removeAll()
+        self.pendingNotifications.removeAll()
+        self.gattService = nil
+        self.isRunning = false
+        // CRITICAL: Cancel pending start promise to prevent JS-side await hanging forever
+        if let startPromise = self.pendingStartPromise {
+          startPromise.reject("CANCELLED", "Peripheral stopped before start completed")
+          self.pendingStartPromise = nil
+        }
+        promise.resolve(nil)
       }
-      self.characteristics.removeAll()
-      self.subscribedCentrals.removeAll()
-      self.connectedCentralIds.removeAll()
-      self.pendingNotifications.removeAll()
-      self.gattService = nil
-      self.isRunning = false
-      // CRITICAL: Cancel pending start promise to prevent JS-side await hanging forever
-      if let startPromise = self.pendingStartPromise {
-        startPromise.reject("CANCELLED", "Peripheral stopped before start completed")
-        self.pendingStartPromise = nil
-      }
-      promise.resolve(nil)
     }
 
     Function("isPeripheralRunning") { () -> Bool in
-      return self.isRunning
+      // THREAD-SAFETY (görev #7): isRunning'i bleQueue üzerinden oku.
+      return self.bleQueue.sync { self.isRunning }
     }
 
     Function("updateAdvertisementData") { (hexData: String) in
-      self.advertisementData = Self.hexToData(hexData)
-      if self.isRunning {
-        self.peripheralManager?.stopAdvertising()
-        self.startAdvertising()
+      // THREAD-SAFETY (görev #7): paylaşılan durum bleQueue üzerinde.
+      self.bleQueue.async {
+        self.advertisementData = Self.hexToData(hexData)
+        if self.isRunning {
+          self.peripheralManager?.stopAdvertising()
+          self.startAdvertising()
+        }
       }
     }
 
     Function("notifyCharacteristic") { (characteristicUUID: String, hexData: String) in
-      let uuid = characteristicUUID.lowercased()
-      guard let characteristic = self.characteristics[uuid],
-            let data = Self.hexToData(hexData) else { return }
+      // THREAD-SAFETY (görev #7): characteristics sözlüğü ve pendingNotifications
+      // bleQueue üzerinde — retryPendingNotifications ile aynı seri alanda.
+      self.bleQueue.async {
+        let uuid = characteristicUUID.lowercased()
+        guard let characteristic = self.characteristics[uuid],
+              let data = Self.hexToData(hexData) else { return }
 
-      // updateValue returns false if BLE queue is full
-      let success = self.peripheralManager?.updateValue(data, for: characteristic, onSubscribedCentrals: nil) ?? false
-      if !success {
-        // Queue for retry when peripheralManagerIsReadyToUpdateSubscribers fires
-        NSLog("[AfetNetBlePeripheral] updateValue returned false — queuing for retry")
-        self.queuePendingNotification(data: data, characteristic: characteristic)
+        // updateValue returns false if BLE queue is full
+        let success = self.peripheralManager?.updateValue(data, for: characteristic, onSubscribedCentrals: nil) ?? false
+        if !success {
+          // Queue for retry when peripheralManagerIsReadyToUpdateSubscribers fires
+          NSLog("[AfetNetBlePeripheral] updateValue returned false — queuing for retry")
+          self.queuePendingNotification(data: data, characteristic: characteristic)
+        }
       }
     }
 
     Function("getConnectedDeviceCount") { () -> Int in
+      // THREAD-SAFETY (görev #7): connectedCentralIds'i bleQueue üzerinden oku.
       // Return count of ALL connected centrals (including write-only clients)
-      return self.connectedCentralIds.count
+      return self.bleQueue.sync { self.connectedCentralIds.count }
     }
   }
 
@@ -214,14 +255,37 @@ public class AfetNetBlePeripheralModule: Module {
   // MARK: - Pending Notification Queue
 
   private func queuePendingNotification(data: Data, characteristic: CBMutableCharacteristic) {
-    let notification = PendingNotification(data: data, characteristic: characteristic, timestamp: Date())
+    // SOS karakteristiğine ait paketler yüksek önceliklidir — eviction'dan korunur.
+    // görev #8: hardcoded sabit yerine JS'ten geçilen activeSosCharUUID kullanılır.
+    let isSOS = characteristic.uuid.uuidString.lowercased() == activeSosCharUUID
+    let notification = PendingNotification(
+      data: data,
+      characteristic: characteristic,
+      timestamp: Date(),
+      isHighPriority: isSOS
+    )
     pendingNotifications.append(notification)
 
-    // Evict old entries (keep most recent, drop notifications older than 30s)
+    // 30 saniyeden eski girdileri temizle — ANCAK yüksek öncelikli (SOS) paketler
+    // KORUNUR. KRİTİK (görev #8): Önceki kod yaş filtresini KOŞULSUZ uyguluyordu;
+    // BLE iletim kuyruğu 30 sn+ tıkanırsa (afet sonrası yoğun trafikte fazlasıyla
+    // olası) mahsur kullanıcının SOS bildirimi de siliniyordu — v1.6.3'ün "SOS
+    // paketi düşürülemez" garantisi deliniyordu. SOS paketleri yaşına bakılmaksızın
+    // kuyrukta kalır; yalnız düşük öncelikli paketler 30 sn sonra düşer.
     let cutoff = Date().addingTimeInterval(-30)
-    pendingNotifications = pendingNotifications.filter { $0.timestamp > cutoff }
+    pendingNotifications = pendingNotifications.filter { $0.isHighPriority || $0.timestamp > cutoff }
+
+    // Kuyruk doluysa: önce düşük öncelikli paketi at, yoksa en eskiyi at
+    // SOS paketleri asla öncelik sırası dışında silinmez
     if pendingNotifications.count > maxPendingNotifications {
-      pendingNotifications = Array(pendingNotifications.suffix(maxPendingNotifications))
+      if let lowPriorityIndex = pendingNotifications.firstIndex(where: { !$0.isHighPriority }) {
+        NSLog("[AfetNetBlePeripheral] Kuyruk dolu — düşük öncelikli paket silindi (SOS korundu)")
+        pendingNotifications.remove(at: lowPriorityIndex)
+      } else {
+        // Tüm paketler yüksek öncelikli — en eskiyi at (son çare)
+        NSLog("[AfetNetBlePeripheral] Kuyruk dolu — tüm paketler yüksek öncelikli, en eski silindi")
+        pendingNotifications.removeFirst()
+      }
     }
   }
 

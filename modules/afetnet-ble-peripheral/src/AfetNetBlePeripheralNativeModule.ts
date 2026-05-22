@@ -11,7 +11,7 @@ export type WriteReceivedEvent = {
 export type DeviceEvent = { deviceId: string };
 
 export interface AfetNetBlePeripheralModuleType {
-  startPeripheral(serviceUUID: string, characteristicUUIDs: string[]): Promise<void>;
+  startPeripheral(serviceUUID: string, characteristicUUIDs: string[], sosCharacteristicUUID: string): Promise<void>;
   stopPeripheral(): Promise<void>;
   isPeripheralRunning(): boolean;
   updateAdvertisementData(data: string): void;

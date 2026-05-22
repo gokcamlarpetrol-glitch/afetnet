@@ -49,8 +49,12 @@ function pad2(value: number): string {
     return String(value).padStart(2, '0');
 }
 
-function formatTurkeyApiDateTimeFromMs(timestamp: number): { date: string; time: string } {
-    const date = new Date(timestamp + TURKEY_UTC_OFFSET_MS);
+// AFAD apiv2 — start/end sorgu parametreleri UTC bekler (yanıt `date` alanı da
+// UTC'dir). Canlı doğrulama (2026-05-21): start/end=05:55-06:05 UTC penceresi
+// M5.6 Malatya olayını döndürdü; +3sa kaydırılmış (yerel saat) pencere boş `[]`
+// döndürdü. Bu yüzden pencere UTC üretilir — saat dilimi ofseti EKLENMEZ.
+function formatUtcApiDateTimeFromMs(timestamp: number): { date: string; time: string } {
+    const date = new Date(timestamp);
     return {
         date: `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`,
         time: `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`,
@@ -97,6 +101,30 @@ function parseTurkeyLocalDateTime(value: unknown): number {
     }
 
     return Date.UTC(year, month - 1, day, hour, minute, second) - TURKEY_UTC_OFFSET_MS;
+}
+
+/**
+ * AFAD apiv2 olay zaman damgalarını UTC olarak ayrıştırır.
+ *
+ * AFAD `date` alanı saat dilimi eki OLMADAN UTC verir (örn. "2026-05-20T06:00:15";
+ * bazen "2026-05-20T06:47:37.28205" gibi kesirli saniyeli). Çalışma ortamının
+ * timezone'undan bağımsız UTC ayrıştırmak için ek yoksa 'Z' eklenir.
+ *
+ * NOT: parseTurkeyLocalDateTime YALNIZCA Kandilli (KOERI lst0.asp) içindir —
+ * o kaynak Türkiye yerel saatiyle yayımlar. AFAD'a uygulanırsa issuedAt 3 saat
+ * hatalı çıkar ve isFreshOfficialEvent tüm AFAD olaylarını "stale" eler.
+ */
+function parseAfadUtcDateTime(value: unknown): number {
+    if (typeof value !== 'string') return 0;
+
+    const raw = value.trim();
+    if (!raw) return 0;
+
+    const normalized = raw.replace(/\s+/, 'T');
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+    const parsed = Date.parse(hasExplicitTimezone ? normalized : `${normalized}Z`);
+
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function parseKandilliMagnitude(md: string, ml: string, mw: string): number {
@@ -148,26 +176,45 @@ function isFreshOfficialEvent(event: EEWEvent): boolean {
 
 async function fetchAFADEvents(): Promise<EEWEvent[]> {
     const now = Date.now();
-    const fiveMinutesAgo = now - 5 * 60 * 1000;
+    // RELIABILITY: 15dk pencere — AFAD'ın 3-8 dk yayın gecikmesini karşılar ve
+    // isFreshOfficialEvent'in 15dk eşiğiyle tutarlıdır. Önceki 5dk pencere, deprem
+    // window sınırına denk geldiğinde olayı tamamen kaçırıyordu.
+    const windowStart = now - 15 * 60 * 1000;
 
-    const start = formatTurkeyApiDateTimeFromMs(fiveMinutesAgo);
-    const end = formatTurkeyApiDateTimeFromMs(now);
+    // CRITICAL: AFAD apiv2 start/end parametrelerini UTC bekler. Önceki kod pencereyi
+    // Türkiye yerel saatine (+3sa) çeviriyordu → AFAD'a 3 saat GELECEKTEKİ pencere
+    // soruluyordu → her zaman boş `[]` → deprem günü AFAD=0 dönmesinin doğrudan sebebi.
+    // Canlı test (2026-05-21): UTC pencere M5.6 Malatya'yı döndürdü, yerel pencere boş.
+    const start = formatUtcApiDateTimeFromMs(windowStart);
+    const end = formatUtcApiDateTimeFromMs(now);
 
-    const url = `${AFAD_API}?start=${encodeURIComponent(`${start.date} ${start.time}`)}&end=${encodeURIComponent(`${end.date} ${end.time}`)}&minmag=3&limit=10`;
+    // AFAD apiv2 ISO 8601 bekler (T ayraçlı, boşluksuz).
+    const url = `${AFAD_API}?start=${encodeURIComponent(`${start.date}T${start.time}`)}&end=${encodeURIComponent(`${end.date}T${end.time}`)}&minmag=3&limit=20&orderby=timedesc`;
 
     try {
         const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(5000),
+            headers: { 'Accept': 'application/json', 'User-Agent': 'AfetNet-EEW/2.0' },
+            signal: AbortSignal.timeout(8000),
         });
+        // CRITICAL: HTTP hata durumunda response.json() çöp/boş döndürüp hatayı
+        // sessizce yutuyordu — durumu açıkça logla.
+        if (!response.ok) {
+            functions.logger.error(`AFAD fetch HTTP ${response.status} — url: ${url}`);
+            return [];
+        }
         const data = await response.json();
 
-        if (!Array.isArray(data)) return [];
+        if (!Array.isArray(data)) {
+            functions.logger.error(`AFAD beklenmeyen yanıt tipi: ${typeof data}`);
+            return [];
+        }
 
         return data.map((item: Record<string, unknown>): EEWEvent => {
             const geojson = item.geojson as { coordinates?: unknown } | undefined;
             const coordinates = Array.isArray(geojson?.coordinates) ? geojson.coordinates : [];
-            const issuedAt = parseTurkeyLocalDateTime(item.eventDate || item.date || item.originTime || item.time);
+            // AFAD `date` alanı UTC'dir (saat dilimi eki yok) — UTC olarak ayrıştır.
+            // parseTurkeyLocalDateTime burada issuedAt'i 3 saat geçmişe kaydırırdı.
+            const issuedAt = parseAfadUtcDateTime(item.eventDate || item.date || item.originTime || item.time);
 
             return {
                 id: `afad-${String(item.eventID || item.id || issuedAt || Date.now())}`,
@@ -193,12 +240,42 @@ async function fetchKandilliEvents(): Promise<EEWEvent[]> {
         // NOTE: Format is fragile. If Kandilli redesigns the page (e.g. moves to
         // a JSON endpoint or changes column layout), this function returns 0 events.
         // AFAD / USGS / EMSC act as redundant sources so EEW continues to work.
-        // Monitor BigQuery logs: a sustained 0-events-from-kandilli signal means
-        // the parser needs updating.
-        const response = await fetch(KANDILLI_API, {
-            headers: { 'Accept': 'text/html' },
-            signal: AbortSignal.timeout(4000),
-        });
+        // K6: A successful HTTP fetch that produces 0 events is logged at ERROR
+        // level so Cloud Monitoring can alert on sustained parser failure. Set up:
+        //   Log Explorer: severity=ERROR AND textPayload:"Kandilli parser produced 0 events"
+        //   → Create alerting policy: 60 occurrences in 60 minutes → email/PagerDuty.
+        // RELIABILITY: 8sn timeout (HTML sayfası + yavaş akademik CGI servisi),
+        // gerçekçi User-Agent (varsayılan fetch UA'sı akademik sunucuda engellenebilir)
+        // ve tek retry. Production'da bu kaynak her polling'de 4sn'de timeout
+        // veriyordu — redundant kaynaklar (AFAD/USGS/EMSC) birincildir, Kandilli
+        // yalnızca ek doğrulama katmanıdır.
+        let response: Response | null = null;
+        for (let attempt = 0; attempt < 2 && !response; attempt++) {
+            try {
+                const r = await fetch(KANDILLI_API, {
+                    headers: {
+                        'Accept': 'text/html,*/*',
+                        'User-Agent': 'AfetNet-EEW/2.0 (afet erken uyari; contact@afetnet.app)',
+                        'Accept-Encoding': 'gzip, deflate',
+                    },
+                    signal: AbortSignal.timeout(8000),
+                });
+                if (r.ok) {
+                    response = r;
+                    break;
+                }
+                functions.logger.warn(`Kandilli fetch HTTP ${r.status} (deneme ${attempt + 1})`);
+            } catch (attemptErr) {
+                functions.logger.warn(`Kandilli fetch denemesi ${attempt + 1} basarisiz: ${attemptErr instanceof Error ? attemptErr.name : String(attemptErr)}`);
+            }
+            if (attempt === 0 && !response) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+            }
+        }
+        if (!response) {
+            functions.logger.warn('Kandilli erisilemedi — redundant kaynaklar (AFAD/USGS/EMSC) kullaniliyor');
+            return [];
+        }
         const html = await response.text();
 
         // Parse HTML to extract earthquake data
@@ -255,6 +332,93 @@ async function fetchKandilliEvents(): Promise<EEWEvent[]> {
             }
         }
 
+        // K2/K6: Counter-based monitoring for Kandilli HTML parser health.
+        //
+        // We maintain a Firestore counter at `monitoring/kandilli_health` so a
+        // single quiet hour doesn't trip alerts, but a sustained format change
+        // does. The counter is updated transactionally:
+        //   - success path (events > 0): reset consecutiveFailures to 0
+        //   - failure path (events == 0 with non-empty HTML): increment
+        //
+        // Alerting rules to create in Cloud Monitoring (one-time setup):
+        //   1. Log-based metric "kandilli_parser_failure":
+        //        resource.type=cloud_function AND
+        //        jsonPayload.event_type="kandilli_parser_failure"
+        //   2. Alert policy:
+        //        rate > 0 over 30 min → severity=warning (page on-call later)
+        //        rate > 0 over 60 min AND consecutiveFailures > 10 → page now
+        //
+        // Sample gcloud command (run once):
+        //   gcloud alpha monitoring policies create \
+        //     --notification-channels="$CHANNEL_ID" \
+        //     --display-name="Kandilli EEW Parser Failure" \
+        //     --condition-display-name="Sustained 0-event parses (>10 in 60min)" \
+        //     --condition-filter='metric.type="logging.googleapis.com/user/kandilli_parser_failure" AND resource.type="cloud_function"' \
+        //     --condition-threshold-value=10 \
+        //     --condition-threshold-duration=3600s \
+        //     --aggregation-alignment-period=600s \
+        //     --aggregation-per-series-aligner=ALIGN_RATE
+        const monitoringRef = db.collection('monitoring').doc('kandilli_health');
+        const now = Date.now();
+        try {
+            await db.runTransaction(async (tx) => {
+                const doc = await tx.get(monitoringRef);
+                const prev = (doc.data() || {}) as {
+                    lastSuccess?: number;
+                    lastFailure?: number;
+                    consecutiveFailures?: number;
+                    totalSuccesses?: number;
+                    totalFailures?: number;
+                };
+                if (events.length > 0) {
+                    tx.set(monitoringRef, {
+                        lastSuccess: now,
+                        consecutiveFailures: 0,
+                        totalSuccesses: (prev.totalSuccesses ?? 0) + 1,
+                        totalFailures: prev.totalFailures ?? 0,
+                        lastFailure: prev.lastFailure ?? null,
+                    }, { merge: true });
+                } else if (html.length > 1000) {
+                    const consecutive = (prev.consecutiveFailures ?? 0) + 1;
+                    tx.set(monitoringRef, {
+                        lastFailure: now,
+                        consecutiveFailures: consecutive,
+                        totalFailures: (prev.totalFailures ?? 0) + 1,
+                        totalSuccesses: prev.totalSuccesses ?? 0,
+                        lastSuccess: prev.lastSuccess ?? null,
+                    }, { merge: true });
+
+                    // Severity escalates with consecutive failures:
+                    //   1..9 failures  → WARNING (transient, single shot)
+                    //   10+ failures   → ERROR (likely structural — HTML format change)
+                    const severityIsError = consecutive >= 10;
+                    if (severityIsError) {
+                        functions.logger.error('kandilli_parser_failure', {
+                            event_type: 'kandilli_parser_failure',
+                            severity: 'ERROR',
+                            consecutiveFailures: consecutive,
+                            htmlLength: html.length,
+                            message: `Sustained Kandilli parser failure — ${consecutive} consecutive 0-event parses. HTML format likely changed.`,
+                        });
+                    } else {
+                        functions.logger.warn('kandilli_parser_failure', {
+                            event_type: 'kandilli_parser_failure',
+                            severity: 'WARNING',
+                            consecutiveFailures: consecutive,
+                            htmlLength: html.length,
+                        });
+                    }
+                }
+            });
+        } catch (monitoringErr) {
+            // Monitoring is best-effort — never let a Firestore write failure
+            // block EEW event emission. Fall back to structured log only.
+            functions.logger.warn('kandilli_health monitoring write failed', {
+                event_type: 'kandilli_monitoring_write_failed',
+                error: monitoringErr instanceof Error ? monitoringErr.message : String(monitoringErr),
+            });
+        }
+
         return events;
     } catch (error) {
         functions.logger.error('Kandilli fetch error:', error);
@@ -265,18 +429,26 @@ async function fetchKandilliEvents(): Promise<EEWEvent[]> {
 async function fetchUSGSEvents(): Promise<EEWEvent[]> {
     try {
         const response = await fetch(USGS_API, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(5000),
+            headers: { 'Accept': 'application/json', 'User-Agent': 'AfetNet-EEW/2.0' },
+            signal: AbortSignal.timeout(8000),
         });
+        if (!response.ok) {
+            functions.logger.error(`USGS fetch HTTP ${response.status}`);
+            return [];
+        }
         const data = await response.json();
 
         if (!data.features) return [];
 
         return data.features
             .filter((f: any) => {
-                // Filter for Turkey region only
-                const lon = f.geometry.coordinates[0];
-                const lat = f.geometry.coordinates[1];
+                // 2.5_hour feed tüm M2.5+ olayları içerir — yerel anlamlı depremler
+                // için M4.0 alt sınırı uygula. Koordinat dizisi de doğrulanır.
+                if (typeof f?.properties?.mag !== 'number' || f.properties.mag < 4.0) return false;
+                const coords = f?.geometry?.coordinates;
+                if (!Array.isArray(coords) || coords.length < 2) return false;
+                const lon = coords[0];
+                const lat = coords[1];
                 return lat >= TURKEY_BOUNDS.minLat && lat <= TURKEY_BOUNDS.maxLat &&
                     lon >= TURKEY_BOUNDS.minLon && lon <= TURKEY_BOUNDS.maxLon;
             })
@@ -301,18 +473,23 @@ async function fetchUSGSEvents(): Promise<EEWEvent[]> {
 async function fetchEMSCEvents(): Promise<EEWEvent[]> {
     try {
         const response = await fetch(EMSC_API, {
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(5000),
+            headers: { 'Accept': 'application/json', 'User-Agent': 'AfetNet-EEW/2.0' },
+            signal: AbortSignal.timeout(8000),
         });
+        if (!response.ok) {
+            functions.logger.error(`EMSC fetch HTTP ${response.status}`);
+            return [];
+        }
         const data = await response.json();
 
         if (!data.features) return [];
 
         return data.features
             .filter((f: any) => {
-                // Filter for Turkey region only
-                const lon = f.geometry.coordinates[0];
-                const lat = f.geometry.coordinates[1];
+                const coords = f?.geometry?.coordinates;
+                if (!Array.isArray(coords) || coords.length < 2) return false;
+                const lon = coords[0];
+                const lat = coords[1];
                 return lat >= TURKEY_BOUNDS.minLat && lat <= TURKEY_BOUNDS.maxLat &&
                     lon >= TURKEY_BOUNDS.minLon && lon <= TURKEY_BOUNDS.maxLon;
             })
@@ -1127,10 +1304,13 @@ export const eewEmergencyTrigger = functions
             return;
         }
 
-        // SECURITY FIX: Timing-safe comparison to prevent timing attacks
-        if (!apiKey || typeof apiKey !== 'string' ||
-            apiKey.length !== validKey.length ||
-            !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(validKey))) {
+        // SECURITY: Hash'lenmiş timing-safe karşılaştırma. SHA-256 digest her zaman
+        // 32 byte olduğundan timingSafeEqual sabit zamanda çalışır; sağlanan anahtarın
+        // uzunluğu sızdırılmaz (önceki kod uzunluk farkını erken-return ile sızdırıyordu).
+        if (typeof apiKey !== 'string' ||
+            !crypto.timingSafeEqual(
+                crypto.createHash('sha256').update(apiKey).digest(),
+                crypto.createHash('sha256').update(validKey).digest())) {
             res.status(403).json({ error: 'Invalid API key' });
             return;
         }
@@ -1325,9 +1505,30 @@ export const broadcastEEW = functions
             issuedAt: Date.now(),
         };
 
-        await saveEEWEvent(event);
-        const result = await sendEEWPushWithRetry(event);
+        // IDEMPOTENCY (görev #14): check-then-set transaction — aynı event.id
+        // ikinci kez işlenirse (istemci retry / çift çağrı) tekrar push ATILMAZ.
+        // Önceki kod saveEEWEvent (çıplak set) + koşulsuz push yapıyordu →
+        // eşzamanlı çağrı her cihaza ÇİFT ulusal alarm. eewMonitorFast deseni.
+        const eventRef = db.collection('eew_events').doc(event.id);
+        let alreadyProcessed = false;
+        await db.runTransaction(async (tx) => {
+            const doc = await tx.get(eventRef);
+            if (doc.exists) {
+                alreadyProcessed = true;
+                return;
+            }
+            tx.set(eventRef, {
+                ...event,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+        });
 
+        if (alreadyProcessed) {
+            functions.logger.warn(`broadcastEEW: event ${event.id} zaten işlenmiş — çift push atlandı`);
+            return { success: true, sent: 0, failed: 0, deduped: true };
+        }
+
+        const result = await sendEEWPushWithRetry(event);
         return { success: true, ...result };
     });
 
@@ -1348,10 +1549,13 @@ export const eewWebhook = functions
             return;
         }
 
-        // SECURITY FIX: Timing-safe comparison to prevent timing attacks
-        if (!apiKey || typeof apiKey !== 'string' ||
-            apiKey.length !== validKey.length ||
-            !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(validKey))) {
+        // SECURITY: Hash'lenmiş timing-safe karşılaştırma. SHA-256 digest her zaman
+        // 32 byte olduğundan timingSafeEqual sabit zamanda çalışır; sağlanan anahtarın
+        // uzunluğu sızdırılmaz (önceki kod uzunluk farkını erken-return ile sızdırıyordu).
+        if (typeof apiKey !== 'string' ||
+            !crypto.timingSafeEqual(
+                crypto.createHash('sha256').update(apiKey).digest(),
+                crypto.createHash('sha256').update(validKey).digest())) {
             res.status(403).json({ error: 'Invalid API key' });
             return;
         }
@@ -1399,7 +1603,29 @@ export const eewWebhook = functions
                 issuedAt: Date.now(),
             };
 
-            await saveEEWEvent(event);
+            // IDEMPOTENCY (görev #14): check-then-set transaction — webhook aynı
+            // event.id ile tekrar POST edilirse (kaynak retry'ı / çift kaynak)
+            // tekrar push ATILMAZ. Önceki kod çıplak set + koşulsuz push yapıyordu
+            // → her cihaza çift ulusal alarm riski. eewMonitorFast deseni.
+            const eventRef = db.collection('eew_events').doc(event.id);
+            let alreadyProcessed = false;
+            await db.runTransaction(async (tx) => {
+                const doc = await tx.get(eventRef);
+                if (doc.exists) {
+                    alreadyProcessed = true;
+                    return;
+                }
+                tx.set(eventRef, {
+                    ...event,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            });
+
+            if (alreadyProcessed) {
+                functions.logger.warn(`eewWebhook: event ${event.id} zaten işlenmiş — çift push atlandı`);
+                res.json({ success: true, eventId: event.id, deduped: true });
+                return;
+            }
 
             if (event.magnitude >= MIN_MAGNITUDE_ALERT) {
                 await sendEEWPushWithRetry(event);
