@@ -518,9 +518,23 @@ function saveAlertToStore(alertId: string, alertData: any): void {
             return;
         }
 
+        // FAZ 1 #18 fix: SOS doc update'lerinde alertData.trapped UNDEFINED
+        // olabilir (sender beacon update'leri tüm field'ları tekrar göndermiyor).
+        // Eski kod `!!alertData.trapped` koşulsuz set → undefined olduğunda false
+        // yazılır → addIncomingSOSAlert shallow-merge'de orijinal `trapped: true`
+        // SİLİNİR → rescuer "ENKAZ ALTINDA" göstergesini kaybeder ve mahsur user'ı
+        // düşük öncelikli sayar. Çözüm: alertData.trapped undefined ise store'daki
+        // mevcut alert'in trapped değerini fallback olarak kullan (preserve).
+        const signalIdKey = alertData.signalId || alertId;
+        const existingAlert = useSOSStore.getState().incomingSOSAlerts.find(
+            (a: { signalId?: string; id?: string }) => a.signalId === signalIdKey || a.id === alertId,
+        );
+        const resolvedTrapped = alertData.trapped !== undefined
+            ? !!alertData.trapped
+            : !!existingAlert?.trapped;
         useSOSStore.getState().addIncomingSOSAlert({
             id: alertId,
-            signalId: alertData.signalId || alertId,
+            signalId: signalIdKey,
             senderDeviceId: alertData.senderDeviceId || '',
             senderUid: typeof alertData.senderUid === 'string'
                 ? alertData.senderUid
@@ -530,7 +544,7 @@ function saveAlertToStore(alertId: string, alertData: any): void {
             longitude: lng,
             timestamp: normalizeTimestampMs(alertData?.timestamp) ?? Date.now(),
             message: alertData.message || 'Acil yardım gerekiyor!',
-            trapped: !!alertData.trapped,
+            trapped: resolvedTrapped,
             battery: alertData.battery,
             healthInfo: alertData.healthInfo || undefined,
         });

@@ -74,7 +74,7 @@ Deprem sonrası baz istasyonu çöktüğünde, telefonlar Bluetooth Low Energy i
 
 • Aile üyelerinin güvenlik durumunu anlık görün
 • Konumlarını harita üzerinde takip edin
-• Aile içi grup sohbeti (encrypted)
+• Aile içi grup sohbeti (mesh BLE aktarımı şifreli; bulut iletimi sunucu üzerinden)
 • SOS sinyali tüm aileye anında ulaşır
 
 🟢 SOS ELITE 6-KANAL ULAŞIM
@@ -103,7 +103,7 @@ AFAD listesinden derlenen 45+ toplanma noktası harita üzerinde. Offline erişi
 
 • Sağlık verisi VARSAYILAN OLARAK cihazda kalır
 • Açık rıza vermeden sunucuya gönderilmez (KVKK Madde 6)
-• AES-256 şifreleme her aşamada
+• Mesh (BLE) peer-to-peer şifreleme + TLS/HTTPS sunucu bağlantısı (bulut depolaması sunucu tarafından okunabilir; tam E2EE yol haritasında)
 • Firebase europe-west1 (AB veri merkezi)
 • İstediğiniz zaman verilerinizi silme hakkı
 

@@ -114,7 +114,8 @@ export default function PrivacyPolicyScreen({ navigation }: PrivacyPolicyScreenP
           <Text style={styles.sectionTitle}>5. VERİ GÜVENLİĞİ</Text>
           <Text style={styles.paragraph}>
             • Bulut Güvenliği: Verileriniz Firebase güvenlik kuralları ve Google Cloud altyapısı ile korunur{'\n'}
-            • Mesh Şifreleme: Cihazlar arası BLE mesh iletişimi uçtan uca şifrelenir{'\n'}
+            • Mesh Şifreleme: Cihazlar arası BLE mesh iletişimi uçtan uca şifrelenir (peer-DM){'\n'}
+            • Bulut Mesajları (ŞEFFAFLIK): Bulut üzerinden iletilen mesajlar Firestore'da saklanır ve sunucu altyapısı tarafından okunabilir — tam uçtan uca şifreleme (Signal Protocol) ilerleyen sürümlerde tüm DM kanallarına genişletilecektir{'\n'}
             • Erişim Kontrolü: Firestore güvenlik kuralları ile yetkisiz erişim engellenir{'\n'}
             • Güvenli İletişim: Sunucu bağlantıları TLS/SSL ile şifrelenir
           </Text>

@@ -602,7 +602,13 @@ class MultiSourceEEWService {
                     // 3 services (EEWService, MultiSourceEEWService, RealtimeEarthquakeMonitor) poll
                     // the same AFAD endpoint with different eventId prefixes ('afad-X' vs 'AFAD_X').
                     // Normalized key by magnitude+roundedCoords+timeWindow ensures dedup across services.
-                    const dedupKey = `eq:${event.magnitude.toFixed(1)}:${event.latitude.toFixed(2)}:${event.longitude.toFixed(2)}:${Math.floor(event.originTime / 60000)}`;
+                    // FAZ 1 #19: 0.01° (~1km) bucket consensus'ı kaçırıyordu —
+                    // gerçek-dünyada AFAD vs USGS aynı deprem için 5-10km farklı
+                    // epicenter raporlar (farklı inversion algoritmaları). 0.1°
+                    // (~11km) bucket NotificationService.shouldDeliverNotification
+                    // pattern'iyle (latBucket * 10) consistent → multi-source
+                    // confirmation BOOST artık gerçek olaylarda tetiklenir.
+                    const dedupKey = `eq:${event.magnitude.toFixed(1)}:${event.latitude.toFixed(1)}:${event.longitude.toFixed(1)}:${Math.floor(event.originTime / 60000)}`;
 
                     // Sprint Audit FIX A6: Consensus tracking — multi-source confirmation boost.
                     // Track how many distinct sources reported the same earthquake.

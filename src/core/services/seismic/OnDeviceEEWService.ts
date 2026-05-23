@@ -175,26 +175,25 @@ class OnDeviceEEWService {
     // Update location for accurate calculations
     await this.updateUserLocation();
 
-    // Estimate warning time based on P-wave characteristics
-    const estimatedWarningTime = this.estimateWarningTime(event);
-
-    // Estimate magnitude from G-force (rough approximation)
+    // FAZ 1 #14: estimateWarningTime FREKANSA dayalı YALANCI fizik (mobile
+    // MEMS sensor frekansı epicentral mesafeyi GÜVENİLİR şekilde göstermez).
+    // Yanlış ETA ("5 saniyen var!") → kullanıcı korunmayı geciktirir → S-wave
+    // gelir. KALDIRDIK. On-device tespit sadece "ŞİDDETLİ SARSINTI ALGILANDI"
+    // immediate alarm verir; gerçek countdown yalnız resmi kaynak (AFAD/Kandilli
+    // server-push) ile çalışır — onlar epicentral mesafeyi gerçekten ölçer.
     const estimatedMagnitude = this.estimateMagnitudeFromGForce(event.magnitude, event.confidence);
 
-    // Create countdown config
+    // Create config WITHOUT misleading countdown — warningTime=0 anlamı:
+    // "Şu an algılandı, hemen koru". Countdown engine 0sn için "IMPACT NOW" gösterir.
     const config: CountdownConfig = {
-      warningTime: estimatedWarningTime,
+      warningTime: 0, // FAZ 1 #14: SAHTE ETA YOK — şiddetli sarsıntı şu anda
       magnitude: estimatedMagnitude,
       estimatedIntensity: this.estimateIntensity(event.magnitude),
       location: 'Yerel Algılama - On-Device EEW',
-      epicentralDistance: this.estimateDistance(event),
+      epicentralDistance: 0, // FAZ 1 #14: frekansa dayalı estimate YALANCI — atla
       pWaveArrivalTime: 0, // Already arrived
-      sWaveArrivalTime: estimatedWarningTime,
-      // KRİTİK (görev #12): Konum yoksa SAHTE (0,0) merkez (Null Island —
-      // Türkiye'den ~6000 km) sentezleme. On-device EEW'de "origin" cihazın
-      // kendi konumunun vekilidir; konum bilinmiyorsa origin tamamen atlanır.
-      // Geri sayım süresi/büyüklük zaten origin'e bağlı değil; engine de
-      // origin'i yalnızca mesh yayınında kullanır ve undefined'ı es geçer.
+      sWaveArrivalTime: 0, // FAZ 1 #14: S-wave de şu anda olabilir
+      // KRİTİK (görev #12): Konum yoksa SAHTE (0,0) merkez sentezleme atla.
       ...(this.userLocation ? {
         origin: {
           latitude: this.userLocation.latitude,
@@ -204,20 +203,17 @@ class OnDeviceEEWService {
       } : {}),
     };
 
-    // START COUNTDOWN ENGINE!
+    // START COUNTDOWN ENGINE (warningTime=0 → "IMPACT NOW" mode)
     await eewCountdownEngine.startCountdown(config);
 
-    // Show critical notification via MagnitudeBasedNotificationService
-    // CRITICAL FIX: Do NOT use notificationService.showEarthquakeNotification —
-    // it calls showMagnitudeBasedNotification internally, adding unnecessary indirection.
-    // Route directly to MBN which has cross-system dedup + rate limiting.
+    // Show critical notification — DÜRÜST mesaj, sahte ETA yok.
     try {
       const { notificationCenter } = await import('../notifications/NotificationCenter');
       await notificationCenter.notify('eew', {
         magnitude: estimatedMagnitude,
-        location: `DEPREM UYARISI! ~${estimatedWarningTime}sn`,
+        location: 'ŞİDDETLİ SARSINTI ALGILANDI — HEMEN ÖRTÜN, KORUYUN, TUTUN',
         isEEW: true,
-        timeAdvance: estimatedWarningTime,
+        timeAdvance: 0, // FAZ 1 #14: SAHTE ETA YOK
         timestamp: Date.now(),
       }, 'OnDeviceEEWService');
     } catch (error) {

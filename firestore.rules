@@ -167,15 +167,29 @@ service cloud.firestore {
     // per-message create rules (recipient inbox bound, sender = auth.uid).
     // The worst they can do is bypass rate-limit on typing notifications,
     // which carry no payload — already low-impact.
+    // FAZ 1 #9 fix (DEPLOY ÖNCESİ KULLANICI ONAYI GEREK): eski helper
+    // `conversation.lastMessage is map` check ediyordu, fakat gerçek schema'da
+    // `lastMessage: string` (FirebaseMessageOperations + FirebaseGroupOperations).
+    // `is map` her zaman false → short-circuit `true` → THROTTLE YOK → herkes
+    // 1000 msg/sn spam yapabilir. KVKK orantılılık ihlal + DoS vektörü.
+    //
+    // Yeni helper:
+    //   - `lastMessageAt: number` field'ını kullanır (gerçek schema)
+    //   - request.time (server time) ile karşılaştırır, spoof korumalı
+    //   - 700ms throttle konuşma genelinde uygulanır (tüm gönderenler için)
+    //   - TYPING signal exempt (önceki davranış korunur)
+    //
+    // Eski "same-sender" semantiği bilerek bırakıldı: `lastMessageSenderUid`
+    // schema'da yok; eklemek server-side write değişikliği gerektirir (FAZ 2).
+    // Throttle-all-senders pratikte spam'i sınırlar; legitimate kullanıcı 700ms
+    // bekleyebilir (< 1sn).
     function passesConversationMessageRateLimit(conversationId) {
       let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
       let isTypingSignal = request.resource.data.type == 'TYPING';
+      let lastAt = conversation.lastMessageAt;
       return isTypingSignal
-             || !(conversation.lastMessage is map)
-             || !(conversation.lastMessage.from is string)
-             || !(conversation.lastMessage.timestamp is number)
-             || conversation.lastMessage.from != request.auth.uid
-             || request.resource.data.timestamp >= conversation.lastMessage.timestamp + 700;
+             || !(lastAt is number)
+             || request.time.toMillis() >= lastAt + 700;
     }
 
     // Optional server-side block switch:

@@ -118,7 +118,8 @@ export default function TermsOfServiceScreen({ navigation }: TermsOfServiceScree
             • Yüklediğiniz içerikten siz sorumlusunuz{'\n'}
             • Yasadışı, zararlı veya hak ihlali içeren içerik yükleyemezsiniz{'\n'}
             • İçeriğiniz Firebase güvenlik kuralları ve Google Cloud altyapısı ile korunur{'\n'}
-            • Cihazlar arası mesh iletişimi uçtan uca şifrelenir{'\n'}
+            • Cihazlar arası BLE mesh iletişimi uçtan uca şifrelenir (peer-DM){'\n'}
+            • Bulut üzerinden iletilen mesajlar Firestore'da saklanır ve sunucu altyapısı tarafından okunabilir — tam uçtan uca şifreleme ilerleyen sürümlerde planlanmaktadır{'\n'}
             • Acil durumlarda içeriğiniz paylaşılabilir
           </Text>
         </View>
