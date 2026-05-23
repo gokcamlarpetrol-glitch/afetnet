@@ -21,6 +21,79 @@ const logger = createLogger('SOSAlertListener');
 const processedAlertIds = new Set<string>();
 const MAX_PROCESSED_IDS = 200;
 
+// FAZ 1 TIER1-10: NearbySOSListener silindi (firestore.rules:1386 dead-code).
+// Haversine 50km proximity filter port edildi — SOS_RADIUS_KM CF tarafıyla
+// uyumlu safety net. resolveReceiverLocation: önce LocationService (taze),
+// fallback Firestore locations_current. RECEIVER_LOCATION_MAX_AGE_MS 15 dk.
+const RECEIVER_LOCATION_MAX_AGE_MS = 15 * 60 * 1000;
+const PROXIMITY_FILTER_KM = 50;
+
+function toRad(value: number): number {
+    return value * Math.PI / 180;
+}
+
+function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const earthRadiusKm = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function resolveReceiverLocation(): Promise<{ latitude: number; longitude: number; timestamp: number } | null> {
+    try {
+        const { locationService } = await import('../LocationService');
+        const local = locationService.getCurrentLocation?.();
+        if (
+            local &&
+            Number.isFinite(local.latitude) &&
+            Number.isFinite(local.longitude) &&
+            Date.now() - local.timestamp <= RECEIVER_LOCATION_MAX_AGE_MS
+        ) {
+            return {
+                latitude: local.latitude,
+                longitude: local.longitude,
+                timestamp: local.timestamp,
+            };
+        }
+    } catch {
+        // fall back to Firestore cached current location
+    }
+
+    try {
+        const { identityService } = await import('../IdentityService');
+        const uid = identityService.getUid();
+        if (!uid) return null;
+
+        const { getFirestoreInstanceAsync } = await import('../firebase/FirebaseInstanceManager');
+        const db = await getFirestoreInstanceAsync();
+        if (!db) return null;
+
+        const { doc, getDoc } = await import('firebase/firestore');
+        const snap = await getDoc(doc(db, 'locations_current', uid));
+        if (!snap.exists()) return null;
+        const data = snap.data();
+        const latitude = data?.latitude;
+        const longitude = data?.longitude;
+        const timestamp = normalizeTimestampMs(data?.timestamp || data?.updatedAt) ?? 0;
+        if (
+            typeof latitude === 'number' &&
+            typeof longitude === 'number' &&
+            Number.isFinite(latitude) &&
+            Number.isFinite(longitude) &&
+            timestamp > 0 &&
+            Date.now() - timestamp <= RECEIVER_LOCATION_MAX_AGE_MS
+        ) {
+            return { latitude, longitude, timestamp };
+        }
+    } catch {
+        // no trusted location available
+    }
+    return null;
+}
+
 let currentUnsubscribe: (() => void) | null = null;
 let isListening = false;
 
@@ -28,7 +101,7 @@ let isListening = false;
  * Process a single SOS alert document — shared by legacy and V3 listeners.
  * Uses processedAlertIds for dedup (prevents double notification from dual-path).
  */
-function processSOSAlert(alertId: string, alertData: any): void {
+async function processSOSAlert(alertId: string, alertData: any): Promise<void> {
     // Bug #23: Add alertId to processedAlertIds at the START to prevent duplicate processing
     if (processedAlertIds.has(alertId)) return;
     processedAlertIds.add(alertId);
@@ -83,6 +156,31 @@ function processSOSAlert(alertId: string, alertData: any): void {
     const alertAge = Date.now() - normalizedTimestamp;
     if (alertAge > 30 * 60 * 1000) {
         return;
+    }
+
+    // FAZ 1 TIER1-10: 50km proximity safety-net (NearbySOSListener'dan port).
+    // CF onSOSBroadcast 50km filtre yapıyor zaten ama bu client-side safety:
+    // (a) sender konum verisinde stale/yanlış değer varsa, (b) CF radius config
+    // değişirse, (c) future-proof yerel filter. SADECE type='sos_proximity' veya
+    // serverFanout==true alertler için — family/own SOS distance bağımsız.
+    const isProximityFanout = alertData?.type === 'sos_proximity' ||
+                              alertData?.type === 'nearby_sos' ||
+                              alertData?.serverFanout === true;
+    if (isProximityFanout) {
+        const alertLat = alertData?.location?.latitude ?? alertData?.latitude;
+        const alertLng = alertData?.location?.longitude ?? alertData?.longitude;
+        if (typeof alertLat === 'number' && typeof alertLng === 'number' &&
+            Number.isFinite(alertLat) && Number.isFinite(alertLng)) {
+            const receiverLoc = await resolveReceiverLocation();
+            if (receiverLoc) {
+                const distKm = haversineDistanceKm(receiverLoc.latitude, receiverLoc.longitude, alertLat, alertLng);
+                if (distKm > PROXIMITY_FILTER_KM) {
+                    logger.debug(`Proximity SOS ${alertId} skipped: ${Math.round(distKm)}km > ${PROXIMITY_FILTER_KM}km`);
+                    return;
+                }
+            }
+            // receiverLoc null → don't filter (fail-open for life-safety; CF already vetted)
+        }
     }
 
     // Handle cancellation signals — show "SOS cancelled" notification and remove from store
@@ -307,7 +405,7 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
                     (snapshot) => {
                         for (const change of snapshot.docChanges()) {
                             if (change.type === 'added') {
-                                processSOSAlert(change.doc.id, change.doc.data());
+                                void processSOSAlert(change.doc.id, change.doc.data());
                             } else if (change.type === 'modified') {
                                 // Handle SOS cancellation via document update (not just separate cancel doc)
                                 const data = change.doc.data();
@@ -348,7 +446,7 @@ export async function startSOSAlertListener(myDeviceId: string): Promise<void> {
                     (snapshot) => {
                         for (const change of snapshot.docChanges()) {
                             if (change.type === 'added') {
-                                processSOSAlert(change.doc.id, change.doc.data());
+                                void processSOSAlert(change.doc.id, change.doc.data());
                             } else if (change.type === 'modified') {
                                 const data = change.doc.data();
                                 if (data?.status === 'cancelled') {

@@ -155,9 +155,10 @@ export default function SOSHelpScreen({ navigation, route }: SOSHelpScreenProps)
     }, [signalId]);
 
     // G1: Listen for SOS cancellation while rescuer is on this screen.
-    // NearbySOSListener emits SOS_FULLSCREEN_CANCEL when the original SOS is
-    // cancelled (sender rescued or stopped). Without this, the rescuer stays
-    // stuck on the rescue screen unaware that the call is over.
+    // SOSAlertListener.handleSOSCancellation emits SOS_FULLSCREEN_CANCEL when the
+    // original SOS is cancelled (sender rescued or stopped). Without this, the rescuer
+    // stays stuck on the rescue screen unaware that the call is over.
+    // (FAZ 1 TIER1-10: NearbySOSListener kaldırıldı, emitter SOSAlertListener'da.)
     useEffect(() => {
         if (!signalId) return undefined;
         const subscription = DeviceEventEmitter.addListener('SOS_FULLSCREEN_CANCEL', (payload: { signalId?: string }) => {

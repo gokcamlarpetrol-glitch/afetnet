@@ -1192,7 +1192,7 @@ export const useFamilyStore = create<FamilyState & FamilyActions>((set, get) => 
     if (familyLinksUnsubscribe) { try { familyLinksUnsubscribe(); } catch { /* */ } familyLinksUnsubscribe = null; }
 
     try { const { stopSOSAlertListener } = await import('../services/sos/SOSAlertListener'); stopSOSAlertListener(); } catch { /* */ }
-    try { const { stopNearbySOSListener } = await import('../services/sos/NearbySOSListener'); stopNearbySOSListener(); } catch { /* */ }
+    // FAZ 1 TIER1-10: NearbySOSListener kaldırıldı (proximity SOSAlertListener içinde).
 
     set({ members: [], firebaseUnsubscribe: null, isInitialized: false });
 

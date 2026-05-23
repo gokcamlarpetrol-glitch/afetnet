@@ -813,16 +813,17 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
       // TurkeyOfflineData, Assembly, Tsunami are data-only — no init needed
       logger.info('✅ Life-saving data services available');
 
-      // -- SOS Alert Listeners: Listen for family SOS + nearby broadcasts --
+      // -- SOS Alert Listeners: Listen for family SOS + nearby (proximity) broadcasts --
+      // FAZ 1 TIER1-10: NearbySOSListener kaldırıldı (firestore.rules:1386 dead-code).
+      // Proximity broadcasts artık SOSAlertListener içinde 50km haversine safety-net ile
+      // filtreleniyor (SOSAlertListener.ts:161). Backend zaten coğrafi shard yapıyor.
       try {
         const { getDeviceId } = await import('./utils/device');
         const myDeviceId = await getDeviceId();
         if (myDeviceId) {
           const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
-          const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
           await startSOSAlertListener(myDeviceId);
-          await startNearbySOSListener(myDeviceId);
-          logger.info('✅ SOS Alert Listeners (family + nearby)');
+          logger.info('✅ SOS Alert Listener (family + proximity, unified)');
         } else {
           logger.warn('⚠️ SOS listeners: no deviceId yet — retrying with backoff');
           // LIFE-SAFETY: Retry SOS listeners with exponential backoff — critical for first-launch users
@@ -846,10 +847,8 @@ export async function initializeApp(options: { authenticated?: boolean } = {}) {
                 const retryDeviceId = await getDeviceId();
                 if (retryDeviceId) {
                   const { startSOSAlertListener } = await import('./services/sos/SOSAlertListener');
-                  const { startNearbySOSListener } = await import('./services/sos/NearbySOSListener');
                   await startSOSAlertListener(retryDeviceId);
-                  await startNearbySOSListener(retryDeviceId);
-                  logger.info(`✅ SOS Alert Listeners started (retry #${attempt})`);
+                  logger.info(`✅ SOS Alert Listener started (retry #${attempt})`);
                 } else {
                   logger.warn(`⚠️ SOS listeners retry #${attempt}: still no deviceId`);
                   retrySOSListeners(attempt + 1, Math.min(delayMs * 1.5, 30000));
@@ -1226,12 +1225,10 @@ export async function shutdownApp() {
     await multiChannelAlertService.cancelAlert();
   } catch { /* already stopped */ }
 
-  // Cleanup SOS listeners
+  // Cleanup SOS listener (FAZ 1 TIER1-10: NearbySOSListener kaldırıldı)
   try {
     const { stopSOSAlertListener } = await import('./services/sos/SOSAlertListener');
-    const { stopNearbySOSListener } = await import('./services/sos/NearbySOSListener');
     stopSOSAlertListener();
-    stopNearbySOSListener();
   } catch { /* already stopped */ }
 
   // CRITICAL FIX: Clear incomingSOSAlerts on logout to prevent cross-account SOS marker leak.
@@ -1404,12 +1401,8 @@ export async function shutdownApp() {
     clearSOSAlertDedup();
   } catch { /* already stopped */ }
 
-  // KRİTİK (görev #26): NearbySOSListener dedup'ını da temizle — aynı çapraz-hesap
-  // dedup sızıntısı (B kullanıcısının SOS'u A'nın işlediği ID yüzünden düşer).
-  try {
-    const { clearNearbySOSDedup } = await import('./services/sos/NearbySOSListener');
-    clearNearbySOSDedup();
-  } catch { /* already stopped */ }
+  // FAZ 1 TIER1-10: NearbySOSListener kaldırıldı, dedup artık SOSAlertListener
+  // içinde (clearSOSAlertDedup yukarıda zaten çağrıldı).
 
   // Reset user status store to prevent cross-account SOS/status leak
   try {

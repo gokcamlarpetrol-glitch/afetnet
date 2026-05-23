@@ -592,7 +592,7 @@ class UnifiedSOSController {
                 const { doc, updateDoc } = await import('firebase/firestore');
                 const cancelData = { status: 'cancelled', cancelledAt: Date.now() };
 
-                // 1. Update original broadcast document (NearbySOSListener watches for 'modified')
+                // 1. Update original broadcast document (SOSAlertListener watches for 'modified')
                 await updateDoc(doc(db, 'sos_broadcasts', originalSignal.id), cancelData)
                     .catch(e => logger.warn('SOS: cancel broadcast update failed:', e));
 
