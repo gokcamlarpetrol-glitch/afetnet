@@ -3,6 +3,7 @@ import { View, ActivityIndicator, StyleSheet, Text, Pressable } from 'react-nati
 import { createStackNavigator } from '@react-navigation/stack';
 
 import MainTabs from './MainTabs';
+import { useSettingsStore, getEulaAcceptedSync } from '../stores/settingsStore';
 
 // Eager Load — Critical Path (initial screen, high frequency, life safety)
 import { AllEarthquakesScreen, EarthquakeDetailScreen } from '../screens/earthquakes';
@@ -134,6 +135,25 @@ const LoadingFallback = () => (
 );
 
 export default function MainNavigator() {
+  // FAZ 1 TIER1-07: EULA backstop gate (Layer 2).
+  // Even if App.tsx ErrorBoundary fallback fails, the navigator NEVER renders
+  // Main content without an accepted EULA. Combines reactive Zustand state with
+  // a one-shot sync MMKV read (getEulaAcceptedSync) to close the hydration
+  // race window. Sync read runs ONCE per mount — Zustand selector drives
+  // re-renders for live changes.
+  const eulaAcceptedZustand = useSettingsStore((s) => s.eulaAccepted);
+  const [eulaAcceptedSyncOnce] = useState<boolean>(() => getEulaAcceptedSync());
+  const eulaAccepted = eulaAcceptedZustand || eulaAcceptedSyncOnce;
+
+  if (!eulaAccepted) {
+    // App.tsx still mounts the EULAModal overlay; navigator just blocks behind it.
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1F4E79" />
+      </View>
+    );
+  }
+
   return (
       <Stack.Navigator
         id={undefined}

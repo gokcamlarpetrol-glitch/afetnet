@@ -87,6 +87,14 @@ const getInitialEulaAccepted = (): boolean => {
   return false;
 };
 
+/**
+ * FAZ 1 TIER1-07: Synchronous EULA-accepted read for navigation gate.
+ * Used by MainNavigator to enforce blocking even before Zustand hydrates.
+ * Reads BOTH the Zustand persist payload AND legacy MMKV key. Defaults to
+ * false (safe — blocks rather than bypass) on any read failure.
+ */
+export const getEulaAcceptedSync = (): boolean => getInitialEulaAccepted();
+
 interface SettingsState {
   // Notifications
   notificationsEnabled: boolean;

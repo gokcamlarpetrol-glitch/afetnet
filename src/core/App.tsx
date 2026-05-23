@@ -25,6 +25,7 @@ import BiometricLockOverlay from './components/BiometricLockOverlay';
 import NotificationRePromptModal from './components/NotificationRePromptModal';
 import NotificationDisabledBanner from './components/NotificationDisabledBanner';
 import { EULAModal } from './components/compliance/EULAModal';
+import EULAFallbackScreen from './components/compliance/EULAFallbackScreen';
 import { useOnboardingStore } from './stores/onboardingStore';
 import { useAuthStore, cleanupAuthListener } from './stores/authStore';
 import { hasCachedAuthenticatedSession } from './utils/authSessionCache';
@@ -462,10 +463,14 @@ export default function CoreApp() {
             </PermissionGuard>
 
             {/* ELITE: Compliance - Mandatory EULA */}
-            {/* (App H2): kendi ErrorBoundary'sinde — EULA render crash'i life-safety
+            {/* FAZ 1 TIER1-07: fallback={null} → <EULAFallbackScreen /> — modal
+                crash'inde (BlurView ROM bug, Zustand hydrate race, vs.) sessizce
+                bypass etmek yerine bloklayıcı "Yeniden Başlat" ekranı göster.
+                Apple 1.2/5.1.1 + KVKK Madde 7 uyum garantisi.
+                (App H2): kendi ErrorBoundary'sinde — EULA render crash'i life-safety
                 overlay'lerini (SOSFullScreenAlert / ActiveSOSBanner) öldürmesin. */}
             {isBootStorageReady ? (
-              <ErrorBoundary fallback={null}>
+              <ErrorBoundary fallback={<EULAFallbackScreen />}>
                 <EULAModal />
               </ErrorBoundary>
             ) : null}
