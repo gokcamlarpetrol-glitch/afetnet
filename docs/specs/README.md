@@ -12,10 +12,10 @@ Bu dizin, **ULTRA PLAN v1.7 FAZ 1** kapsamında düzeltilecek 10 ship-blocker bu
 | 4 | Swift killed-app SOS restoration | Hayati | L (3-5 gün) | [TIER1-04](./TIER1-04-swift-state-restoration.md) |
 | 5 | iOS Critical Alerts entitlement | Hayati | L (Apple onayı 1-4 hafta + 1-2 gün) | [TIER1-05](./TIER1-05-ios-critical-alerts.md) |
 | 6 | Background FCM handler | Hayati | M (2-3 gün + EAS rebuild) | [TIER1-06](./TIER1-06-background-fcm-handler.md) |
-| 7 | EULA bypass via ErrorBoundary | Hukuki (Apple 1.2/5.1.1 + KVKK 7) | M (2 gün) | [TIER1-07](./TIER1-07-eula-bypass-fix.md) |
+| 7 | EULA bypass via ErrorBoundary | Hukuki (Apple 1.2/5.1.1 + KVKK 7) | M (2 gün) | ✅ **YAPILDI** (commit ff19e1f) |
 | 8 | Account deletion v3 family | Hukuki (KVKK 7 right to forget) | L (3-4 gün + backfill) | [TIER1-08](./TIER1-08-account-deletion-v3-family.md) |
 | 9 | Firestore rate-limit DEAD rule | KVKK orantılılık + DoS | S (1 gün, deploy onay) | ✅ **YAPILDI** (commit 834675e) |
-| 10 | NearbySOSListener DEAD CODE | Maintenance hijyen | S (sil) veya L (refactor) | [TIER1-10](./TIER1-10-nearby-sos-listener-decision.md) |
+| 10 | NearbySOSListener DEAD CODE | Maintenance hijyen | S (sil) veya L (refactor) | ✅ **YAPILDI** (commit 115c40e — Option A: delete + 50km port) |
 
 **+ Bonus düzeltmeler bu sprint'te yapıldı (commit 834675e)**:
 - #14 EEW on-device countdown KALDIR (frekansa dayalı yalancı fizik)
