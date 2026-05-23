@@ -382,9 +382,37 @@ export async function sendPushToToken(
             rawType === 'family_sos' ||
             rawType === 'sos_proximity' ||
             rawType === 'nearby_sos';
-        const iosInterruptionLevel: 'active' | 'time-sensitive' = isEmergencyType
-            ? 'time-sensitive'
-            : 'active';
+
+        // FAZ 1 TIER1-05: iOS Critical Alerts routing (Apple onayı sonrası flag aç).
+        // - 'critical'      → hardware silent switch + Focus + DND bypass (entitlement gerek)
+        // - 'time-sensitive'→ Focus + DND bypass (hardware silent BYPASS ETMEZ — sessizde duyulmaz)
+        // - 'active'        → standart (Focus/DND tarafından bastırılır)
+        //
+        // CRITICAL_PUSH_TYPES: aile + ulusal EEW = pre-authorized closed recipient set
+        // (Apple onayı verir). Proximity/nearby = time-sensitive (geniş kullanıcı kümesi,
+        // critical kullanımı entitlement revoke riski yaratır).
+        //
+        // Default OFF: EEW_CRITICAL_ENABLED env var true olana kadar 'time-sensitive'
+        // davranışı korunur. Apple onayı sonrası: gcloud functions deploy --set-env-vars
+        // EEW_CRITICAL_ENABLED=true (client release gerek YOK — server-side flip).
+        const CRITICAL_PUSH_TYPES: ReadonlySet<string> = new Set([
+            'eew', 'sos', 'sos_family', 'family_sos',
+        ]);
+        const TIME_SENSITIVE_PUSH_TYPES: ReadonlySet<string> = new Set([
+            'sos_proximity', 'nearby_sos',
+        ]);
+        const criticalEnabled = process.env.EEW_CRITICAL_ENABLED === 'true';
+
+        type ApnsInterruption = 'active' | 'time-sensitive' | 'critical';
+        let iosInterruptionLevel: ApnsInterruption;
+        if (criticalEnabled && CRITICAL_PUSH_TYPES.has(rawType)) {
+            iosInterruptionLevel = 'critical';
+        } else if (CRITICAL_PUSH_TYPES.has(rawType) || TIME_SENSITIVE_PUSH_TYPES.has(rawType)) {
+            iosInterruptionLevel = 'time-sensitive';
+        } else {
+            iosInterruptionLevel = 'active';
+        }
+
         const notificationSound = isEmergencyType ? EMERGENCY_NOTIFICATION_SOUND : 'default';
 
         if (isExpoPushToken(token)) {
@@ -427,6 +455,26 @@ export async function sendPushToToken(
             };
             if (threadId) aps['thread-id'] = threadId;
             if (apnsCategory) aps.category = apnsCategory;
+
+            // FAZ 1 TIER1-05: APNS headers — critical level için apns-priority=10
+            // zorunlu (5=low device'ı uyandırmaz). apns-collapse-id ile EEW
+            // aftershock zincirinde lock screen 10x banner ile dolmaz, aynı SOS
+            // session tekrarlanırsa collapse olur.
+            const apnsHeaders: Record<string, string> = {
+                'apns-priority': isEmergencyType ? '10' : '5',
+                'apns-push-type': 'alert',
+            };
+            if (rawType === 'eew' && safeData?.eewId) {
+                apnsHeaders['apns-collapse-id'] = `eew_${String(safeData.eewId)}`;
+            } else if (
+                (rawType === 'sos' || rawType === 'sos_family' || rawType === 'family_sos') &&
+                safeData?.signalId
+            ) {
+                apnsHeaders['apns-collapse-id'] = `sos_${String(safeData.signalId)}`;
+            } else if (safeData?.eventId) {
+                apnsHeaders['apns-collapse-id'] = String(safeData.eventId);
+            }
+
             await messaging.send({
                 token,
                 notification: { title, body },
@@ -436,6 +484,7 @@ export async function sendPushToToken(
                     notification: { sound: notificationSound, priority: 'max', channelId },
                 },
                 apns: {
+                    headers: apnsHeaders,
                     payload: {
                         aps,
                         ...(safeData || {}),
