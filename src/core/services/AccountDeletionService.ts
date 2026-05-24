@@ -273,7 +273,10 @@ class AccountDeletionService {
         logger.error('Failed to delete user profile:', error);
       });
 
-      // Step 16: Delete Firebase Storage user files (media, voice, images)
+      // Step 17: Delete Firebase Storage user files (media, voice, images)
+      // FAZ 1 TIER1-08: önceki kodda iki ardışık "Step 16" label vardı —
+      // progress UI atlamasına neden oluyordu. Doğru sıralama: 16 profil,
+      // 17 storage, 18 Auth, 19 local, 20 secure.
       progress++;
       onProgress?.({
         step: 'Medya dosyaları siliniyor...',
@@ -600,7 +603,16 @@ class AccountDeletionService {
   }
 
   /**
-   * Delete family members subcollection
+   * Delete family members subcollection.
+   *
+   * FAZ 1 TIER1-08: Bu LEGACY (devices/{deviceId}/familyMembers) path için
+   * best-effort client-side temizlik. V3 family schema (families/{familyId}/members/{uid}
+   * + reverse links users/{otherUid}/familyMembers/{uid}) için AUTHORITATIVE
+   * temizlik functions/src/privacy.ts onUserDeletedCleanup CF'inde — auth.user()
+   * .onDelete() trigger sayesinde Firebase Auth delete'ten sonra otomatik fire eder
+   * ve Admin SDK ile reverse links'i bile temizler (client auth scope dışında).
+   *
+   * Client burada legacy path'i siler, server CF v3 path'i + reverse links'i temizler.
    */
   private async deleteFamilyMembers(deviceId: string): Promise<void> {
     if (!firebaseDataService.isInitialized) return;
@@ -609,18 +621,52 @@ class AccountDeletionService {
       const db = await getFirestoreInstanceAsync();
       if (!db) return;
 
+      // Legacy: devices/{deviceId}/familyMembers/* (v1.6.2 öncesi cihaz-anahtarlı şema)
       const membersRef = collection(db, 'devices', deviceId, 'familyMembers');
       const snapshot = await getDocs(membersRef);
 
       const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
       await Promise.allSettled(deletePromises);
-      logger.info(`Deleted ${snapshot.docs.length} family members`);
+      logger.info(`Deleted ${snapshot.docs.length} legacy family members`);
     } catch (error: unknown) {
       const fbError = error as FirebaseError;
       if (fbError?.code !== 'permission-denied') {
         throw error;
       }
     }
+
+    // V3: client-side best-effort — auth token kaybolmadan önce kendi outbound
+    // familyMembers + familyIds subcollection'larını silmeye çalış. Reverse links
+    // (diğer kullanıcıların namespace'inde) ve families/.../members/{uid}'yi CF
+    // halleder; bunlar burada permission-denied döner, sessiz geçeriz.
+    try {
+      const { getFirebaseAuth } = await import('../../lib/firebase');
+      const uid = getFirebaseAuth()?.currentUser?.uid;
+      if (!uid) return;
+
+      const db = await getFirestoreInstanceAsync();
+      if (!db) return;
+
+      // Outbound familyMembers (users/{uid}/familyMembers/*)
+      try {
+        const outRef = collection(db, 'users', uid, 'familyMembers');
+        const outSnap = await getDocs(outRef);
+        await Promise.allSettled(outSnap.docs.map((d) => deleteDoc(d.ref)));
+        if (outSnap.size > 0) {
+          logger.info(`Deleted ${outSnap.size} outbound familyMembers (v3, client best-effort)`);
+        }
+      } catch { /* permission-denied OK, CF handles */ }
+
+      // familyIds (users/{uid}/familyIds/*)
+      try {
+        const idsRef = collection(db, 'users', uid, 'familyIds');
+        const idsSnap = await getDocs(idsRef);
+        await Promise.allSettled(idsSnap.docs.map((d) => deleteDoc(d.ref)));
+        if (idsSnap.size > 0) {
+          logger.info(`Deleted ${idsSnap.size} familyIds (v3, client best-effort)`);
+        }
+      } catch { /* permission-denied OK, CF handles */ }
+    } catch { /* IdentityService unavailable mid-deletion */ }
   }
 
   /**

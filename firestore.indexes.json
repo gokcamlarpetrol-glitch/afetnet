@@ -231,6 +231,14 @@
         { "fieldPath": "uid", "order": "ASCENDING" },
         { "fieldPath": "requestedAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "deletion_audit_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "triggeredBy", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

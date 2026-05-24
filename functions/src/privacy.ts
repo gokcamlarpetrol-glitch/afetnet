@@ -376,3 +376,201 @@ function sanitizeHealthProfile(data: FirebaseFirestore.DocumentData | undefined)
         updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
     };
 }
+
+// ============================================================
+// FAZ 1 TIER1-08 — ACCOUNT DELETION V3 FAMILY CLEANUP
+// ============================================================
+// KVKK Madde 7 (Right to be Forgotten) + GDPR Article 17 paralel uyum.
+//
+// AccountDeletionService.deleteAccount client-side 20 step iyi yapıyor ama
+// 6 boşluk var:
+//   - families/{id}/members/{uid} (v3 doc) NOT TOUCHED
+//   - families.members array → uid NOT REMOVED
+//   - users/{otherUid}/familyMembers/{uid} reverse links NOT DELETED
+//   - sos_signals where deviceId == uid MISSED
+//   - families/{id}/groupChat/messages where senderUid == uid NOT ANONYMIZED
+//
+// Bu CF auth.user().onDelete() trigger'ı ile çalışır:
+//   - Client deleteUser(user) → auth token kaybeder → Firestore writes 'unauthenticated'
+//     fail eder. Server-side admin SDK bypass'le bu yetim PII'yi temizler.
+//   - Idempotency guard: deletion_audit_log check — auth trigger at-least-once.
+//
+// Anonymization vs delete:
+//   - Group chat messages ANONYMIZE (sender → '[Silindi]', text → '[Bu mesaj
+//     silindi]') — KVKK Madde 7 anonymization alternative, diğer üyelerin
+//     "deprem öncesi konuşma" tarihi korunur.
+//   - SOS/emergency mesajları HARD DELETE (acil aksiyon kapatıldı).
+
+export const onUserDeletedCleanup = functions
+    .region(REGION)
+    .runWith({ timeoutSeconds: 540, memory: '512MB' })
+    .auth.user()
+    .onDelete(async (user) => {
+        const uid = user.uid;
+        functions.logger.info(`[onUserDeletedCleanup] starting cleanup for uid=${uid}`);
+
+        // Idempotency guard — at-least-once auth trigger
+        try {
+            const audit = await db.collection('deletion_audit_log')
+                .where('uid', '==', uid)
+                .where('triggeredBy', '==', 'auth.user().onDelete')
+                .limit(1)
+                .get();
+            if (!audit.empty) {
+                functions.logger.info(`[onUserDeletedCleanup] uid=${uid} already processed, skip`);
+                return;
+            }
+        } catch (err) {
+            functions.logger.warn(`[onUserDeletedCleanup] idempotency check failed (continuing):`, err);
+        }
+
+        // 1. Families that contain uid in their members array
+        let familiesSnap: FirebaseFirestore.QuerySnapshot;
+        try {
+            familiesSnap = await db.collection('families')
+                .where('members', 'array-contains', uid)
+                .get();
+        } catch (err) {
+            functions.logger.error(`[onUserDeletedCleanup] families query failed:`, err);
+            return;
+        }
+
+        functions.logger.info(`[onUserDeletedCleanup] uid=${uid} in ${familiesSnap.size} families`);
+
+        // 1a. Remove uid from each family — member doc + array + delete-if-empty
+        const familyMetadata: Array<{ familyRef: FirebaseFirestore.DocumentReference; otherMembers: string[]; groupId?: string }> = [];
+        for (const f of familiesSnap.docs) {
+            const data = f.data();
+            const members: string[] = Array.isArray(data.members) ? data.members : [];
+            const others = members.filter((m: string) => m !== uid);
+            familyMetadata.push({
+                familyRef: f.ref,
+                otherMembers: others,
+                groupId: typeof data.groupId === 'string' ? data.groupId : undefined,
+            });
+
+            try {
+                const batch = db.batch();
+                batch.delete(f.ref.collection('members').doc(uid));
+                batch.update(f.ref, { members: admin.firestore.FieldValue.arrayRemove(uid) });
+                if (others.length === 0) {
+                    batch.delete(f.ref);
+                }
+                await batch.commit();
+            } catch (err) {
+                functions.logger.warn(`[onUserDeletedCleanup] family ${f.id} cleanup failed:`, err);
+            }
+        }
+
+        // 2. Reverse links: users/{otherUid}/familyMembers/{uid}
+        for (const meta of familyMetadata) {
+            for (const otherUid of meta.otherMembers) {
+                try {
+                    await db.collection('users').doc(otherUid)
+                        .collection('familyMembers').doc(uid).delete();
+                } catch {
+                    // doc may not exist — best effort
+                }
+            }
+        }
+
+        // 3. Outbound own familyMembers + familyIds subcollections
+        try {
+            const outbound = await db.collection('users').doc(uid)
+                .collection('familyMembers').get();
+            if (!outbound.empty) {
+                const ob = db.batch();
+                outbound.docs.forEach((d) => ob.delete(d.ref));
+                await ob.commit();
+            }
+        } catch (err) {
+            functions.logger.warn(`[onUserDeletedCleanup] outbound familyMembers cleanup failed:`, err);
+        }
+
+        try {
+            const fids = await db.collection('users').doc(uid)
+                .collection('familyIds').get();
+            if (!fids.empty) {
+                const fb = db.batch();
+                fids.docs.forEach((d) => fb.delete(d.ref));
+                await fb.commit();
+            }
+        } catch (err) {
+            functions.logger.warn(`[onUserDeletedCleanup] familyIds cleanup failed:`, err);
+        }
+
+        // 4. Group chat messages — anonymize (preserve history for other members)
+        for (const meta of familyMetadata) {
+            if (!meta.groupId) continue;
+            try {
+                const msgsSnap = await db.collection('conversations').doc(meta.groupId)
+                    .collection('messages').where('senderUid', '==', uid).get();
+                if (msgsSnap.empty) continue;
+
+                const mb = db.batch();
+                for (const m of msgsSnap.docs) {
+                    const d = m.data();
+                    const isEmergency = d.type === 'sos' || d.type === 'emergency';
+                    if (isEmergency) {
+                        mb.delete(m.ref);
+                    } else {
+                        mb.update(m.ref, {
+                            senderName: '[Silindi]',
+                            senderUid: null,
+                            text: '[Bu mesaj silindi]',
+                            mediaUrl: null,
+                            voiceUrl: null,
+                            deletedAt: Date.now(),
+                            deletedBySystem: true,
+                        });
+                    }
+                }
+                await mb.commit();
+            } catch (err) {
+                functions.logger.warn(`[onUserDeletedCleanup] groupChat ${meta.groupId} anonymize failed:`, err);
+            }
+        }
+
+        // 5. SOS signals keyed by UID (deviceId field can match either)
+        try {
+            const sosSnap = await db.collection('sos_signals')
+                .where('senderUid', '==', uid)
+                .limit(500)
+                .get();
+            if (!sosSnap.empty) {
+                const sb = db.batch();
+                sosSnap.docs.forEach((d) => sb.delete(d.ref));
+                await sb.commit();
+            }
+        } catch (err) {
+            functions.logger.warn(`[onUserDeletedCleanup] sos_signals senderUid cleanup failed:`, err);
+        }
+
+        try {
+            const sosBroadcastSnap = await db.collection('sos_broadcasts')
+                .where('senderUid', '==', uid)
+                .limit(500)
+                .get();
+            if (!sosBroadcastSnap.empty) {
+                const sbb = db.batch();
+                sosBroadcastSnap.docs.forEach((d) => sbb.delete(d.ref));
+                await sbb.commit();
+            }
+        } catch (err) {
+            functions.logger.warn(`[onUserDeletedCleanup] sos_broadcasts cleanup failed:`, err);
+        }
+
+        // 6. Audit log — KVKK Madde 7 compliance evidence + idempotency anchor
+        try {
+            await db.collection('deletion_audit_log').add({
+                uid,
+                deletedAt: Date.now(),
+                triggeredBy: 'auth.user().onDelete',
+                familiesCleanedUp: familyMetadata.length,
+            });
+        } catch (err) {
+            functions.logger.error(`[onUserDeletedCleanup] audit log write failed:`, err);
+        }
+
+        functions.logger.info(`[onUserDeletedCleanup] complete for uid=${uid}`);
+    });

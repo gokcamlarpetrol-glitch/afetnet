@@ -81,6 +81,6 @@ export { onSeismicReportCreated } from './admin';
 export { auditFirestore } from './audit';
 
 // ============================================================
-// PRIVACY MODULE — GDPR/KVKK veri ihraç
+// PRIVACY MODULE — GDPR/KVKK veri ihraç + silme
 // ============================================================
-export { exportUserData } from './privacy';
+export { exportUserData, onUserDeletedCleanup } from './privacy';
