@@ -7,13 +7,13 @@ Bu dizin, **ULTRA PLAN v1.7 FAZ 1** kapsamında düzeltilecek 10 ship-blocker bu
 | # | Bug | Risk | Effort | Spec |
 |---|---|---|---|---|
 | 1 | E2EE label change | Hukuki (KVKK Madde 4 + tüketici) | S (1 gün) | ✅ **YAPILDI** (commit 834675e) |
-| 2 | Cross-account state isolation | Hukuki KRİTİK (KVKK 4/6) | M (3 gün) | [TIER1-02](./TIER1-02-cross-account-isolation.md) |
-| 3 | KVKK PII pending invite | Hukuki KRİTİK (KVKK 7/8) | M (3-4 gün) | [TIER1-03](./TIER1-03-kvkk-pii-pending-invite.md) |
-| 4 | Swift killed-app SOS restoration | Hayati | L (3-5 gün) | [TIER1-04](./TIER1-04-swift-state-restoration.md) |
-| 5 | iOS Critical Alerts entitlement | Hayati | L (Apple onayı 1-4 hafta + 1-2 gün) | [TIER1-05](./TIER1-05-ios-critical-alerts.md) |
-| 6 | Background FCM handler | Hayati | M (2-3 gün + EAS rebuild) | [TIER1-06](./TIER1-06-background-fcm-handler.md) |
+| 2 | Cross-account state isolation | Hukuki KRİTİK (KVKK 4/6) | M (3 gün) | ✅ **YAPILDI** (commit 6901b4b) |
+| 3 | KVKK PII pending invite | Hukuki KRİTİK (KVKK 7/8) | M (3-4 gün) | ✅ **YAPILDI** phase 1 (commit 386b862) |
+| 4 | Swift killed-app SOS restoration | Hayati | L (3-5 gün) | ✅ **YAPILDI** (commit dffc27d) |
+| 5 | iOS Critical Alerts entitlement | Hayati | L (Apple onayı 1-4 hafta + 1-2 gün) | ✅ **YAPILDI** phase 1 backend (commit e6cde63) |
+| 6 | Background FCM handler | Hayati | M (2-3 gün + EAS rebuild) | ✅ **YAPILDI** (commit 265a604) |
 | 7 | EULA bypass via ErrorBoundary | Hukuki (Apple 1.2/5.1.1 + KVKK 7) | M (2 gün) | ✅ **YAPILDI** (commit ff19e1f) |
-| 8 | Account deletion v3 family | Hukuki (KVKK 7 right to forget) | L (3-4 gün + backfill) | [TIER1-08](./TIER1-08-account-deletion-v3-family.md) |
+| 8 | Account deletion v3 family | Hukuki (KVKK 7 right to forget) | L (3-4 gün + backfill) | ✅ **YAPILDI** (commit 13bebb0) |
 | 9 | Firestore rate-limit DEAD rule | KVKK orantılılık + DoS | S (1 gün, deploy onay) | ✅ **YAPILDI** (commit 834675e) |
 | 10 | NearbySOSListener DEAD CODE | Maintenance hijyen | S (sil) veya L (refactor) | ✅ **YAPILDI** (commit 115c40e — Option A: delete + 50km port) |
 
@@ -22,21 +22,30 @@ Bu dizin, **ULTRA PLAN v1.7 FAZ 1** kapsamında düzeltilecek 10 ship-blocker bu
 - #18 trapped flag erase fix (SOSAlertListener conditional set)
 - #19 Multi-source EEW consensus bucket 0.01° → 0.1°
 
-## Sprint planı — v1.6.4 Hafta 1 + Hafta 2
+## Sprint planı — v1.6.4 (TÜMÜ KOD HAZIR — DEPLOY + DEVICE TEST AŞAMASI)
 
-### Hafta 1 — Privacy & Compliance (hukuki risk indir)
-1. **TIER1-02** Cross-account isolation (AuthLifecycle bus)
-2. **TIER1-03** KVKK PII pending invite (opaque code + CF acceptance)
-3. **TIER1-07** EULA bypass fix (navigation gate + blocking fallback)
-4. **TIER1-06** Background FCM handler (paket install + setBackgroundMessageHandler)
-5. **TIER1-05** Apple Critical Alerts başvuru BAŞLAT (paralel, 1-4 hafta bekle)
+### Hafta 1 — Privacy & Compliance — ✅ KOD HAZIR
+1. ✅ **TIER1-02** Cross-account isolation (AuthLifecycle bus) — `6901b4b`
+2. ✅ **TIER1-03** KVKK PII pending invite phase 1 (opaque code CF) — `386b862` — *deploy + client phase 2 sonraki sprint*
+3. ✅ **TIER1-07** EULA bypass fix — `ff19e1f`
+4. ✅ **TIER1-06** Background FCM handler — `265a604` — *EAS rebuild gerek*
+5. ⏸ **TIER1-05** Apple başvuru — *USER ACTION: developer.apple.com/contact/request/notifications-critical-alerts*
 
-### Hafta 2 — Native + Receive Path
-6. **TIER1-04** Swift state restoration (CBPeripheralManager restore identifier)
-7. **TIER1-08** Account deletion v3 (CF cleanup + backfill migration)
-8. **TIER1-10** NearbySOSListener karar (Option A: delete + port haversine)
-9. v1.6.4 EAS build + TestFlight beta cohort (10-100 tester, 1 hafta gözlem)
-10. App Store submit (gozlem temiz ise)
+### Hafta 2 — Native + Receive Path — ✅ KOD HAZIR
+6. ✅ **TIER1-04** Swift state restoration — `dffc27d` — *EAS rebuild + 2 cihaz test*
+7. ✅ **TIER1-08** Account deletion v3 CF — `13bebb0` — *firebase deploy gerek*
+8. ✅ **TIER1-10** NearbySOSListener delete — `115c40e`
+9. ⏸ v1.6.4 EAS build + TestFlight beta cohort — *USER ACTION*
+10. ⏸ App Store submit — *USER ACTION (gözlem temiz ise)*
+
+### Kalan kullanıcı aksiyonları
+- `firebase deploy --only functions:onUserDeletedCleanup,functions:createContactInvite,functions:acceptContactRequest`
+- `firebase deploy --only firestore:rules,firestore:indexes`
+- (Phase 2, Apple onayı sonrası) `firebase functions:config:set eew.critical_enabled=true` + iOS entitlement
+- `npx expo prebuild --clean` (TIER1-06 + TIER1-04 native değişiklikleri için)
+- `eas build --profile production --platform ios`
+- TestFlight 10-100 tester gözlem 1 hafta
+- 2 fiziksel cihaz BLE mesh + killed-app test (TIER1-04)
 
 ## Toplam effort
 
