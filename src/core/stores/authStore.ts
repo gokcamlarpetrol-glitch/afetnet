@@ -247,6 +247,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                         // This closes auth-race windows where app init requested token before UID was available.
                         void ensurePushTokenRegistration('auth-state-change');
 
+                        // FAZ 1 TIER1-02: AuthLifecycle bus — login emit.
+                        // Identity sync + state set olduktan SONRA (handler'lar getIdentity()
+                        // çağırdığında null görmesin). Fire-and-forget — emit'in await'ı
+                        // login flow'unu bloklamasın; her handler kendi 5s timeout'una sahip.
+                        try {
+                            // eslint-disable-next-line @typescript-eslint/no-require-imports
+                            const { authLifecycle } = require('../auth/AuthLifecycle');
+                            void authLifecycle.emitLogin(firebaseUser.uid).catch((err: unknown) => {
+                                logger.warn('AuthLifecycle emitLogin failed (non-blocking):', err);
+                            });
+                        } catch { /* bus unavailable */ }
+
                         if (__DEV__) {
                             logger.info(`User authenticated: ${identity?.uid}`);
                         }

@@ -163,10 +163,13 @@ class IdentityService {
    */
   private getCachedAppleName(uid: string): string {
     try {
-      // Priority: 1) By Firebase UID, 2) Global latest
-      const storedByUid = DirectStorage.getString(`@afetnet:apple_name_${uid}`) ?? null;
-      const storedLatest = DirectStorage.getString('@afetnet:apple_name_latest') ?? null;
-      const raw = storedByUid || storedLatest;
+      // FAZ 1 TIER1-02: SADECE UID-scoped key oku. Önceki kod `_latest` global
+      // fallback kullanıyordu → User A signin → A'nın adı `@afetnet:apple_name_latest`
+      // yazılır → A signout → B signin (B'nin UID-scoped key'i yok) → storedLatest
+      // A'nın adını döner → B, A'nın adıyla görünür (KVKK Madde 4-6 ihlali).
+      // Apple sadece İLK auth'da fullName veriyor — A re-signin yaparsa
+      // `apple_name_${A.uid}` UID-scoped key'inden okuyacağız (orada hâlâ var).
+      const raw = DirectStorage.getString(`@afetnet:apple_name_${uid}`) ?? null;
       if (!raw) return '';
 
       const parsed = JSON.parse(raw) as { givenName?: string | null; familyName?: string | null };
@@ -706,3 +709,24 @@ class IdentityService {
 }
 
 export const identityService = new IdentityService();
+
+// FAZ 1 TIER1-02: AuthLifecycle bus registration.
+// onLogin: identity restore for the new user's UID (idempotent — initialize
+//   noops if already initialized for this UID).
+// onLogout: clear in-memory identity + cached display name BEFORE the next user
+//   reads anything. Without this, getDisplayName() returns stale A name to B.
+try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { authLifecycle } = require('../auth/AuthLifecycle');
+    authLifecycle.register({
+        name: 'IdentityService',
+        onLogin: async (_uid: string) => {
+            await identityService.initialize();
+        },
+        onLogout: async (_uid: string) => {
+            await identityService.clearIdentity();
+        },
+    });
+} catch {
+    // Bus unavailable in tests — no-op
+}

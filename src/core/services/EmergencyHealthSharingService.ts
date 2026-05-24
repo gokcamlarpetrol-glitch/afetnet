@@ -410,3 +410,30 @@ class EmergencyHealthSharingService {
 
 // Singleton instance
 export const emergencyHealthSharingService = new EmergencyHealthSharingService();
+
+// FAZ 1 TIER1-02: AuthLifecycle bus — singleton in-memory state ASLA çapraz
+// hesap geçişinde kalmamalı. isEnabled flag'i kullanıcı A'nın opt-in'i,
+// kullanıcı B login olduğunda B'nin İLK SOS'unda yanlışlıkla broadcast yapılır
+// (KVKK Madde 6 — sağlık verisi yanlış paylaşım). stopBroadcast + initialize
+// kombinasyonu state'i sıfırlar.
+try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { authLifecycle } = require('../auth/AuthLifecycle');
+    authLifecycle.register({
+        name: 'EmergencyHealthSharingService',
+        onLogin: async (_uid: string) => {
+            // Önce previous state'i kapat, sonra yeni UID için fresh init
+            await emergencyHealthSharingService.stopBroadcast();
+            await emergencyHealthSharingService.initialize();
+        },
+        onLogout: async (_uid: string) => {
+            await emergencyHealthSharingService.stopBroadcast();
+            // isEnabled flag'i de sıfırla — setEnabled MMKV'ye yazar, başka kullanıcı
+            // bu değeri okuyabilir. Burada yalnızca in-memory durumu reset; MMKV
+            // UID-scoped olmalı (ayrı story — başlıbaşına spec).
+            await emergencyHealthSharingService.setEnabled(false);
+        },
+    });
+} catch {
+    // Bus unavailable in tests — no-op
+}

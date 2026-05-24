@@ -674,3 +674,24 @@ class FCMTokenService {
 // ============================================================
 
 export const fcmTokenService = new FCMTokenService();
+
+// FAZ 1 TIER1-02: AuthLifecycle bus — push_tokens/{prevUid} ASLA B'nin cihazına
+// teslim olmamalı. cleanup() Firestore'dan token siler. Önceki kodda
+// AuthService.signOut() bu çağrıyı YAPMIYORDU — stale token push_tokens/{A}'da
+// kalıyor → A'ya gönderilen push B'nin cihazına ulaşıyordu (KVKK ihlali).
+try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { authLifecycle } = require('../auth/AuthLifecycle');
+    authLifecycle.register({
+        name: 'FCMTokenService',
+        onLogin: async (_uid: string) => {
+            // initialize is async + idempotent — re-register token for new UID
+            await fcmTokenService.initialize();
+        },
+        onLogout: async (_uid: string) => {
+            fcmTokenService.cleanup();
+        },
+    });
+} catch {
+    // Bus unavailable in tests — no-op
+}

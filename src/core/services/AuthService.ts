@@ -543,6 +543,19 @@ export const AuthService = {
         settingsSyncService.cleanup();
       } catch { /* best effort */ }
 
+      // FAZ 1 TIER1-02: AuthLifecycle emitLogout — Firebase signOut'tan ÖNCE.
+      // Handler'lar hâlâ authenticated context'te (FCMTokenService Firestore'a
+      // token sil yazabilir, EmergencyHealthSharingService stopBroadcast olabilir).
+      // signOutUid boşsa (uid önce kayboldu) emit yapma — bus'da last UID fallback.
+      if (signOutUid) {
+        try {
+          const { authLifecycle } = await import('../auth/AuthLifecycle');
+          await authLifecycle.emitLogout(signOutUid);
+        } catch (err) {
+          logger.warn('AuthLifecycle emitLogout failed (continuing signOut):', err);
+        }
+      }
+
       // CRITICAL: Firebase sign-out FIRST, then local cleanup.
       // If local cleanup runs first and Firebase sign-out fails,
       // the user is still authenticated remotely but local session is destroyed.
