@@ -170,6 +170,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     // ELITE: Google Sign-In Plugin
     "@react-native-google-signin/google-signin",
+    // FAZ 1 TIER1-06: Background FCM handler — killed-app data-only push delivery.
+    // Config plugin auto-injects FirebaseApp.configure() in iOS AppDelegate and
+    // adds FirebaseMessagingService to Android AndroidManifest.xml. Without this,
+    // setBackgroundMessageHandler() in index.ts never fires on killed Android.
+    "@react-native-firebase/app",
+    "@react-native-firebase/messaging",
     // görev #31: react-native-webrtc / VoiceCallService notu kaldırıldı — sesli arama özelliği v1.6.3'te kaldırıldı.
     // AfetNet BLE Peripheral: autolinked via expo-module.config.json (no config plugin needed)
   ],

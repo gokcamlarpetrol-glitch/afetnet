@@ -80,9 +80,76 @@ try {
 // ELITE: APP INITIALIZATION
 // ============================================================================
 
-// NOTE: @react-native-firebase/messaging is NOT installed in this project.
-// Push notifications use expo-notifications + Firebase Cloud Functions.
-// Background message handling is done via expo-task-manager tasks above.
+// FAZ 1 TIER1-06: Background FCM handler — killed-app data-only push delivery.
+// Without this, FCM data-only push (no `notification` block, `content-available:1`
+// only) silently drops on killed Android; iOS throttles after a few attempts.
+// MUST be registered BEFORE registerRootComponent — Firebase JS layer requires
+// this for the handler to fire on subsequent killed-app push events.
+//
+// Conservative: headless JS context can't write Firestore (no auth), can't mutate
+// React stores. ONLY safe action = schedule local notification → user gets banner +
+// emergency-alert.wav → on tap, app opens and processes the SOS data normally.
+//
+// try/catch wrapped: if messaging module missing (older binary, simulator), the
+// app continues without background handler — no crash, foreground push path
+// (expo-notifications) still works.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const messaging = require('@react-native-firebase/messaging').default;
+  if (messaging && typeof messaging === 'function') {
+    messaging().setBackgroundMessageHandler(async (remoteMessage: {
+      data?: Record<string, string>;
+      notification?: { title?: string; body?: string };
+      messageId?: string;
+    }) => {
+      try {
+        const data = remoteMessage?.data ?? {};
+        const type = String(data.type ?? '').toLowerCase();
+        const messageId = remoteMessage.messageId ?? String(data.signalId ?? '');
+
+        // SOS types — show emergency local notif immediately
+        if (['sos', 'sos_family', 'family_sos', 'sos_proximity', 'nearby_sos'].includes(type)) {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { scheduleNotificationAsync } = require('expo-notifications');
+          await scheduleNotificationAsync({
+            content: {
+              title: `SOS: ${String(data.senderName ?? data.from ?? 'Bilinmeyen')}`,
+              body: String(data.message ?? 'Acil yardım gerekiyor!'),
+              data: { type, signalId: String(data.signalId ?? messageId), ...data },
+              sound: 'emergency-alert.wav',
+              priority: 'max',
+            },
+            trigger: null,
+          });
+        } else if (['eew', 'earthquake'].includes(type)) {
+          // EEW types — show critical local notif
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { scheduleNotificationAsync } = require('expo-notifications');
+          const mag = data.magnitude ? `M${String(data.magnitude)}` : '';
+          const loc = data.location ? String(data.location) : '';
+          await scheduleNotificationAsync({
+            content: {
+              title: `Deprem Uyarısı ${mag}`.trim(),
+              body: loc || 'Deprem erken uyarı sistemi tetiklendi',
+              data: { type, ...data },
+              sound: 'emergency-alert.wav',
+              priority: 'max',
+            },
+            trigger: null,
+          });
+        }
+        // chat/message/family/news: NO action — display notification (sent with
+        // top-level notification block) already shows banner via OS path; app
+        // processes data on tap.
+      } catch {
+        // Headless handler swallows errors — fall through to OS default.
+      }
+    });
+  }
+} catch {
+  // @react-native-firebase/messaging unavailable (simulator, older binary) —
+  // foreground path (expo-notifications) handles all received pushes normally.
+}
 
 // Import CoreApp from src/core/App
 import CoreApp from './src/core/App';
