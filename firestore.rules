@@ -1534,6 +1534,43 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ====================================================
+    // FAZ 1 TIER1-03 — KVKK PII-safe contact invite flow
+    // ====================================================
+    // contact_requests/{recipientUid}/incoming/{opaqueCode}
+    //
+    // Client (recipient) sadece kendi inbox'unu OKUYABİLİR ve davetiyeyi SİLEBİLİR.
+    // WRITE/CREATE yalnızca CF (admin SDK bypass) yapar — direkt client write
+    // KVKK Madde 8 ihlali (önceki bug). Recipient PII görmez, sadece opaqueCode +
+    // timestamps. PII yalnızca acceptContactRequest CF batch'i sonrasında
+    // users/{recipient}/familyMembers/{sender} doc'una yazılır.
+    match /contact_requests/{recipientUid}/incoming/{inviteCode} {
+      allow read: if isOwner(recipientUid);
+      allow delete: if isOwner(recipientUid);
+      // Hiçbir client direkt write/create yapamaz — CF authoritative
+      allow create, update: if false;
+    }
+
+    // invite_lookup/{opaqueCode}
+    //
+    // Admin-only. Sender + recipient + familyId mapping CF tarafından kullanılır.
+    // Hiçbir client okuyamaz (PII içerir) — yazamaz (security).
+    match /invite_lookup/{inviteCode} {
+      allow read, write: if false;
+    }
+
+    // consent_log/{logId}
+    //
+    // KVKK Madde 11 audit trail. CF tarafından yazılır. İlgili kullanıcılar
+    // (sender + recipient) kendi consent kayıtlarını okuyabilir — denetim talebi
+    // veya kendi geçmiş onayları için. Diğerleri erişemez.
+    match /consent_log/{logId} {
+      allow read: if isAuthenticated()
+                    && (resource.data.senderUid == request.auth.uid
+                        || resource.data.recipientUid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
     // Catch-all deny for undefined paths
     match /{document=**} {
       allow read, write: if false;

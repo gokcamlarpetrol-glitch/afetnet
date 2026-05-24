@@ -84,3 +84,8 @@ export { auditFirestore } from './audit';
 // PRIVACY MODULE — GDPR/KVKK veri ihraç + silme
 // ============================================================
 export { exportUserData, onUserDeletedCleanup } from './privacy';
+
+// ============================================================
+// CONTACT REQUESTS — KVKK Madde 4/7/8 opaque invite flow (TIER1-03)
+// ============================================================
+export { createContactInvite, acceptContactRequest } from './contact-requests';
