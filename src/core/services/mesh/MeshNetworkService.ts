@@ -232,6 +232,8 @@ class MeshNetworkService {
   // GATT incoming data listener cleanup
   private incomingDataUnsubscribe: (() => void) | null = null;
   private ackReceivedUnsubscribe: (() => void) | null = null;
+  // FAZ 1 TIER1-04: killed-app restoration DeviceEventEmitter subscription
+  private restorationSubscription: { remove: () => void } | null = null;
 
   // BLE chunk reassembly state
   private chunkReassembly: Map<string, ChunkReassemblyState> = new Map();
@@ -1363,6 +1365,32 @@ class MeshNetworkService {
     // Start heartbeat
     this.startHeartbeat();
 
+    // FAZ 1 TIER1-04: killed-app restoration sonrası bootstrap path.
+    // CBPeripheralManagerOptionRestoreIdentifierKey ile registered olduğumuz için
+    // iOS, killed-app + nearby peer AfetNet UUID advertise edince uygulamayı
+    // background'da relaunch eder ve onStateRestored event'i fire eder.
+    // HighPerformanceBle bunu DeviceEventEmitter('AFETNET_BLE_STATE_RESTORED')
+    // şeklinde yeniden yayınlar. iOS ~30s background execution penceresi var —
+    // bu pencerede scanner'ı çabuk başlatıp gelen SOS paketlerini işlemeliyiz.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { DeviceEventEmitter } = require('react-native');
+      const restoredSub = DeviceEventEmitter.addListener(
+        'AFETNET_BLE_STATE_RESTORED',
+        () => {
+          logger.info('🔄 Mesh bootstrap from BLE state restoration (killed-app relaunch)');
+          // startDualMode idempotent (peripheralRunning kontrolü mevcut) — restoration
+          // sonrası native peripheral zaten advertising, scanner'ı çabuk başlat.
+          highPerformanceBle.startDualMode().catch((e) => {
+            logger.warn('Restoration bootstrap startDualMode failed:', e);
+          });
+        }
+      );
+      this.restorationSubscription = restoredSub;
+    } catch {
+      /* RN her zaman var; emitter sub hatasını yutuyoruz */
+    }
+
     // Start GATT server (advertising + accepting writes) + BLE scanner
     await highPerformanceBle.startDualMode();
     // FIX: Remove existing listener before adding to prevent duplicate callbacks
@@ -1440,6 +1468,11 @@ class MeshNetworkService {
     if (this.incomingDataUnsubscribe) {
       this.incomingDataUnsubscribe();
       this.incomingDataUnsubscribe = null;
+    }
+    // FAZ 1 TIER1-04
+    if (this.restorationSubscription) {
+      try { this.restorationSubscription.remove(); } catch { /* */ }
+      this.restorationSubscription = null;
     }
     await highPerformanceBle.stopDualMode();
     this.isRealMode = false;

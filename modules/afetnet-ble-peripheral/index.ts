@@ -8,10 +8,12 @@ export {
   addOnWriteReceivedListener,
   addOnDeviceConnectedListener,
   addOnDeviceDisconnectedListener,
+  addOnStateRestoredListener,
 } from './src/AfetNetBlePeripheralModule';
 
 export type {
   OnWriteReceivedEvent,
   OnDeviceConnectedEvent,
   OnDeviceDisconnectedEvent,
+  OnStateRestoredEvent,
 } from './src/AfetNetBlePeripheralModule';

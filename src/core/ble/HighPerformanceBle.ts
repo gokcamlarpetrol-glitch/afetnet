@@ -22,6 +22,14 @@ interface AfetNetPeripheralAPI {
   addOnWriteReceivedListener(listener: (event: { deviceId: string; characteristicUUID: string; data: string }) => void): { remove: () => void };
   addOnDeviceConnectedListener(listener: (event: { deviceId: string }) => void): { remove: () => void };
   addOnDeviceDisconnectedListener(listener: (event: { deviceId: string }) => void): { remove: () => void };
+  // FAZ 1 TIER1-04: killed-app restoration sonrası iOS event'i. JS bunu
+  // yakalayıp scanner + listener'ları ~30s background penceresinde bootstrap eder.
+  addOnStateRestoredListener?(listener: (event: {
+    serviceUUIDs: string[];
+    characteristicUUIDs: string[];
+    hadAdvertisementData: boolean;
+    timestamp: number;
+  }) => void): { remove: () => void };
 }
 let AfetNetPeripheral: AfetNetPeripheralAPI | null = null;
 try {
@@ -379,6 +387,30 @@ class HighPerformanceBle {
       logger.debug(`GATT client disconnected: ${event.deviceId.substring(0, 8)}`);
     });
     this.nativeEventSubscriptions.push(disconnectSub);
+
+    // FAZ 1 TIER1-04: killed-app restoration sonrası native side onStateRestored
+    // event'i gönderir (yalnızca iOS). MeshNetworkService bunu DeviceEventEmitter
+    // üzerinden yakalayıp scanner + listener bootstrap eder; ayrıca burada
+    // peripheralRunning + isAdvertising flag'leri restore edilir, böylece üst
+    // katman "GATT server kapalı" sanmaz ve yeniden start denemez.
+    if (typeof AfetNetPeripheral.addOnStateRestoredListener === 'function') {
+      const restoreSub = AfetNetPeripheral.addOnStateRestoredListener((event) => {
+        logger.info(
+          `🔄 BLE state restored: services=${event.serviceUUIDs.length} chars=${event.characteristicUUIDs.length} adData=${event.hadAdvertisementData}`
+        );
+        this.peripheralRunning = true;
+        this.isAdvertising = true;
+
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { DeviceEventEmitter } = require('react-native');
+          DeviceEventEmitter.emit('AFETNET_BLE_STATE_RESTORED', event);
+        } catch {
+          /* RN her zaman var ama emit hatasını yutuyoruz */
+        }
+      });
+      this.nativeEventSubscriptions.push(restoreSub);
+    }
   }
 
   /**

@@ -45,6 +45,20 @@ private class PeripheralDelegate: NSObject, CBPeripheralManagerDelegate {
   func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
     module?.retryPendingNotifications()
   }
+
+  // FAZ 1 TIER1-04: Core Bluetooth state restoration delegate hook.
+  // iOS, killed-app durumunda nearby peer AfetNet UUID advertise ederse uygulamayı
+  // background'da relaunch eder ve önce buraya restoration state'i teslim eder.
+  // BU CALLBACK peripheralManagerDidUpdateState'den ÖNCE çağrılır. CBMutableService'leri
+  // yeniden bağlamamız gerekiyor — yoksa restored advertising'in arkasındaki GATT
+  // boş kalır ve mesh SOS'u alıp iletemeyiz.
+  func peripheralManager(_ peripheral: CBPeripheralManager,
+                         willRestoreState dict: [String: Any]) {
+    let services = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService]
+    let advertisementData = dict[CBPeripheralManagerRestoredStateAdvertisementDataKey] as? [String: Any]
+    NSLog("[AfetNetBlePeripheral] willRestoreState: services=\(services?.count ?? 0) advertising=\(advertisementData != nil)")
+    module?.handleRestoredState(peripheral: peripheral, services: services, advertisementData: advertisementData)
+  }
 }
 
 // MARK: - Pending Notification
@@ -96,7 +110,10 @@ public class AfetNetBlePeripheralModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AfetNetBlePeripheral")
 
-    Events("onWriteReceived", "onDeviceConnected", "onDeviceDisconnected")
+    // FAZ 1 TIER1-04: onStateRestored — killed-app restoration sonrası JS tarafına
+    // sinyal göndererek MeshNetworkService'in scan + listener'ları bootstrap etmesini
+    // sağlar. iOS ~30s background execution penceresi içinde SOS paketleri işlenir.
+    Events("onWriteReceived", "onDeviceConnected", "onDeviceDisconnected", "onStateRestored")
 
     OnCreate {
       self.peripheralDelegate.module = self
@@ -133,7 +150,19 @@ public class AfetNetBlePeripheralModule: Module {
 
         if self.peripheralManager == nil {
           // bleQueue: UI thread'den bağımsız dedicated BLE kuyruğu
-          self.peripheralManager = CBPeripheralManager(delegate: self.peripheralDelegate, queue: self.bleQueue)
+          // FAZ 1 TIER1-04: CBPeripheralManagerOptionRestoreIdentifierKey ekledik.
+          // Killed-app + nearby peer advertise → iOS uygulamayı background relaunch
+          // edip willRestoreState callback'i tetikler. Restore ID singleton (her
+          // launch'ta aynı string). showPowerAlert=true Apple varsayılan davranış.
+          let options: [String: Any] = [
+            CBPeripheralManagerOptionRestoreIdentifierKey: "com.afetnet.ble.peripheral.restoration",
+            CBPeripheralManagerOptionShowPowerAlertKey: true,
+          ]
+          self.peripheralManager = CBPeripheralManager(
+            delegate: self.peripheralDelegate,
+            queue: self.bleQueue,
+            options: options
+          )
         } else if self.peripheralManager?.state == .poweredOn {
           self.setupGATTService()
           self.startAdvertising()
@@ -424,6 +453,72 @@ public class AfetNetBlePeripheralModule: Module {
       if wasRunning {
         NSLog("[AfetNetBlePeripheral] BLE state changed to \(peripheral.state.rawValue) — peripheral stopped (auto-resume armed)")
       }
+    }
+  }
+
+  // FAZ 1 TIER1-04: Killed-app state restoration handler.
+  // CBPeripheralManagerOptionRestoreIdentifierKey set olduğu için iOS, killed-app
+  // durumunda nearby peer AfetNet UUID advertise edince uygulamayı background'da
+  // relaunch eder VE bu callback'i peripheralManagerDidUpdateState'den ÖNCE çağırır.
+  // Burada:
+  //   1. Restored CBMutableService'leri characteristic dictionary'ye remap et
+  //      (yoksa updateValue stale ref ile sessizce başarısız olur).
+  //   2. peripheralManager referansı zaten elimizde (init zamanında yarattığımız) —
+  //      restored manager singleton aynı instance.
+  //   3. isRunning=true set et + shouldAutoResumeOnPowerOn=true (state callback
+  //      sonradan gelirse setupGATTService idempotent şekilde tetiklensin).
+  //   4. JS tarafına "onStateRestored" event'i gönder — MeshNetworkService bunu
+  //      yakalayıp scanner + listener'ları ~30s background penceresinde başlatır.
+  func handleRestoredState(peripheral: CBPeripheralManager,
+                           services: [CBMutableService]?,
+                           advertisementData: [String: Any]?) {
+    bleQueue.async {
+      var restoredServiceUUIDs: [String] = []
+      var restoredCharUUIDs: [String] = []
+      if let services = services {
+        for service in services {
+          let serviceUuid = service.uuid.uuidString.lowercased()
+          restoredServiceUUIDs.append(serviceUuid)
+          self.gattService = service
+          if let chars = service.characteristics {
+            for char in chars {
+              guard let mutableChar = char as? CBMutableCharacteristic else { continue }
+              let charUuid = mutableChar.uuid.uuidString.lowercased()
+              self.characteristics[charUuid] = mutableChar
+              restoredCharUUIDs.append(charUuid)
+            }
+          }
+        }
+      }
+
+      // Restored advertising data, eğer iOS bize teslim ettiyse, future
+      // startAdvertising çağrıları için pendingServiceUUID/CharUUIDs'i seed et.
+      if let firstService = restoredServiceUUIDs.first {
+        self.pendingServiceUUID = firstService
+      }
+      if !restoredCharUUIDs.isEmpty {
+        self.pendingCharUUIDs = restoredCharUUIDs
+      }
+
+      // Restored manager TEKİL — peripheralManager referansı zaten constructor'da
+      // set edilmiş olabilir, yoksa şimdi sakla (idempotent).
+      if self.peripheralManager == nil {
+        self.peripheralManager = peripheral
+      }
+
+      // Marka et: restoration sonrası mesh aktif → onPowerOn callback resume kararı versin.
+      self.isRunning = true
+      self.shouldAutoResumeOnPowerOn = true
+
+      NSLog("[AfetNetBlePeripheral] handleRestoredState: services=\(restoredServiceUUIDs.count) chars=\(restoredCharUUIDs.count) — onStateRestored gönderiliyor")
+
+      // JS tarafına haber ver — MeshNetworkService bootstrap yapacak.
+      self.sendEvent("onStateRestored", [
+        "serviceUUIDs": restoredServiceUUIDs,
+        "characteristicUUIDs": restoredCharUUIDs,
+        "hadAdvertisementData": advertisementData != nil,
+        "timestamp": Date().timeIntervalSince1970,
+      ])
     }
   }
 
