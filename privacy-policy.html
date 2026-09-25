@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gizlilik Politikası - AfetNet</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.8; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { color: #f8fafc; font-size: 28px; margin-bottom: 8px; }
+        h2 { color: #38bdf8; font-size: 20px; margin-top: 32px; margin-bottom: 12px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; }
+        h3 { color: #94a3b8; font-size: 16px; margin-top: 16px; margin-bottom: 8px; }
+        p, li { font-size: 15px; color: #cbd5e1; margin-bottom: 8px; }
+        ul { padding-left: 20px; }
+        a { color: #38bdf8; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .date { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+        .highlight { background: #1e293b; border-left: 4px solid #38bdf8; padding: 16px; border-radius: 8px; margin: 16px 0; }
+        .important { background: #1e293b; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 8px; margin: 16px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        th { color: #38bdf8; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Gizlilik Politikası</h1>
+    <p class="date">Yürürlük: 22 Temmuz 2026 | Gizlilik bildirimi sürümü 2.3</p>
+
+    <div class="highlight">
+        <p>Bu politika, AfetNet uygulamasında hangi veri kategorilerinin hangi özellikler için işlenebileceğini açıklar. İşleme; kullandığınız özelliğe, verdiğiniz izinlere, uygulama ayarlarına, işletim sistemi davranışına ve hizmet sağlayıcı yapılandırmasına göre değişebilir.</p>
+        <p>AfetNet bağımsız bir uygulamadır; 112, AFAD, Kandilli Rasathanesi, USGS, EMSC veya resmî kurtarma ekipleri tarafından işletilmez, onaylanmaz ve bu kurumların acil yardım sistemlerine entegre değildir. Kamuya açık verinin gösterilmesi kurum onayı ya da ortaklığı anlamına gelmez. Hayati acil durumda ayrıca <strong>112'yi arayın</strong> ve resmî duyuruları izleyin.</p>
+    </div>
+
+    <h2>1. Veri Sorumlusu ve İletişim</h2>
+    <p><strong>Veri sorumlusu:</strong> Gökhan Çamcı (Bireysel Geliştirici)</p>
+    <p><strong>İletişim:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+    <p><strong>Uygulama:</strong> AfetNet — Afet ve Aile İletişimi</p>
+
+    <h2>2. İşlenebilen Veri Kategorileri</h2>
+    <p>AfetNet, yalnız kullandığınız özelliklerle ilişkili veri kategorilerini işler. Bir alanın uygulamada bulunması, her kullanıcı için her zaman toplandığı anlamına gelmez.</p>
+
+    <table>
+        <tr><th>Veri kategorisi</th><th>Örnekler</th><th>Ne zaman</th></tr>
+        <tr><td>Hesap ve profil</td><td>Kullanıcı kimliği, giriş yöntemine bağlı e-posta, görünen ad, profil bilgileri</td><td>Hesap oluşturduğunuzda veya profil özelliğini kullandığınızda</td></tr>
+        <tr><td>Cihaz ve uygulama</td><td>Push tokenı, uygulama sürümü, cihaz modeli, işletim sistemi, dil, saat ve teknik tanımlayıcılar</td><td>Bildirim, güvenlik, hata giderme ve hizmet işletimi sırasında</td></tr>
+        <tr><td>Konum</td><td>Kesin veya yaklaşık konum, zaman damgası, izin verilirse arka plan konumu</td><td>SOS, aile paylaşımı, harita veya bölgesel bildirim özelliğini kullandığınızda</td></tr>
+        <tr><td>İletişim içeriği ve metaveri</td><td>Mesaj, aile durumu, SOS içeriği, gönderen/alıcı, zaman, teslim/alındı durumu</td><td>Mesajlaşma, aile veya SOS özelliğini kullandığınızda</td></tr>
+        <tr><td>Medya</td><td>Kullanıcının seçtiği ya da çektiği fotoğraf, video, ses ve afet raporu eki</td><td>Çekme/seçme ve gönderme işlemini siz başlattığınızda</td></tr>
+        <tr><td>Sağlık, kimlik ve acil durum bilgisi</td><td>Ad/soyad, doğum tarihi, cinsiyet, boy/kilo, kan grubu, alerji, hastalık, ilaç, tıbbi geçmiş, sigorta bilgisi, organ bağışı tercihi, acil kişiler ve notlar</td><td>Bu isteğe bağlı alanları doldurduğunuzda veya paylaşmayı seçtiğinizde</td></tr>
+        <tr><td>Bluetooth / yakın cihaz</td><td>Dönen veya takma adlı peer kimliği, cihaz yetenekleri, mesaj türü ve seçilen acil durum paketi</td><td>Yakın cihaz/BLE özelliğini açtığınızda ve gerekli izinler bulunduğunda</td></tr>
+        <tr><td>Hareket ve topluluk sensörü</td><td>İvmeölçer örnekleri; yüksek güvenli olaylarda hesap kimliği, yaklaşık/yuvarlanmış konum, zaman, tepe ivmesi, güven, süre ve platform özeti</td><td>Sensör algılama ve topluluk kaynağı ayarları etkin olduğunda</td></tr>
+        <tr><td>AI verisi</td><td>İstem, sohbet içeriği, seçilen bağlam, yanıt ve teknik istek verisi</td><td>Online AI özelliğini kullandığınızda</td></tr>
+        <tr><td>Hata ve performans</td><td>Crash kaydı, stack trace, ekran/özellik bağlamı, teknik ve takma adlı tanımlayıcılar</td><td>Üretim yapılandırması ve gizlilik tercihlerine göre hata oluştuğunda</td></tr>
+    </table>
+
+    <h2>3. İzinler ve Özellik Bazlı Kullanım</h2>
+
+    <h3>Konum</h3>
+    <ul>
+        <li>Bölgenizle ilgili deprem kayıtlarını filtrelemek, mesafeyi hesaplamak ve ilgili kayıtları göstermek.</li>
+        <li>Kullanıcı başlatırsa SOS veya durum mesajına konum eklemek ve seçilen AfetNet alıcılarıyla paylaşmak.</li>
+        <li>Karşılıklı onay ve ilgili ayarlar kapsamında aile üyeleri arasında konum paylaşmak.</li>
+        <li>Harita, yakınlık ve rota işlevlerini sunmak.</li>
+    </ul>
+    <p>Konum iznini cihaz ayarlarından kapatabilirsiniz. Arka plan konumu yalnız ilgili özellik etkinleştirildiğinde ve işletim sistemi izin verdiğinde denenir. AfetNet konumu 112'ye, AFAD'a veya resmî kurtarma ekiplerine otomatik iletmez.</p>
+
+    <h3>Kamera, fotoğraf arşivi ve medya</h3>
+    <p>Kamera; QR kod tarama, sohbet veya afet raporu için kullanıcının fotoğraf çekmesi ve bazı cihazlarda fener/torch işlevi için kullanılabilir. Fotoğraf arşivi, kullanıcının paylaşmak üzere medya seçmesi veya açıkça kaydetme işlemi başlatması için kullanılabilir. Kamera izni verilmesi tek başına çekim veya yükleme başlatmaz; medya, kullanıcı çekme/seçme ve gönderme işlemini yaptığında işlenir. Gönderilen medya Firebase Storage veya ilgili uygulama servislerinde saklanabilir.</p>
+
+    <h3>Bildirimler</h3>
+    <p>Push ve yerel bildirimler, deprem kaydı, aile olayı, mesaj veya SOS gibi uygulama olayları için kullanılabilir. Bildirimin ulaşması, görünmesi, ses çıkarması veya titreşim üretmesi; kullanıcı iznine, internet bağlantısına, cihazın ses/Focus/Rahatsız Etmeyin ayarlarına, pil optimizasyonuna ve işletim sistemi kısıtlarına bağlıdır. AfetNet sessiz modda, DND/Focus açıkken, arka planda veya uygulama kapatılmışken teslim ya da ses garantisi vermez.</p>
+    <p><strong>Otomatik güvenlik kontrolü varsayılan olarak kapalıdır.</strong> Kullanıcı bu özelliği ayrıca ve açıkça etkinleştirirse, en az iki güvenilir katalog kaynağıyla doğrulanan ve güncel cihaz konumuna yakın bir depremden sonra yaklaşık iki dakika içinde yerel güvenlik bildirimi planlanabilir. Yanıt verilmemesi kişinin tehlikede olduğunun kanıtı değildir; “Cevap yok — yardım gerekebilir” durumu yalnız karşılıklı onaylı aile üyeleriyle paylaşılmaya çalışılır. Özellik her an kapatılabilir; kapatma bekleyen bildirim ve son tarihi iptal etmeyi dener. Bildirimin görünmesi veya durumun aile üyelerine ulaşması garanti edilmez.</p>
+
+    <h3>Hareket sensörü ve topluluk algılama</h3>
+    <p>Sensör tabanlı algılama açıkken ivmeölçer örnekleri cihazda işlenebilir. Topluluk kaynağı da etkinse yüksek güven eşiğini geçen olayların özeti; oturum açmış hesap kimliği, yaklaşık 1 km düzeyine yuvarlanmış konum, zaman, tepe ivmesi, güven, süre ve platform bilgisiyle AfetNet/Firebase Realtime Database'e gönderilebilir. Ham sensör akışının tamamının sunucuya gönderildiği iddia edilmez; ancak gönderilen özet tam anonim değildir.</p>
+    <p>Bu ayarlar mevcut sürümde açık gelebilir. <strong>Ayarlar → Deprem Ayarları</strong> içindeki <strong>Sensör Tabanlı Algılama</strong> ve <strong>Topluluk ve sensör algılamaları</strong> seçeneklerinden kapatılabilir. Özellik deneysel bir topluluk sinyalidir; resmî deprem erken uyarısı, P-dalgası hizmeti veya deprem tahmini değildir.</p>
+
+    <h2>4. Bluetooth ve Yakın Cihaz İletişimi</h2>
+    <p>AfetNet, internet bağlantısı bulunmadığında veya ek bir aktarım yolu gerektiğinde yakın uyumlu AfetNet cihazları arasında Bluetooth Low Energy (BLE) üzerinden iletişim <strong>deneyebilir</strong>.</p>
+    <ul>
+        <li>Çalışma; Bluetooth/yakın cihaz izinlerine, cihaz desteğine, menzilde uyumlu cihaz bulunmasına ve işletim sisteminin ön plan/arka plan koşullarına bağlıdır.</li>
+        <li>Uygulama zorla kapatıldığında, işletim sistemi süreci durdurduğunda, gerekli izinler yokken veya uyumlu cihaz bulunmadığında aktarım çalışmayabilir.</li>
+        <li>Peer tanımlayıcıları kimliği azaltmak için dönen veya takma adlı olabilir; bu, tam anonimlik garantisi değildir.</li>
+        <li>Mesaj türüne ve kullanıcının seçimine göre SOS içeriği, yaklaşık/kesin konum, sağlık veya başka acil durum bilgisi yakındaki uyumlu cihazlara aktarılabilir. Bluetooth üzerinden hiçbir kişisel veri paylaşılmadığı iddia edilmez.</li>
+        <li>Birebir veya aile mesajlarında şifreleme/kimlik doğrulama mekanizmaları kullanılabilir; geniş acil durum yayınları tüm alıcılar için uçtan uca şifreli olmayabilir. Kullanıcı paylaşmak istemediği bilgileri acil durum paketine eklememelidir.</li>
+        <li><code>Gönderildi</code> veya <code>kuyrukta</code> durumu teslimat kanıtı değildir. Alındı/onaylandı durumu görülmedikçe teslim varsayılmamalıdır.</li>
+    </ul>
+
+    <h2>5. Sağlık ve Diğer Hassas Veriler</h2>
+    <div class="important">
+        <p><strong>Sağlık profili:</strong> Sağlık alanları isteğe bağlıdır. Mevcut ürün tasarımı bu verileri varsayılan olarak cihazda tutmayı amaçlar. Ancak bulut yedekleme, cihazlar arası eşitleme, mesaj/SOS eki veya açık paylaşım gibi bir işlevi etkinleştirmeniz verinin Firebase/AfetNet servislerinde ve seçilen uygulama alıcılarında işlenmesine yol açabilir.</p>
+        <p>AfetNet'in 112/AFAD ile bağlantılı bir "kurtarma backend'i" yoktur ve sağlık verisinin resmî sağlık veya kurtarma personeline ulaşacağını garanti etmez. BLE aktarımı da yalnız uygun koşullarda denenir ve yakındaki cihazın resmî ekip tarafından kullanıldığı doğrulanamaz.</p>
+        <p>Bir paylaşımı onaylamadan önce içeriği ve alıcıyı kontrol edin. Hayati acilde ayrıca 112'yi arayın.</p>
+    </div>
+
+    <h2>6. Yapay Zeka ve Çevrimdışı İçerik</h2>
+    <p>AfetNet bazı ekranlarda genel afet hazırlığı veya ilk yardım bilgilendirmesi için yerel içerik, kural tabanlı yanıtlar ve/veya online AI hizmetleri kullanabilir.</p>
+    <ul>
+        <li>Online AI özelliğinde istem, seçilen uygulama bağlamı ve teknik istek verisi AfetNet backend'i ve yapılandırılmış AI sağlayıcısı üzerinden işlenebilir.</li>
+        <li>Uygulama belirli kişisel veri örüntülerini redakte etmeye çalışabilir; serbest metin, bölge, aile profili, konum bağlamı, kimlik doğrulama veya ağ metaverisi nedeniyle tam anonimlik garanti edilmez.</li>
+        <li>Offline içerik mevcut olduğunda kullanılabilir; sabit bir içerik sayısı veya her soruya çevrimdışı yanıt garantisi verilmez.</li>
+        <li>AI çıktıları genel bilgilendirmedir; doktor, 112, AFAD veya kurtarma ekibi yerine geçmez. Tanı, tedavi, deprem tahmini veya kişiye özel profesyonel karar olarak kullanılmamalıdır.</li>
+    </ul>
+
+    <h2>7. Veri Güvenliği</h2>
+    <p>AfetNet, verinin niteliğine ve aktarım yoluna göre erişim kontrolü, platform güvenli depolaması, kimlik doğrulama, aktarım koruması ve uygulama düzeyi şifreleme/mesaj doğrulama mekanizmaları kullanabilir. Bununla birlikte:</p>
+    <ul>
+        <li>Firebase ve diğer sağlayıcıların ağ ve disk korumaları kendi hizmet yapılandırmaları ve politikalarına bağlıdır.</li>
+        <li>HTTPS/TLS kullanılabilse de her bağlantı için sabit bir TLS sürümü veya tüm veriler için tek bir AES algoritması taahhüt edilmez.</li>
+        <li>Tüm bulut, mesaj, medya ve BLE yollarının uçtan uca şifreli olduğu iddia edilmez; geniş SOS yayınları farklı güvenlik özelliklerine sahip olabilir.</li>
+        <li>Jailbreak/root veya cihaz bütünlüğü kontrolleri tüm değiştirilmiş cihazları tespit etmeyebilir.</li>
+        <li>Hiçbir sistem mutlak güvenlik sağlayamaz. Güvenlik olayı şüphesinde <a href="mailto:support@afetnet.app">support@afetnet.app</a> adresine ulaşabilirsiniz.</li>
+    </ul>
+
+    <h2>8. Hizmet Sağlayıcılar</h2>
+    <p>Kullanılan özelliğe ve üretim yapılandırmasına göre aşağıdaki sağlayıcılar veri işleyebilir:</p>
+    <table>
+        <tr><th>Hizmet</th><th>Amaç</th><th>Politika</th></tr>
+        <tr><td>Google Firebase (Authentication, Firestore, Realtime Database, Storage, Cloud Messaging, Crashlytics ve ilgili servisler)</td><td>Kimlik doğrulama, veri/medya/sensör özeti saklama, bildirim, hata ve hizmet işletimi</td><td><a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer">Firebase Privacy</a></td></tr>
+        <tr><td>Apple Sign in with Apple</td><td>Seçilen giriş yöntemi</td><td><a href="https://www.apple.com/legal/privacy/" target="_blank" rel="noopener noreferrer">Apple Privacy</a></td></tr>
+        <tr><td>Google Sign-In</td><td>Seçilen giriş yöntemi</td><td><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy</a></td></tr>
+        <tr><td>OpenAI veya yapılandırılmış AI sağlayıcısı</td><td>Online AI istem ve yanıt işleme</td><td><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer">OpenAI Privacy</a></td></tr>
+        <tr><td>Sentry</td><td>Yapılandırılmışsa hata ve performans izleme</td><td><a href="https://sentry.io/privacy/" target="_blank" rel="noopener noreferrer">Sentry Privacy</a></td></tr>
+        <tr><td>Kamuya açık deprem, harita/tile, haber ve dış bağlantı sağlayıcıları</td><td>Kaynak içerik, harita ve haber gösterimi; sağlayıcı IP adresi ve teknik istek verisi alabilir</td><td>Kaynağın kendi gizlilik ve kullanım koşulları; etkin uç noktalar sürüme göre değişebilir</td></tr>
+    </table>
+
+    <h2>9. Paylaşım ve Uluslararası Aktarım</h2>
+    <p>Veriler aşağıdaki alıcı kategorileriyle, yalnız ilgili amaç kapsamında paylaşılabilir:</p>
+    <ul>
+        <li>Mesaj, aile, konum veya SOS özelliğinde sizin seçtiğiniz AfetNet kullanıcıları ve uygun koşullarda yakındaki uyumlu cihazlar.</li>
+        <li>Yukarıdaki teknik hizmet sağlayıcılar.</li>
+        <li>Geçerli bir hukuki yükümlülük veya yetkili makam talebi bulunması hâlinde yetkili merciler.</li>
+    </ul>
+    <p>AfetNet, SOS veya sağlık verisini 112'ye, AFAD'a ya da resmî kurtarma ekiplerine otomatik iletmez. Küresel altyapı kullanan hizmet sağlayıcılar veriyi Türkiye, Avrupa Ekonomik Alanı ve diğer ülkelerde işleyebilir; sağlayıcının aktarım mekanizmaları ve sözleşmeleri geçerlidir.</p>
+
+    <h2>10. Saklama Süreleri</h2>
+    <p>Veriler, özelliği sunmak, güvenlik ve hata giderme ihtiyaçlarını karşılamak, kullanıcı talebini yerine getirmek ve uygulanabilir hukuki yükümlülüklere uymak için gerekli olduğu sürece saklanır. Genel ölçütler:</p>
+    <ul>
+        <li>Hesap ve profil verileri, hesap aktif olduğu veya hizmet için gerekli olduğu sürece; silme talebinden sonra teknik/yasal gereklilikler ölçüsünde.</li>
+        <li>Mesaj, SOS, medya ve aile verileri; kullanıcı işlemleri, hesap silme akışı, alıcı kopyaları, güvenlik kayıtları ve yedekleme döngülerine göre farklı sürelerde kalabilir.</li>
+        <li>Konum; gerçek zamanlı paylaşım, yerel önbellek veya mesaj/SOS içeriğinin parçası olarak farklı sürelerde işlenebilir. "Sunucuda hiçbir zaman saklanmaz" garantisi verilmez.</li>
+        <li>AI istemleri ve teknik kayıtlar, ilgili sağlayıcının seçili hizmet planı ve saklama ayarlarına göre işlenebilir.</li>
+        <li>Topluluk sensörü raporları, AfetNet/Firebase saklama ve silme yapılandırmasına göre tutulur; hesap kimliği ile yaklaşık konum içerebilir.</li>
+        <li>Crash ve performans kayıtları, yapılandırılmış sağlayıcının retention ayarına göre saklanır.</li>
+        <li>Hesap değiştirme sonrası eski bildirim kayıtlarının başka hesaba teslimatı yeniden etkinleştirmesini önlemek için, ham bildirim jetonu ve hesap kimliği içermeyen tek yönlü jeton-hash iptal kaydı hesap silme sonrası en fazla 30 gün tutulur; süre sonunda otomatik temizlenir.</li>
+    </ul>
+
+    <h2>11. İşleme Amaçları ve Hukuki Dayanaklar</h2>
+    <p>Uygulanabilir mevzuata ve kullandığınız özelliğe göre işleme; sözleşmenin kurulması/ifası, açık rıza, hukuki yükümlülük veya veri sorumlusunun hak ve özgürlüklerinizle dengelenmiş meşru menfaati gibi dayanaklara dayanabilir. Konum işleme, uygulanabilir hukuki dayanak ve aydınlatma koşullarına ek olarak işletim sistemi iznine bağlıdır; cihaz izni tek başına KVKK/GDPR açık rızası veya üçüncü kişiye paylaşım onayı sayılmaz. Sağlık verisi ve ayrı isteğe bağlı paylaşımlar için uygulanabilir olduğunda açık rıza kullanılır. Online AI kullanıldığında Bölüm 6'da açıklanan aktarım ve tam anonim olmama koşulları geçerlidir.</p>
+
+    <h2>12. Haklarınız ve Tercihleriniz</h2>
+    <p>Uygulanabilir KVKK ve GDPR hükümleri kapsamında; verinizin işlenip işlenmediğini öğrenme, erişim, düzeltme, silme/yok etme, işlemeyi kısıtlama, itiraz, veri taşınabilirliği ve hukuka aykırı işleme nedeniyle zararın giderilmesini isteme haklarınız bulunabilir. Talebin kapsamı ve uygulanabilir istisnalar ilgili mevzuata göre değerlendirilir.</p>
+    <ul>
+        <li>Cihaz izinlerini işletim sistemi ayarlarından değiştirebilirsiniz.</li>
+        <li>Sunulan ayarlar ölçüsünde paylaşım, aile, sağlık ve bildirim tercihlerini değiştirebilir; online AI özelliğini kullanmamayı seçebilirsiniz.</li>
+        <li>Başvurularınız için <a href="mailto:support@afetnet.app">support@afetnet.app</a> adresini kullanabilirsiniz.</li>
+    </ul>
+
+    <h2>13. Hesap Silme</h2>
+    <div class="important">
+        <p>Hesap silme talebini uygulamadaki <strong>Ayarlar → Hesabı Sil</strong> yolundan başlatabilirsiniz. Akış; mevcut oturum ve servis erişimine göre Authentication, uygulama verisi ve özel medya için silme işlemlerini dener.</p>
+        <p>Silme anlık veya mutlak olmayabilir. Alıcıların cihazındaki mesaj kopyaları, güvenlik/audit kayıtları, sağlayıcı yedekleri ya da hukuken saklanması gereken kayıtlar sınırlı sürelerle kalabilir. Akış tamamlanmazsa veya erişiminiz yoksa destek adresinden talep gönderebilirsiniz.</p>
+    </div>
+
+    <h2>14. Çocukların Gizliliği</h2>
+    <p>AfetNet 13 yaş altındaki çocuklara yönelik değildir ve 13 yaş altındaki kişilerden bilerek veri toplamayı amaçlamaz. Bir çocuğun uygunsuz biçimde veri sağladığını düşünüyorsanız destek adresinden iletişime geçin.</p>
+
+    <h2>15. Reklam Amaçlı Takip</h2>
+    <p>Mevcut ürün tasarımı üçüncü taraf reklam göstermez, veriyi reklam amacıyla satmaz ve IDFA'yı uygulamalar arası reklam takibi için kullanmayı amaçlamaz. Bu ifade, uygulama içi izinli aile konum paylaşımını veya hizmet sağlayıcıların güvenlik, bildirim, AI, crash ve performans için teknik veri işlemesini "anonim" yapmaz.</p>
+
+    <h2>16. Politika Değişiklikleri</h2>
+    <p>Bu politika ürün, sağlayıcı veya mevzuat değişiklikleriyle güncellenebilir. Önemli değişiklikler bu sayfada yeni tarih ile yayımlanır; gerekli olduğunda uygulama içinde bildirim veya yeniden onay istenir.</p>
+
+    <h2>📧 İletişim</h2>
+    <p>Gizlilik soruları ve veri sahibi talepleri için:</p>
+    <p><strong>E-posta:</strong> <a href="mailto:support@afetnet.app">support@afetnet.app</a></p>
+    <p><strong>Geliştirici:</strong> Gökhan Çamcı</p>
+    <p><strong>Adres:</strong> İstanbul, Türkiye</p>
+
+    <hr style="border-color: #1e293b; margin-top: 32px;">
+    <p style="color: #64748b; font-size: 12px; text-align: center; margin-top: 16px;">
+        © 2026 AfetNet. Tüm hakları saklıdır.
+    </p>
+</body>
+</html>
